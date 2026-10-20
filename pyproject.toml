@@ -1,0 +1,35 @@
+[project]
+name = "ctc"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "aiface", email = "ducanhdn.ptit@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "usearch",
+    "numpy",
+    "pyyaml",
+    "httpx",
+    "pydantic",
+    "typer",
+    "anthropic",
+    "openai",
+]
+
+[project.optional-dependencies]
+eval = ["ranx", "datasets", "scikit-learn"]
+
+[dependency-groups]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+ctc = "ctc:main"
+
+[tool.uv.build-backend]
+module-root = ""
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
