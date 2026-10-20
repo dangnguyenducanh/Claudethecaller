@@ -3,6 +3,9 @@ __pycache__/
 data/
 *.usearch
 *.db
+models/
+*.gguf
+*.safetensors
 graphify-out/
 dashboard/node_modules/
 dashboard/dist/

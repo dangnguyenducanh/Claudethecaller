@@ -16,13 +16,11 @@ dependencies = [
     "typer",
     "anthropic",
     "openai",
+    "scikit-learn",
 ]
 
-[project.optional-dependencies]
-eval = ["ranx", "datasets", "scikit-learn"]
-
 [dependency-groups]
-dev = ["pytest", "ruff"]
+dev = ["pytest", "ruff", "ranx", "datasets"]
 
 [project.scripts]
 ctc = "ctc:main"

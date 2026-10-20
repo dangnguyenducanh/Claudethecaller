@@ -33,6 +33,12 @@ class Capability:
     path: str
     hash: str
 
+    @property
+    def invoke(self) -> str:
+        if self.namespace == "user" or self.namespace.startswith("project@"):
+            return self.name
+        return self.id
+
 
 def _split_frontmatter(text: str) -> tuple[dict, str] | None:
     if not text.startswith("---"):
@@ -75,18 +81,103 @@ def _make_capability(path: Path, kind: Kind, namespace: str, default_name: str) 
     )
 
 
+_MANIFEST_PATH = ".claude-plugin/plugin.json"
+_MANIFEST_KEY_KIND: dict[str, Kind] = {"skills": "skill", "agents": "agent", "commands": "command"}
+
+
+def _load_plugin_manifest(root: Path) -> dict | None:
+    try:
+        data = json.loads((root / _MANIFEST_PATH).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _scan_declared_path(path: Path, kind: Kind, namespace: str) -> tuple[list[Capability], list[str]]:
+    caps: list[Capability] = []
+    warnings: list[str] = []
+    if path.is_dir():
+        pattern = "*/SKILL.md" if kind == "skill" else "*.md"
+        for sub in sorted(path.glob(pattern)):
+            default_name = sub.parent.name if kind == "skill" else sub.stem
+            cap = _make_capability(sub, kind, namespace, default_name)
+            if cap is None:
+                warnings.append(f"skipped malformed capability file: {sub}")
+                continue
+            caps.append(cap)
+    elif path.is_file():
+        cap = _make_capability(path, kind, namespace, path.stem)
+        if cap is None:
+            warnings.append(f"skipped malformed capability file: {path}")
+        else:
+            caps.append(cap)
+    return caps, warnings
+
+
+def _scan_manifest_paths(root: Path, namespace: str) -> tuple[list[Capability], list[str]]:
+    manifest = _load_plugin_manifest(root)
+    if manifest is None:
+        return [], []
+    caps: list[Capability] = []
+    warnings: list[str] = []
+    for key, kind in _MANIFEST_KEY_KIND.items():
+        declared = manifest.get(key)
+        if declared is None:
+            continue
+        for rel in [declared] if isinstance(declared, str) else declared:
+            if not isinstance(rel, str):
+                continue
+            sub_caps, sub_warnings = _scan_declared_path((root / rel).resolve(), kind, namespace)
+            caps.extend(sub_caps)
+            warnings.extend(sub_warnings)
+    return caps, warnings
+
+
 def _scan_root(root: Path, namespace: str) -> tuple[list[Capability], list[str]]:
     caps: list[Capability] = []
     warnings: list[str] = []
+    seen_paths: set[Path] = set()
     for kind, pattern, name_from_dir in _GLOBS:
         for path in sorted(root.glob(pattern)):
+            resolved = path.resolve()
+            if resolved in seen_paths:
+                continue
+            seen_paths.add(resolved)
             default_name = path.parent.name if name_from_dir else path.stem
             cap = _make_capability(path, kind, namespace, default_name)
             if cap is None:
                 warnings.append(f"skipped malformed capability file: {path}")
                 continue
             caps.append(cap)
+    manifest_caps, manifest_warnings = _scan_manifest_paths(root, namespace)
+    for cap in manifest_caps:
+        resolved = Path(cap.path).resolve()
+        if resolved in seen_paths:
+            continue
+        seen_paths.add(resolved)
+        caps.append(cap)
+    warnings.extend(manifest_warnings)
     return caps, warnings
+
+
+_KIND_PRIORITY: dict[Kind, int] = {"skill": 0, "workflow": 1, "agent": 2, "command": 3}
+
+
+def _dedup_by_id(caps: list[Capability]) -> tuple[list[Capability], list[str]]:
+    by_id: dict[str, list[Capability]] = {}
+    for cap in caps:
+        by_id.setdefault(cap.id, []).append(cap)
+    deduped: list[Capability] = []
+    warnings: list[str] = []
+    for cap_id, group in by_id.items():
+        if len(group) == 1:
+            deduped.append(group[0])
+            continue
+        kept = min(group, key=lambda c: _KIND_PRIORITY[c.kind])
+        deduped.append(kept)
+        other_paths = ", ".join(c.path for c in group if c is not kept)
+        warnings.append(f"duplicate id {cap_id}: kept {kept.path}, dropped {other_paths}")
+    return deduped, warnings
 
 
 def scan_library(roots: list[tuple[Path, str]]) -> tuple[list[Capability], list[str]]:
@@ -98,7 +189,13 @@ def scan_library(roots: list[tuple[Path, str]]) -> tuple[list[Capability], list[
         root_caps, root_warnings = _scan_root(root, namespace)
         caps.extend(root_caps)
         warnings.extend(root_warnings)
+    caps, dedup_warnings = _dedup_by_id(caps)
+    warnings.extend(dedup_warnings)
     return caps, warnings
+
+
+def project_namespace(project_dir: Path) -> str:
+    return f"project@{hashlib.sha256(str(project_dir.resolve()).encode()).hexdigest()[:8]}"
 
 
 def default_roots(project_dir: Path) -> list[tuple[Path, str]]:
@@ -117,7 +214,7 @@ def default_roots(project_dir: Path) -> list[tuple[Path, str]]:
             if install_path:
                 roots.append((Path(install_path), namespace))
 
-    roots.append((project_dir / ".claude", "project"))
+    roots.append((project_dir / ".claude", project_namespace(project_dir)))
     return roots
 
 

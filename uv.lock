@@ -659,42 +659,37 @@ dependencies = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "scikit-learn" },
     { name = "typer" },
     { name = "usearch" },
 ]
 
-[package.optional-dependencies]
-eval = [
-    { name = "datasets" },
-    { name = "ranx" },
-    { name = "scikit-learn" },
-]
-
 [package.dev-dependencies]
 dev = [
+    { name = "datasets" },
     { name = "pytest" },
+    { name = "ranx" },
     { name = "ruff" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "anthropic" },
-    { name = "datasets", marker = "extra == 'eval'" },
     { name = "httpx" },
     { name = "numpy" },
     { name = "openai" },
     { name = "pydantic" },
     { name = "pyyaml" },
-    { name = "ranx", marker = "extra == 'eval'" },
-    { name = "scikit-learn", marker = "extra == 'eval'" },
+    { name = "scikit-learn" },
     { name = "typer" },
     { name = "usearch" },
 ]
-provides-extras = ["eval"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "datasets" },
     { name = "pytest" },
+    { name = "ranx" },
     { name = "ruff" },
 ]
 
