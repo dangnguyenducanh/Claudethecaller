@@ -111,7 +111,7 @@ ctc/enrich.py       enrichment + dedup
 ctc/indexer.py      USearch build, atomic swap, DenseIndex
 ctc/retrieve.py     hybrid search, RRF, filters, rerank, abstain
 ctc/cli.py          `ctc` (typer)
-eval/datasets.py  eval/label.py  eval/run.py
+eval/datasets.py  eval/label.py  eval/run.py  eval/gates.toml (owner-only)
 tests/test_*.py  tests/fixtures/
 # M2+: ctc/daemon.py ctc/decide.py ctc/memory.py ctc/ltm.py  dashboard/ (React + Vite)
 ```
@@ -131,7 +131,7 @@ Two tiers, nothing else.
 | `tests/test_ltm.py` | cosine ≥ 0.95 → NOOP + `use_count` +1; 0.85–0.95 same meaning → UPDATE (1 row); contradiction → SUPERSEDE (old soft-deleted, linked); fake `sk-…` key never reaches the fake Llm; project A recall never returns project B rows; pinned skips decay; topic shift (cos < 0.55) resets window | M3 |
 | `dashboard/e2e.spec.ts` (Playwright) | block a skill → `ctc search` drops it; delete a memory → next bundle's `memories` drops it | M4 |
 
-**Tier 2 — metric gates** (`uv run eval/run.py --gate`, exit 1 on any miss; report saved to `data/report-<date>.md`):
+**Tier 2 — metric gates** (`uv run eval/run.py --gate`, exit 1 on any miss; report saved to `data/report-<date>.md`; thresholds live in `eval/gates.toml`, written once in Task 6 and owner-edited only):
 
 | Metric | Gate | Data | From |
 |---|---|---|---|
@@ -147,6 +147,83 @@ Two tiers, nothing else.
 | Extraction precision | ≥ 0.80 (initial) | 50 hand-checked memories | M3 |
 
 Every task's **Done when** names its Tier 1 row and/or Tier 2 gate. Commit after each task.
+
+---
+
+## Rounds (run with gnhf)
+
+Development runs as [gnhf](https://github.com/kunchenguid/gnhf) rounds: each round is one `gnhf` run with one goal, a command-checkable stop condition and an iteration cap. gnhf commits each successful iteration and rolls back failed ones; three failures in a row abort the round. Milestones and Tasks below are the spec the rounds point at.
+
+**One-time setup:** install gnhf (see its README); `~/.gnhf/config.yml`: `agent: claude`, `commitMessage: { preset: conventional }`.
+
+**Per milestone:** `git checkout -b m<N>-<name>` → run that milestone's rounds in order (all use `--current-branch`; the tree must be clean before each) → human gates → `gh pr create` into `main`.
+
+**If a round aborts or hits its cap:** read `.gnhf/runs/<id>/notes.md`, fix the blocker or narrow the goal, re-run the same command. gnhf continues from what's already committed.
+
+### gnhf rules (every round prompt says "follow the gnhf rules in PLAN.md")
+
+1. Work only on the round's goal and files; do not start the next round's work.
+2. One small, verified change per iteration; run the round's stop check before finishing the iteration.
+3. Never edit `PLAN.md`, `eval/gates.toml`, or `data/own-eval*` (labels). Never weaken an existing assertion in `tests/`; only add.
+4. No dependencies beyond "Stack per component". No secrets, `data/`, model weights or `*.usearch` in commits.
+5. Stop any process you started (daemon, uvicorn, dev servers) before finishing; `docker compose` model servers may stay up.
+6. If blocked by something only the owner can do (credentials, hand labels, GPU busy), write it in notes and stop.
+
+Each round's command has this shape (fill in from the table below):
+
+```bash
+gnhf --current-branch --model <Model> --max-iterations <Cap> \
+  --stop-when "<Stop when>" \
+  "Follow the gnhf rules in PLAN.md. Spec: PLAN.md sections 'Stack per component', 'Global Constraints', <Spec>. Round <R> goal: <Goal>. The round is done when: <Stop when>."
+```
+
+### Milestone 1 — `m1-retrieval-core`
+
+| R | Spec | Goal | Stop when | Cap | Model |
+|---|---|---|---|---|---|
+| R1 | Task 1, Task 2, `tests/test_capability.py` row | Scaffold the uv package and build `ctc/capability.py` that scans every skill, agent, command and workflow into namespaced `Capability` records | `uv run pytest tests/test_capability.py` exits 0 AND `uv run python -m ctc.capability` prints a count ≥ 300 for this machine | 8 | sonnet |
+| R2 | Task 3, `tests/test_index.py` row | SQLite store with FTS5 and overrides, plus incremental USearch multi-vector index with atomic swap | `uv run pytest tests/test_index.py` exits 0 | 10 | sonnet |
+| R3 | Task 4 (compose part) | `docker-compose.yml` serving the SkillRet embedder, bge reranker and llama-server; `ctc/models.py` clients | `curl` to `:18300/embed`, `:18301/rerank`, `:18302/v1/models` all return 200 AND `nvidia-smi` shows the three containers using ≤ 7 GB total | 6 | sonnet |
+| R4 | Task 4 (enrich + dedup), dedup rows of `tests/test_retrieve.py` | `ctc/enrich.py`: schema-enforced enrichment and threshold dedup | dedup tests in `tests/test_retrieve.py` pass AND enriching 5 real capabilities writes 5 valid `Enrichment` rows | 8 | sonnet |
+| R5 | Task 5, `tests/test_retrieve.py` row | Hybrid retrieval (dense + FTS → RRF → filters → rerank → abstain) and the `ctc` CLI | `uv run pytest tests/test_retrieve.py` exits 0 AND `uv run ctc explain "fix a flaky test"` lists a debugging or TDD skill in its top 5 | 10 | opus |
+| R6 | Task 6 (build part) | SkillRet + MetaTool loaders, transcript labeler with secret redaction, `eval/run.py` report and `eval/gates.toml` with the Tier 2 M1 values | `data/own-eval.jsonl` has ≥ 300 rows, `data/own-eval-review.csv` has 200 rows, and `uv run eval/run.py` writes `data/report-<date>.md` with every M1 metric | 10 | sonnet |
+| **H1** | — | **Owner:** hand-check the 200 review rows, fix labels, commit | — | — | — |
+| R7 | Task 6 (gates), "Data & Metrics" | Improve retrieval quality (enrichment prompts, trigger phrasings, fusion depth, rerank depth, τ sweep) until the M1 gates pass, without touching gates or labels | `uv run eval/run.py --gate` exits 0 | 20 | opus |
+| **H2** | — | **Owner:** read the report, open PR `m1-retrieval-core` → `main` | — | — | — |
+
+### Milestone 2 — `m2-agent-integration`
+
+| R | Spec | Goal | Stop when | Cap | Model |
+|---|---|---|---|---|---|
+| R8 | Task 7, hook rows of `tests/test_route.py` | FastAPI daemon on socket + `:18310`, `/hook/*` and `/route`, `ctc install` writing curl hooks and MCP registration | hook/install tests in `tests/test_route.py` pass AND with the daemon running, `echo '{"prompt":"fix a flaky test","session_id":"t"}' \| curl -s --unix-socket ~/.claudethecaller/ctc.sock --data-binary @- http://ctc/hook/prompt` prints a `[claudethecaller] Suggested:` line | 10 | sonnet |
+| R9 | Task 8, decider rows of `tests/test_route.py` | `ctc/decide.py` bundle with difficulty/tier classifier, step order, agent matching; `find_capabilities` MCP tool; follow tracking | `uv run pytest tests/test_route.py` exits 0 AND `data/difficulty.joblib` exists | 12 | opus |
+| R10 | Tier 2 M2 rows | Replay own-eval through the daemon, add M2 metrics to the report | `uv run eval/run.py --gate` exits 0 including route p95 ≤ 100 ms | 10 | opus |
+| **H3** | — | **Owner:** `ctc install`, use Claude Code normally for a day, check the decision log; PR → `main` | — | — | — |
+
+### Milestone 3 — `m3-memory`
+
+| R | Spec | Goal | Stop when | Cap | Model |
+|---|---|---|---|---|---|
+| R11 | Task 9, "Memory Engine", topic-shift row of `tests/test_ltm.py` | Project profile, session state, decision prior, prefetch and semantic cache | topic-shift test passes AND replay shows prefetch-hit p95 ≤ 10 ms in the report | 12 | opus |
+| R12 | Task 10, `tests/test_ltm.py` row | Long-term memory: extract, ADD/UPDATE/SUPERSEDE/NOOP, recall with decay, Claude memory import | `uv run pytest tests/test_ltm.py` exits 0 | 12 | opus |
+| **H4** | — | **Owner:** hand-check 50 extracted memories into `data/own-eval-memories.jsonl` | — | — | — |
+| R13 | Tier 2 M3 rows | Memory lift and extraction precision in the report; tune weights until gates pass | `uv run eval/run.py --gate` exits 0 including memory lift and extraction precision | 12 | opus |
+| **H5** | — | **Owner:** PR → `main` | — | — | — |
+
+### Milestone 4 — `m4-dashboard`
+
+| R | Spec | Goal | Stop when | Cap | Model |
+|---|---|---|---|---|---|
+| R14 | Milestone 4 | `/api/*` endpoints, dashboard shell, KPI cards, timeline, decision log with explain drawer, activity heatmap | `pnpm -C dashboard build` exits 0 AND the daemon serves the page at `:18310` with real KPI numbers | 12 | sonnet |
+| R15 | Milestone 4, `dashboard/e2e.spec.ts` row | Library control, sessions view, memory view; Playwright e2e | `pnpm -C dashboard exec playwright test` exits 0 | 12 | sonnet |
+| **H6** | — | **Owner:** visual review, PR → `main` | — | — | — |
+
+### Milestones 5–6
+
+| R | Spec | Goal | Stop when | Cap | Model |
+|---|---|---|---|---|---|
+| R16 | Milestone 5 | React Flow editor saving `.claude/workflows/*.yaml` | a workflow drawn and saved in the UI is returned by `uv run ctc search` with its step order intact | 12 | sonnet |
+| R17 | Milestone 6 | Profile `/route` with `py-spy` under replay; build the nanobind module only if Python fusion/filter > 20% of p95 | either `data/profile.md` shows ≤ 20% (round ends, no native code) or the gate report shows identical rankings and lower p95 with the native module | 15 | opus |
 
 ---
 
