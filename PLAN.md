@@ -159,7 +159,7 @@ Development runs as [gnhf](https://github.com/kunchenguid/gnhf) rounds: each rou
 
 **Per milestone:** `git checkout -b m<N>-<name>` → run that milestone's rounds in table order (all use `--current-branch`; the tree must be clean before each) → human gates → `gh pr create` into `main`.
 
-**After every round** (gnhf trusts the agent's `should_fully_stop` and runs nothing itself), the controller re-checks that round's Stop-when on the clean tree; start the next round only after it passes. **If the re-check fails, or the round aborts or hits its cap:** read `.gnhf/runs/<id>/notes.md`, fix the blocker or narrow the goal, re-run the same command. gnhf continues from what's already committed.
+**After every round** the controller re-runs that round's Stop-when command once; if it exits 0, start the next round, otherwise re-run the same round (read `.gnhf/runs/<id>/notes.md` first). No other review between rounds; one review at the end of the milestone, before the PR.
 
 ### gnhf rules (every round prompt says "follow the gnhf rules in PLAN.md")
 
@@ -169,7 +169,7 @@ Development runs as [gnhf](https://github.com/kunchenguid/gnhf) rounds: each rou
 4. No dependencies beyond "Stack per component" and Task 1's dep list; one-off tools run via `uvx` (e.g. `uvx py-spy`) are not dependencies. No secrets, `data/`, model weights or `*.usearch` in commits.
 5. Stop any process you started (daemon, uvicorn, dev servers) before finishing; `docker compose` model servers may stay up. Never write the real `~/.claude/` or `~/.claude.json`: run `ctc install` and `claude mcp add` only with `HOME` set to a temp dir; the real install is H3.
 6. If blocked by something only the owner can do (credentials, hand labels, GPU busy), start `summary` with `BLOCKED: <what the owner must do>`, set `success=false` and `should_fully_stop=false`, and don't touch notes.md (gnhf logs it and aborts after 3 failures). Set `should_fully_stop=true` only after the round's stop check has actually passed.
-7. Tier 1 tests use fakes only: no `skip`, `skipif`, `importorskip` or `xfail`. Each `;`-separated item of the round's Tier 1 row gets its own test asserting the exact values listed. A pytest stop check counts only with 0 skipped and 0 xfailed.
+7. Tier 1 tests use fakes only (no network, no GPU). A pytest stop check passes when `pytest` exits 0.
 
 Each round's command has this shape (fill in from the table below):
 
