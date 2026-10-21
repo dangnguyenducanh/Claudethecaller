@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from ctc.capability import default_roots, scan_library
+from ctc.ingestion.scanner import default_roots, scan_library
 
 
 def _write_skill(root: Path, name: str, description: str = "does a thing", body: str = "Body text.") -> Path:

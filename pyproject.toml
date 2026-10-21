@@ -25,8 +25,6 @@ dev = ["pytest", "ruff", "ranx", "datasets"]
 [project.scripts]
 ctc = "ctc:main"
 
-[tool.uv.build-backend]
-module-root = ""
 
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]
