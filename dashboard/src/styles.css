@@ -168,3 +168,7 @@ pre.code { margin: 0; padding: 12px; background: var(--card-2); border: 1px soli
 .health { display: flex; align-items: center; gap: 5px; margin-bottom: 3px; } .health .faint { margin-left: 4px; font-size: 10px; }
 .pbar { height: 6px; border-radius: 4px; background: var(--card-2); border: 1px solid var(--line); overflow: hidden; }
 .pbar > div { height: 100%; transition: width .3s; }
+.inline-input { background: var(--card-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 12px; outline: 0; min-width: 190px; }
+.inline-input:focus { border-color: var(--accent); }
+code.code { display: block; padding: 12px; background: var(--card-2); border: 1px solid var(--line-2); border-radius: 10px; font: 12px var(--mono); word-break: break-all; user-select: all; }
+.keybox { border-color: var(--warn, #5a4320); }
