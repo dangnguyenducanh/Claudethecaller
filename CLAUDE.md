@@ -1,11 +1,11 @@
 # claudethecaller
 
-Local skill/workflow router for coding agents. **`PLAN.md` is the single source of truth** (product spec, stack, gates, rounds, tasks). Read the sections a task names; never edit `PLAN.md`. `eval/gates.toml` and `data/own-eval*` are written by round R6 and owner-edited after that; see rule 3 under "Rules for every round" in `PLAN.md`.
+Local skill/workflow router for coding agents. **`PLAN.md` is the single source of truth** (product spec, stack, gates, build order, tasks). Read the sections a task names; never edit `PLAN.md`. `eval/gates.toml` and `data/own-eval*` are written by step S6 and owner-edited after that; see rule 3 under "Rules" in `PLAN.md`.
 
 ## How work happens here
 
-- Development runs in **rounds** (`PLAN.md` → "Rounds"): one goal and one Stop-when command each, one milestone branch each (`m1-retrieval-core`, …), PR into `main` at the end of the milestone.
-- Inside a round: follow "Rules for every round" in `PLAN.md`. Small steps, stay in the round's scope, never weaken a test.
+- Development follows the **build order** in `PLAN.md`: one Done-when command per step, one milestone branch each (`m1-retrieval-core`, …), PR into `main` at the end of the milestone.
+- Follow "Rules" in `PLAN.md`: small steps, stay in the current step's scope, never weaken a test.
 - Tests are two tiers only: Tier 1 logic checks (`uv run pytest`) for our own branching/math, Tier 2 metric gates (`uv run eval/run.py --gate mN`, N = milestone). No test-first ceremony, no tests for glue or libraries.
 - Code style: shortest working solution; stdlib and already-chosen deps first; no abstractions with one implementation; mark known corner-cuts with a `ponytail:` comment.
 

@@ -1,6 +1,6 @@
 # claudethecaller Implementation Plan
 
-> **Execution:** build in rounds (see "Rounds"), one at a time, directly in a Claude Code session; commit after each round. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution:** build in steps (see "Build order"), one at a time, directly in a Claude Code session; commit after each step. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A local skill/workflow router that predicts what a coding agent needs from project memory and the live session, and hands Claude an explainable bundle (workflow → ordered skills → subagents → difficulty and model tier) through one MCP tool plus a prompt hook, managed by a CLI and a control dashboard.
 
@@ -47,7 +47,7 @@
 | Packaging | `uv` (Python), `pnpm` (dashboard), `docker-compose.yml` (TEI, llama.cpp) | |
 | Hot-path native module (M6, only if profiled) | C++ via **nanobind** on USearch's C++ API | Python-callable, same interfaces |
 
-GPU budget: TEI embedder ~1.5 GB + TEI reranker ~1.5 GB + llama.cpp 3B Q4 ~2.5 GB + 32k KV ~1.2 GB ≈ 6.7 GB ≤ 7 GB. **GPU use** (R3 stop, Tier 2 gate) = sum of `used_memory` from `nvidia-smi --query-compute-apps=pid,used_memory --format=csv` over the PIDs in `docker compose top` for this project; never whole-GPU `memory.used`, never a process-name match (another service runs llama-server here). Over 7 GB → lower TEI `--max-batch-tokens` first.
+GPU budget: TEI embedder ~1.5 GB + TEI reranker ~1.5 GB + llama.cpp 3B Q4 ~2.5 GB + 32k KV ~1.2 GB ≈ 6.7 GB ≤ 7 GB. **GPU use** (S3 stop, Tier 2 gate) = sum of `used_memory` from `nvidia-smi --query-compute-apps=pid,used_memory --format=csv` over the PIDs in `docker compose top` for this project; never whole-GPU `memory.used`, never a process-name match (another service runs llama-server here). Over 7 GB → lower TEI `--max-batch-tokens` first.
 
 ## Global Constraints
 
@@ -132,7 +132,7 @@ Two tiers, nothing else.
 | `tests/test_ltm.py` | cosine ≥ 0.95 → NOOP + `use_count` +1; 0.85–0.95 same meaning → UPDATE (1 row); contradiction → SUPERSEDE (old soft-deleted, new `supersedes` = old id); fresh ADD (use_count 0, sim 0.9) outranks use_count 3 at sim 0.2; project A recall never returns project B rows; pinned skips decay; topic shift (cos < 0.55) resets window | M3 |
 | `dashboard/e2e.spec.ts` (Playwright) | block a skill → `ctc search` drops it; delete a memory → next bundle's `memories` drops it | M4 |
 
-**Tier 2 — metric gates** (`uv run eval/run.py --gate mN`, exit 1 on any miss; report saved to `data/report-<date>.md`; every row below is written to `eval/gates.toml` by R6 (Task 6) with `milestone = N`, owner-edited only after R6; `--gate mN` enforces rows with milestone ≤ N, a missing metric counts as a miss, report-only rows never fail):
+**Tier 2 — metric gates** (`uv run eval/run.py --gate mN`, exit 1 on any miss; report saved to `data/report-<date>.md`; every row below is written to `eval/gates.toml` by S6 (Task 6) with `milestone = N`, owner-edited only after S6; `--gate mN` enforces rows with milestone ≤ N, a missing metric counts as a miss, report-only rows never fail):
 
 | Metric | Gate | Data | From |
 |---|---|---|---|
@@ -147,77 +147,64 @@ Two tiers, nothing else.
 | Memory lift | Recall@5 with memories ≥ without (memory weight fixed 0.1) | own-eval test; memories only from dev sessions that ended before the turn | M3 |
 | Extraction precision | ≥ 0.80 (initial) | 50 hand-checked memories | M3 |
 
-Every task's **Done when** names its Tier 1 row and/or Tier 2 gate. Commit after each round.
+Every task's **Done when** names its Tier 1 row and/or Tier 2 gate. Commit after each step.
 
 ---
 
-## Rounds
+## Build order
 
-Development is split into rounds: each round has one goal and a Stop-when command that must exit 0. Milestones and Tasks below are the spec each round points at.
+Build the steps in order, directly in a Claude Code session. Each step ends with its **Done when** command exiting 0; then commit and go on. Per milestone: `git checkout -b m<N>-<name>`, build its steps, owner steps (H) as marked, one review at the end, `gh pr create` into `main`. Milestones and Tasks below are the spec each step points at.
 
-**Per milestone:** `git checkout -b m<N>-<name>` → run that milestone's rounds in table order → owner gates → `gh pr create` into `main`.
+### Rules
 
-**After every round:** run its Stop-when command; if it exits 0, commit and start the next round, otherwise fix and re-run it. No other review between rounds; one review at the end of the milestone, before the PR.
-
-### Rules for every round
-
-1. Work only on the round's goal and files; do not start the next round's work.
-2. Small steps; run the round's stop check before calling the round done.
-3. Never edit `PLAN.md`. Outside R6, never edit `eval/gates.toml` or `data/own-eval*` (labels). Never weaken an existing assertion in `tests/`; only add. After R6, never change how an existing metric, gate or eval row set is computed in `eval/` (only add new ones); never copy own-eval query text into enrichment prompts, trigger phrasings, few-shot examples or code (passing it to `Llm.json` as the item being labeled or extracted is fine); tune on dev rows only; the 200 hand-checked rows are scored only through `--gate`.
+1. Stay in the current step's scope; do not start the next step.
+2. Small steps; run the step's Done-when before calling it done.
+3. `eval/gates.toml` and `data/own-eval*` (labels) are written by S6 and owner-edited after that. Never weaken an existing assertion in `tests/`; only add. After S6, never change how an existing metric, gate or eval row set is computed in `eval/` (only add new ones); never copy own-eval query text into enrichment prompts, trigger phrasings, few-shot examples or code (passing it to `Llm.json` as the item being labeled or extracted is fine); tune on dev rows only; the 200 hand-checked rows are scored only through `--gate`.
 4. No dependencies beyond "Stack per component" and Task 1's dep list; one-off tools run via `uvx` (e.g. `uvx py-spy`) are not dependencies. No secrets, `data/`, model weights or `*.usearch` in commits.
 5. Stop any process you started (daemon, uvicorn, dev servers) before finishing; `docker compose` model servers may stay up. Never write the real `~/.claude/` or `~/.claude.json`: run `ctc install` and `claude mcp add` only with `HOME` set to a temp dir; the real install is H3.
 6. If blocked by something only the owner can do (credentials, hand labels, GPU busy), say what the owner must do and stop.
-7. Tier 1 tests use fakes only (no network, no GPU). A pytest stop check passes when `pytest` exits 0.
+7. Tier 1 tests use fakes only (no network, no GPU). A pytest Done-when passes when `pytest` exits 0.
+
 
 ### Milestone 1 — `m1-retrieval-core`
 
-Rows run top to bottom: R3 and R4 precede R2, whose `build_index` calls their code. R1 and R3 are done (ledger).
+Order: S3 and S4 precede S2, whose `build_index` calls their code.
 
-| R | Spec | Goal | Stop when |
-|---|---|---|---|
-| R1 | Task 1, Task 2, `tests/test_capability.py` row | Scaffold the uv package and build `ctc/capability.py` that scans every skill, agent, command and workflow into namespaced `Capability` records | `uv run pytest tests/test_capability.py` exits 0 with ≥ 6 passed AND `uv run python -c 'import sklearn, ranx, datasets'` exits 0 AND `uv run python -m ctc.capability` reports 300–1000 capabilities and ≥ 1 `voltagent-*` agent |
-| R3 | Task 4 (compose + clients) | `docker-compose.yml` serving the SkillRet embedder, bge reranker and llama-server; `ctc/models.py` clients incl. `llm_from_env` and redaction | `uv run python -m ctc.models` embeds 2 texts, reranks 2 docs and returns one `Llm.json` result from the local servers AND GPU use ≤ 7 GB |
-| R4 | Task 4 (enrich + dedup), dedup rows of `tests/test_retrieve.py` | `ctc/enrich.py`: schema-enforced enrichment and threshold dedup | dedup tests in `tests/test_retrieve.py` pass AND `uv run python -m ctc.enrich --limit 5` prints 5 validated `Enrichment` objects for real capabilities |
-| R2 | Task 3, `tests/test_index.py` row | SQLite store with FTS5 and overrides, plus incremental USearch multi-vector index with atomic swap; `build_index` wires in `enrich` and `dedup` | `uv run pytest tests/test_index.py` exits 0 |
-| R5 | Task 5, `tests/test_retrieve.py` row | Hybrid retrieval (dense + FTS → RRF → filters → rerank → abstain) and the `ctc` CLI | `uv run pytest tests/test_retrieve.py` exits 0 AND with no overrides set, `uv run ctc search --json "fix a flaky test"` has `superpowers:systematic-debugging`, `superpowers:test-driven-development` or `ecc:tdd-workflow` in its top 5 |
-| R6 | Task 6 (build part) | SkillRet + MetaTool loaders, transcript labeler (filtered human turns, full-catalog judge, dev/test split), `eval/run.py` report and `eval/gates.toml` with every Tier 2 row tagged `milestone = N` | `data/own-eval.jsonl` has ≥ 300 filtered rows (≥ 100 dev), `data/own-eval-review.csv` has 200 test rows, and `uv run eval/run.py` writes `data/report-<date>.md` with every M1 metric computed on dev |
-| **H1** | — | **Owner:** hand-check the 200 rows by fixing the `gold` column in `data/own-eval-review.csv` (local only; `data/` is gitignored, never commit it) | — |
-| R7 | Task 6 (gates), "Data & Metrics" | Improve retrieval quality on dev rows (enrichment prompts, trigger phrasings, fusion depth, rerank depth, τ sweep) until the M1 gates pass, without touching gates or labels | `uv run eval/run.py --gate m1` exits 0 |
-| **H2** | — | **Owner:** read the report, open PR `m1-retrieval-core` → `main` | — |
+- [x] **S1** (Task 1, Task 2, `tests/test_capability.py` row) — Scaffold the uv package and build `ctc/capability.py` that scans every skill, agent, command and workflow into namespaced `Capability` records. **Done when:** `uv run pytest tests/test_capability.py` exits 0 with ≥ 6 passed AND `uv run python -c 'import sklearn, ranx, datasets'` exits 0 AND `uv run python -m ctc.capability` reports 300–1000 capabilities and ≥ 1 `voltagent-*` agent
+- [x] **S3** (Task 4 (compose + clients)) — `docker-compose.yml` serving the SkillRet embedder, bge reranker and llama-server; `ctc/models.py` clients incl. `llm_from_env` and redaction. **Done when:** `uv run python -m ctc.models` embeds 2 texts, reranks 2 docs and returns one `Llm.json` result from the local servers AND GPU use ≤ 7 GB
+- [ ] **S4** (Task 4 (enrich + dedup), dedup rows of `tests/test_retrieve.py`) — `ctc/enrich.py`: schema-enforced enrichment and threshold dedup. **Done when:** dedup tests in `tests/test_retrieve.py` pass AND `uv run python -m ctc.enrich --limit 5` prints 5 validated `Enrichment` objects for real capabilities
+- [ ] **S2** (Task 3, `tests/test_index.py` row) — SQLite store with FTS5 and overrides, plus incremental USearch multi-vector index with atomic swap; `build_index` wires in `enrich` and `dedup`. **Done when:** `uv run pytest tests/test_index.py` exits 0
+- [ ] **S5** (Task 5, `tests/test_retrieve.py` row) — Hybrid retrieval (dense + FTS → RRF → filters → rerank → abstain) and the `ctc` CLI. **Done when:** `uv run pytest tests/test_retrieve.py` exits 0 AND with no overrides set, `uv run ctc search --json "fix a flaky test"` has `superpowers:systematic-debugging`, `superpowers:test-driven-development` or `ecc:tdd-workflow` in its top 5
+- [ ] **S6** (Task 6 (build part)) — SkillRet + MetaTool loaders, transcript labeler (filtered human turns, full-catalog judge, dev/test split), `eval/run.py` report and `eval/gates.toml` with every Tier 2 row tagged `milestone = N`. **Done when:** `data/own-eval.jsonl` has ≥ 300 filtered rows (≥ 100 dev), `data/own-eval-review.csv` has 200 test rows, and `uv run eval/run.py` writes `data/report-<date>.md` with every M1 metric computed on dev
+- [ ] **H1** — **Owner:** hand-check the 200 rows by fixing the `gold` column in `data/own-eval-review.csv` (local only; `data/` is gitignored, never commit it)
+- [ ] **S7** (Task 6 (gates), "Data & Metrics") — Improve retrieval quality on dev rows (enrichment prompts, trigger phrasings, fusion depth, rerank depth, τ sweep) until the M1 gates pass, without touching gates or labels. **Done when:** `uv run eval/run.py --gate m1` exits 0
+- [ ] **H2** — **Owner:** read the report, open PR `m1-retrieval-core` → `main`
 
 ### Milestone 2 — `m2-agent-integration`
 
-| R | Spec | Goal | Stop when |
-|---|---|---|---|
-| R8 | Task 7, hook rows of `tests/test_route.py` | FastAPI daemon on socket + `:18310`, `/hook/*` and `/route`, `ctc install` writing curl hooks and MCP registration | hook/install tests in `tests/test_route.py` pass AND with the daemon running, `echo '{"prompt":"fix a flaky test","session_id":"t"}' \| curl -s --unix-socket ~/.claudethecaller/ctc.sock --data-binary @- http://ctc/hook/prompt` prints a `[claudethecaller] Suggested:` line |
-| R9 | Task 8, decider rows of `tests/test_route.py` | `ctc/decide.py` bundle with difficulty/tier classifier, step order, agent matching; `find_capabilities` MCP tool; follow tracking; `ctc/ltm.py` with only the `Memory` model | `uv run pytest tests/test_route.py` exits 0 AND `uv run eval/train_difficulty.py` prints held-out macro-F1 and writes `data/difficulty.joblib` |
-| R10 | Tier 2 M2 rows | Replay own-eval through the daemon, add M2 latency and tier metrics to the report (follow rate is added in R13, from live sessions after H3) | with the daemon running, `uv run eval/run.py --gate m2` exits 0 |
-| **H3** | — | **Owner:** `ctc install`, use Claude Code normally for a day, check the decision log; PR → `main` | — |
+- [ ] **S8** (Task 7, hook rows of `tests/test_route.py`) — FastAPI daemon on socket + `:18310`, `/hook/*` and `/route`, `ctc install` writing curl hooks and MCP registration. **Done when:** hook/install tests in `tests/test_route.py` pass AND with the daemon running, `echo '{"prompt":"fix a flaky test","session_id":"t"}' \| curl -s --unix-socket ~/.claudethecaller/ctc.sock --data-binary @- http://ctc/hook/prompt` prints a `[claudethecaller] Suggested:` line
+- [ ] **S9** (Task 8, decider rows of `tests/test_route.py`) — `ctc/decide.py` bundle with difficulty/tier classifier, step order, agent matching; `find_capabilities` MCP tool; follow tracking; `ctc/ltm.py` with only the `Memory` model. **Done when:** `uv run pytest tests/test_route.py` exits 0 AND `uv run eval/train_difficulty.py` prints held-out macro-F1 and writes `data/difficulty.joblib`
+- [ ] **S10** (Tier 2 M2 rows) — Replay own-eval through the daemon, add M2 latency and tier metrics to the report (follow rate is added in S13, from live sessions after H3). **Done when:** with the daemon running, `uv run eval/run.py --gate m2` exits 0
+- [ ] **H3** — **Owner:** `ctc install`, use Claude Code normally for a day, check the decision log; PR → `main`
 
 ### Milestone 3 — `m3-memory`
 
-| R | Spec | Goal | Stop when |
-|---|---|---|---|
-| R11 | Task 9, "Memory Engine", topic-shift row of `tests/test_ltm.py` | Project profile, session state, decision prior, prefetch and semantic cache | topic-shift test passes AND replay through `find_capabilities(ref=…)` shows prefetch-hit p95 ≤ 10 ms in the report |
-| R12 | Task 10, `tests/test_ltm.py` row | Long-term memory: extract, ADD/UPDATE/SUPERSEDE/NOOP, recall with decay, Claude memory import | `uv run pytest tests/test_ltm.py` exits 0 AND with the daemon running, `uv run ctc memory backfill --sessions 30` writes ≥ 50 memories from dev sessions |
-| **H4** | — | **Owner:** hand-check 50 extracted memories into `data/own-eval-memories.jsonl`; if precision < 0.80, soft-delete that backfill batch (`deleted_at`), re-run R12 with 'improve the extraction prompt' and the bad memory texts added to its goal, then re-check 50 fresh memories before R13 | — |
-| R13 | Tier 2 M3 rows | Memory lift and extraction precision in the report; tune weights other than the memory weight (fixed 0.1) until gates pass; add the Follow rate row from sessions after H3 (state.db `decisions` + transcript tool calls) | with the daemon running, `uv run eval/run.py --gate m3` exits 0 |
-| **H5** | — | **Owner:** PR → `main` | — |
+- [ ] **S11** (Task 9, "Memory Engine", topic-shift row of `tests/test_ltm.py`) — Project profile, session state, decision prior, prefetch and semantic cache. **Done when:** topic-shift test passes AND replay through `find_capabilities(ref=…)` shows prefetch-hit p95 ≤ 10 ms in the report
+- [ ] **S12** (Task 10, `tests/test_ltm.py` row) — Long-term memory: extract, ADD/UPDATE/SUPERSEDE/NOOP, recall with decay, Claude memory import. **Done when:** `uv run pytest tests/test_ltm.py` exits 0 AND with the daemon running, `uv run ctc memory backfill --sessions 30` writes ≥ 50 memories from dev sessions
+- [ ] **H4** — **Owner:** hand-check 50 extracted memories into `data/own-eval-memories.jsonl`; if precision < 0.80, soft-delete that backfill batch (`deleted_at`), redo S12 with an improved extraction prompt using the bad memory texts, then re-check 50 fresh memories before S13
+- [ ] **S13** (Tier 2 M3 rows) — Memory lift and extraction precision in the report; tune weights other than the memory weight (fixed 0.1) until gates pass; add the Follow rate row from sessions after H3 (state.db `decisions` + transcript tool calls). **Done when:** with the daemon running, `uv run eval/run.py --gate m3` exits 0
+- [ ] **H5** — **Owner:** PR → `main`
 
 ### Milestone 4 — `m4-dashboard`
 
-| R | Spec | Goal | Stop when |
-|---|---|---|---|
-| R14 | Milestone 4 | `/api/*` endpoints, dashboard shell, KPI cards, timeline, decision log with explain drawer, activity heatmap | `pnpm -C dashboard build` exits 0 AND `curl -sf 127.0.0.1:18310/` returns the page AND `curl -s 127.0.0.1:18310/api/kpis` has `routing_calls` > 0 |
-| R15 | Milestone 4, `dashboard/e2e.spec.ts` row | Library control, sessions view, memory view; Playwright e2e | `pnpm -C dashboard exec playwright test` exits 0 |
-| **H6** | — | **Owner:** visual review, PR → `main` | — |
+- [ ] **S14** (Milestone 4) — `/api/*` endpoints, dashboard shell, KPI cards, timeline, decision log with explain drawer, activity heatmap. **Done when:** `pnpm -C dashboard build` exits 0 AND `curl -sf 127.0.0.1:18310/` returns the page AND `curl -s 127.0.0.1:18310/api/kpis` has `routing_calls` > 0
+- [ ] **S15** (Milestone 4, `dashboard/e2e.spec.ts` row) — Library control, sessions view, memory view; Playwright e2e. **Done when:** `pnpm -C dashboard exec playwright test` exits 0
+- [ ] **H6** — **Owner:** visual review, PR → `main`
 
 ### Milestones 5–6
 
-| R | Spec | Goal | Stop when |
-|---|---|---|---|
-| R16 | Milestone 5 | React Flow editor saving `.claude/workflows/*.yaml` | after saving a workflow in the UI, its id is in the hits of `uv run ctc search "<its description>"` AND `POST /route` with that description returns a Bundle whose `workflow` is that id and whose `steps[].cap_id` equals the YAML's `steps[].cap` resolved to ids, in order |
-| R17 | Milestone 6 | Profile `/route` under replay with `uvx py-spy record -- .venv/bin/python -m ctc.daemon` (ptrace blocks attaching by pid); build the nanobind module only if Python fusion/filter > 20% of p95 | either `data/profile.md` shows ≤ 20% (round ends, no native code) or the gate report shows identical rankings and lower p95 with the native module |
+- [ ] **S16** (Milestone 5) — React Flow editor saving `.claude/workflows/*.yaml`. **Done when:** after saving a workflow in the UI, its id is in the hits of `uv run ctc search "<its description>"` AND `POST /route` with that description returns a Bundle whose `workflow` is that id and whose `steps[].cap_id` equals the YAML's `steps[].cap` resolved to ids, in order
+- [ ] **S17** (Milestone 6) — Profile `/route` under replay with `uvx py-spy record -- .venv/bin/python -m ctc.daemon` (ptrace blocks attaching by pid); build the nanobind module only if Python fusion/filter > 20% of p95. **Done when:** either `data/profile.md` shows ≤ 20% (step ends, no native code) or the gate report shows identical rankings and lower p95 with the native module
 
 ---
 
@@ -283,7 +270,7 @@ def enricher_version(llm: Llm) -> str
 def dedup(ids: list[str], vecs: np.ndarray) -> tuple[list[list[str]], list[tuple[str, str]]]   # (clusters, review pairs)
 ```
 - [ ] **Build:** compose: TEI ≥ 1.7.2 (`89-*` Ada image) `:18300` = `ThakiCloud/SKILLRET-Embedding-0.6B` with `--pooling ${TEI_POOLING:-last-token}` (env swap to `BAAI/bge-m3` + `TEI_POOLING=cls`), TEI `:18301` = `BAAI/bge-reranker-v2-m3`, `llama-server` `:18302` = `Qwen2.5-3B-Instruct-Q4_K_M.gguf` with `-c 32768 -np 1`; weights from `~/.cache/huggingface`, never in the repo. Query side uses the model card's instruction prefix. `llm_from_env()`: `CTC_LLM` if set; else `anthropic:claude-haiku-5-5` when `ANTHROPIC_API_KEY` is set; else `openai:http://127.0.0.1:18302/v1:qwen2.5-3b` (a missing key is never a rule-6 blocker). `Llm.json` strips API keys, tokens and credential URLs from `system`/`user` first. `enrich`: body truncated to 6,000 chars, 8–12 triggers via schema length bounds, ≥ 2 non-English via a non-ASCII `field_validator` with 1 retry. Dedup: USearch k-NN + union-find at ≥ 0.92; [0.85, 0.92) → review pairs.
-- [ ] **Done when:** dedup rows of `tests/test_retrieve.py` pass; R3 and R4 stop commands pass; GPU use ≤ 7 GB.
+- [ ] **Done when:** dedup rows of `tests/test_retrieve.py` pass; S3 and S4 stop commands pass; GPU use ≤ 7 GB.
 
 ### Task 5: Retriever + CLI
 **Files:** `ctc/retrieve.py`, `ctc/cli.py`
@@ -298,7 +285,7 @@ def rrf(rankings: list[list[str]], k: int = 60) -> dict[str, float]
 async def search(q: str, ctx: Ctx, k: int = 5, rerank_top: int = 20, abstain_below: float = 0.3) -> SearchResult
 ```
 - [ ] **Build:** dense 50 ∥ FTS 50 → `rrf` → drop block/disable and caps whose namespace is not in `default_roots(Path(ctx.project))`, collapse clusters → rerank top 20 → pins to top → abstain below τ (0.3 until Task 6 calibrates) → top 5. CLI `ctc index | search [--json] | explain | status`; `explain` shows every stage score incl. `dropped` with reason; TEI down → exit 1 `embedder unreachable at <url>` in < 2 s.
-- [ ] **Done when:** `tests/test_retrieve.py` passes; R5's `ctc search` check passes.
+- [ ] **Done when:** `tests/test_retrieve.py` passes; S5's `ctc search` check passes.
 
 ### Task 6: Eval harness + gates
 **Files:** `eval/loaders.py`, `eval/label.py`, `eval/run.py`
@@ -312,7 +299,7 @@ async def search(q: str, ctx: Ctx, k: int = 5, rerank_top: int = 20, abstain_bel
 **Exit:** fresh Claude Code session gets bundles without naming skills; `tests/test_route.py` + M2 gates pass.
 
 ### Task 7: Daemon, hooks, MCP
-`ctc/daemon.py`: FastAPI on `~/.claudethecaller/ctc.sock` + `127.0.0.1:18310`; keeps index/store/HTTP clients warm; `ctc daemon start|stop`. Routes: `POST /hook/{event}` (raw Claude Code hook JSON in, hint text out), `POST /route`, `GET /bundle/{ref}`, `/api/*` (dashboard), `/mcp` (FastMCP streamable HTTP) and static `dashboard/dist`. `/hook/prompt` computes `ref` = first 8 hex of sha256(session_id + prompt) and prefetches under it; R8 prints the hint from `search()`, prefetch and `GET /bundle/{ref}` land in R11. `ctc install` (backup + idempotent, every path from `$HOME`) writes into `~/.claude/settings.json`:
+`ctc/daemon.py`: FastAPI on `~/.claudethecaller/ctc.sock` + `127.0.0.1:18310`; keeps index/store/HTTP clients warm; `ctc daemon start|stop`. Routes: `POST /hook/{event}` (raw Claude Code hook JSON in, hint text out), `POST /route`, `GET /bundle/{ref}`, `/api/*` (dashboard), `/mcp` (FastMCP streamable HTTP) and static `dashboard/dist`. `/hook/prompt` computes `ref` = first 8 hex of sha256(session_id + prompt) and prefetches under it; S8 prints the hint from `search()`, prefetch and `GET /bundle/{ref}` land in S11. `ctc install` (backup + idempotent, every path from `$HOME`) writes into `~/.claude/settings.json`:
 ```
 UserPromptSubmit: LC_ALL=C curl -sf -m 0.12 --unix-socket $HOME/.claudethecaller/ctc.sock --data-binary @- http://ctc/hook/prompt || true
 PostToolUse, Stop: same with /hook/tool and /hook/stop, -m 0.05
@@ -329,7 +316,7 @@ class Bundle(BaseModel):
     workflow: str | None; steps: list[Step]; memories: list[Memory]; abstained: bool   # memories empty until M3
 async def decide(hits: list[Hit], ctx: Ctx) -> Bundle
 ```
-Difficulty/tier: scikit-learn `LogisticRegression` on the query embedding. `eval/train_difficulty.py` reads dev prompts in `data/own-eval.jsonl` without editing it, labels `difficulty`/`model_tier` with `Llm.json` into `data/difficulty-labels.jsonl`, fits `data/difficulty.joblib` and prints held-out macro-F1. Steps: workflow's declared order if a workflow is top, else rerank order. Agent: best `agent` hit with rerank ≥ 0.5 vs the step. Every field has a reason. MCP tool `find_capabilities(task: str, blocker: str | None = None, ref: str | None = None)` → the prefetched bundle when `ref` hits and `blocker` is None, else a live route, plus "Use these in order; say why if you skip one." Follow tracking: a `Skill` `skill`, `Agent` `subagent_type` or slash name equal to a step's `invoke` or `agent` (the agent's invoke name) in the same turn sets `decisions.followed = 1`. R9 creates `ctc/ltm.py` holding only the Task 10 `Memory` model, verbatim; R12 adds the functions.
+Difficulty/tier: scikit-learn `LogisticRegression` on the query embedding. `eval/train_difficulty.py` reads dev prompts in `data/own-eval.jsonl` without editing it, labels `difficulty`/`model_tier` with `Llm.json` into `data/difficulty-labels.jsonl`, fits `data/difficulty.joblib` and prints held-out macro-F1. Steps: workflow's declared order if a workflow is top, else rerank order. Agent: best `agent` hit with rerank ≥ 0.5 vs the step. Every field has a reason. MCP tool `find_capabilities(task: str, blocker: str | None = None, ref: str | None = None)` → the prefetched bundle when `ref` hits and `blocker` is None, else a live route, plus "Use these in order; say why if you skip one." Follow tracking: a `Skill` `skill`, `Agent` `subagent_type` or slash name equal to a step's `invoke` or `agent` (the agent's invoke name) in the same turn sets `decisions.followed = 1`. S9 creates `ctc/ltm.py` holding only the Task 10 `Memory` model, verbatim; S12 adds the functions.
 
 ---
 
@@ -362,7 +349,7 @@ CLI `ctc memory backfill --sessions N` has the daemon (`POST /api/memory/backfil
 
 # Milestone 5 — Visual workflow editor (TypeScript)
 
-React Flow canvas → `<project>/.claude/workflows/<name>.yaml` (`{ name, description, steps: [{ cap, agent? }] }`; `cap` = id or invoke name, resolved to `Step.cap_id`), indexed by Task 2, expanded by Task 8. **Done when:** R16's stop check passes.
+React Flow canvas → `<project>/.claude/workflows/<name>.yaml` (`{ name, description, steps: [{ cap, agent? }] }`; `cap` = id or invoke name, resolved to `Step.cap_id`), indexed by Task 2, expanded by Task 8. **Done when:** S16's stop check passes.
 
 # Milestone 6 — C++ hot path (only if profiling justifies)
 
