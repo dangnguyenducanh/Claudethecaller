@@ -3,7 +3,15 @@ import { Area, AreaChart, ResponsiveContainer } from 'recharts'
 import { usingMock } from './api'
 
 export const PALETTE = ['#7c8cff', '#3ddc97', '#f59e42', '#ff6fae', '#b38cff', '#2dd4bf', '#facc15']
-export const colorOf = (projects: string[], p: string) => PALETTE[Math.max(0, projects.indexOf(p)) % PALETTE.length]
+// Sidebar projects keep their slot; any other name (mock data, a project created after the sidebar loaded) gets the
+// next free slot instead of all falling onto slot 0. ponytail: 7 colours, so the 8th project repeats the 1st.
+const extra: string[] = []
+export const colorOf = (projects: string[], p: string) => {
+  const i = projects.indexOf(p)
+  if (i >= 0) return PALETTE[i % PALETTE.length]
+  if (!extra.includes(p)) extra.push(p)
+  return PALETTE[(projects.length + extra.indexOf(p)) % PALETTE.length]
+}
 
 export const fmtInt = (n: number) => n.toLocaleString('en-US')
 export const fmtPct = (n: number) => `${(n * 100).toFixed(1)}%`
