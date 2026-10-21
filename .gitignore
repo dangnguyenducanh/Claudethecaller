@@ -10,3 +10,4 @@ graphify-out/
 dashboard/node_modules/
 dashboard/dist/
 .env
+.claude/settings.local.json

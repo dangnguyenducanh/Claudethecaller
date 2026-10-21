@@ -107,7 +107,7 @@ A subfolder is created by the step that first puts code in it; no empty folders 
 
 Four tracks. H = owner step. Commit after each step.
 
-**Order:** H0 → B3 → B4 → K1 → F1 → H1 → K2 → H2 → B5 → B6 → F2 → H3 → K3 → A1, A2 → B7 → B8 → A3 → H4 → K4 → F3 → F4 → H6 → F5.
+**Order:** F3 → F4 (done first, on mock data) → H0 → B3 → B4 → K1 → F1 → H1 → K2 → H2 → B5 → B6 → F2 → H3 → K3 → A1, A2 → B7 → B8 → A3 → H4 → K4 → F3 → F4 → H6 → F5.
 
 **Branches:** `m1-retrieval-core` (B1–B4, K1–K2, F1), `m2-agent-integration` (B5–B6, F2, K3), `m3-memory` (B7–B8, A3, K4), `m4-dashboard` (F3–F5), `ai-<name>` per AI step; PR into `main` at the end of each.
 
@@ -199,8 +199,8 @@ Four tracks. H = owner step. Commit after each step.
   ```
   and runs `claude mcp add --scope user --transport http claudethecaller http://127.0.0.1:18310/mcp` if `claude mcp get claudethecaller` fails.
 - [ ] **H3** — owner runs the real `ctc install`, uses Claude Code for a day; PR `m2-agent-integration` → `main`.
-- [ ] **F3 — dashboard shell** (`dashboard/`, Vite React TS): pages fetch `/api/*`. KPI cards (routing calls, adoption, lazy misses = suggested but not followed, p95, cost by tier; 7d/30d/90d/all), Recharts `AreaChart` timeline stacked by project, decision log table → drawer with the stage scores, activity heatmap as a CSS grid. `pnpm build` → `dist/`, served by the daemon.
-- [ ] **F4 — control views**: library (search, enable/disable/pin/block per project via `PUT /api/capabilities/{id}/override`, dedup review), sessions (project rail + per-session decisions and memories), memories (edit, pin, delete, supersede history).
+- [x] **F3 — dashboard shell** (`dashboard/`, Vite React TS): pages fetch `/api/*`. KPI cards (routing calls, adoption, lazy misses = suggested but not followed, p95, cost by tier; 7d/30d/90d/all), Recharts `AreaChart` timeline stacked by project, decision log table → drawer with the stage scores, activity heatmap as a CSS grid. `pnpm build` → `dist/`, served by the daemon. Built first, on mock data (`dashboard/src/mock.ts`) until B5 serves `/api`; `pnpm -C dashboard dev` → `:18320`.
+- [x] **F4 — control views**: library (search, enable/disable/pin/block per project via `PUT /api/capabilities/{id}/override`, dedup review), sessions (project rail + per-session decisions and memories), memories (edit, pin, delete, supersede history). (mock data until B5.)
 - [ ] **H6** — owner visual review.
 - [ ] **F5 — workflow editor**: React Flow canvas with capability nodes from `/api/capabilities`; save → `POST /api/workflows` writes `<project>/.claude/workflows/<name>.yaml` (`{name, description, steps: [{cap, agent?}]}`), then reindex. PR `m4-dashboard` → `main`.
 
