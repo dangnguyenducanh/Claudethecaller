@@ -14,6 +14,14 @@ type View = (typeof VIEWS)[number]
 const SHARED_ONLY: View[] = ['keys']
 export type ViewProps = { project: string | null; range: Range; setRange: (r: Range) => void; projects: string[] }
 
+/** '#library' → view; '#decision/12' → the Overview with decision 12 open. */
+function parseHash(): { view: View; decision: number | null } {
+  const h = location.hash.slice(1)
+  const m = /^decision\/(\d+)$/.exec(h)
+  if (m) return { view: 'overview', decision: Number(m[1]) }
+  return { view: VIEWS.includes(h as View) ? (h as View) : 'overview', decision: null }
+}
+
 const ICONS: Record<View, string> = {
   overview: 'M3 13h4v8H3zM10 3h4v18h-4zM17 9h4v12h-4z',
   library: 'M4 4h6v16H4zM14 4h6v16h-6z',
@@ -40,8 +48,8 @@ function readTheme() {
 }
 
 export default function App() {
-  const initial = location.hash.slice(1) as View
-  const [view, setView] = useState<View>(VIEWS.includes(initial) ? initial : 'overview')
+  const [view, setView] = useState<View>(() => parseHash().view)
+  const [decisionId, setDecisionId] = useState<number | null>(() => parseHash().decision)
   const [project, setProject] = useState<string | null>(null)
   const [range, setRange] = useState<Range>('30d')
   const [projects, setProjects] = useState<Project[]>([])
@@ -67,9 +75,9 @@ export default function App() {
     loadProjects()
     setRev(r => r + 1)
   }
-  useEffect(() => { location.hash = view }, [view])
-  useEffect(() => { // back/forward and pasted #links switch views
-    const onHash = () => { const h = location.hash.slice(1) as View; if (VIEWS.includes(h)) setView(h) }
+  useEffect(() => { location.hash = decisionId ? `decision/${decisionId}` : view }, [view, decisionId])
+  useEffect(() => { // back/forward and pasted #links switch views or open a decision
+    const onHash = () => { const h = parseHash(); setView(h.view); setDecisionId(h.decision) }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
@@ -93,7 +101,7 @@ export default function App() {
           claudethecaller
         </div>
         {VIEWS.filter(v => !SHARED_ONLY.includes(v) || health?.mode === 'shared').map(v => (
-          <button key={v} className={'navitem' + (v === view ? ' on' : '')} onClick={() => setView(v)}>
+          <button key={v} className={'navitem' + (v === view ? ' on' : '')} onClick={() => { setDecisionId(null); setView(v) }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d={ICONS[v]} /></svg>
             {v[0].toUpperCase() + v.slice(1)}
           </button>
@@ -132,7 +140,7 @@ export default function App() {
         </div>
       </nav>
       <main className="main" key={rev}>
-        {view === 'overview' && <Overview {...props} />}
+        {view === 'overview' && <Overview {...props} decisionId={decisionId} onDecision={setDecisionId} />}
         {view === 'library' && <Library {...props} />}
         {view === 'sessions' && <Sessions {...props} />}
         {view === 'memories' && <Memories {...props} />}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis } from 'recharts'
-import { PAGE, api } from './api'
+import { PAGE, api, errText } from './api'
 import type { ViewProps } from './App'
 import type { Activity, Decision, Kpis, Metric, Range, Timeline } from './types'
 import { DecisionDetail, DecisionTable } from './parts'
@@ -10,7 +10,7 @@ const RANGES = ['7d', '30d', '90d', 'all'] as const satisfies readonly Range[]
 const METRICS = ['calls', 'adoption', 'latency'] as const satisfies readonly Metric[]
 const RESULTS = { all: {}, followed: { followed: true }, ignored: { followed: false, abstained: false }, abstained: { abstained: true } } as const
 
-export default function Overview({ project, range, setRange, projects }: ViewProps) {
+export default function Overview({ project, range, setRange, projects, decisionId, onDecision }: ViewProps & { decisionId: number | null; onDecision: (id: number | null) => void }) {
   const [kpis, setKpis] = useState<Kpis | null>(null)
   const [metric, setMetric] = useState<Metric>('calls')
   const [tl, setTl] = useState<Timeline | null>(null)
@@ -21,9 +21,17 @@ export default function Overview({ project, range, setRange, projects }: ViewPro
   const [more, setMore] = useState(false)
   const [act, setAct] = useState<Activity | null>(null)
   const [open, setOpen] = useState<Decision | null>(null)
+  const [linkErr, setLinkErr] = useState('')
 
   useEffect(() => { api.kpis(range, project).then(setKpis); api.activity(project).then(setAct) }, [range, project])
   useEffect(() => { api.timeline(range, metric, project).then(setTl) }, [range, metric, project])
+  // The URL hash (#decision/<id>) is the source of truth for the drawer: rows set it, close clears it, pasted links open it.
+  useEffect(() => {
+    setLinkErr('')
+    if (decisionId === null) return setOpen(null)
+    setOpen(o => (o?.id === decisionId ? o : null))
+    api.decision(decisionId).then(setOpen).catch(e => setLinkErr(errText(e)))
+  }, [decisionId])
   const loadDecisions = (before?: number) =>
     api.decisions({ range, project, q, ...RESULTS[result], before }).then(rows => {
       setDecisions(ds => (before ? [...ds, ...rows] : rows))
@@ -104,7 +112,7 @@ export default function Overview({ project, range, setRange, projects }: ViewPro
             </div>
           </div>
           <div className="tablewrap">
-            <DecisionTable rows={decisions} projects={projects} onOpen={setOpen} />
+            <DecisionTable rows={decisions} projects={projects} onOpen={d => onDecision(d.id)} />
             {!decisions.length && <div className="empty">No decisions match.</div>}
             {more && <button className="btn more" onClick={() => loadDecisions(decisions[decisions.length - 1].id)}>Load more</button>}
           </div>
@@ -129,10 +137,11 @@ export default function Overview({ project, range, setRange, projects }: ViewPro
       </div>
 
       {open && (
-        <Drawer onClose={() => setOpen(null)}>
-          <DecisionDetail d={open} onDeleted={id => { setDecisions(ds => ds.filter(x => x.id !== id)); setOpen(null) }} />
+        <Drawer onClose={() => onDecision(null)}>
+          <DecisionDetail d={open} onDeleted={id => { setDecisions(ds => ds.filter(x => x.id !== id)); onDecision(null) }} />
         </Drawer>
       )}
+      {linkErr && !open && <Drawer onClose={() => onDecision(null)}><div className="err">Decision #{decisionId}: {linkErr}</div></Drawer>}
     </>
   )
 }
