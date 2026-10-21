@@ -1,6 +1,6 @@
 import { handle } from './mock'
 import type {
-  Activity, Capability, CapabilityDetail, CapabilityPatch, Decision, DedupPair, Job, Kind, Kpis, Memory, MemoryDetail,
+  Activity, ApiKey, Capability, CapabilityDetail, CapabilityPatch, Decision, DedupPair, Health, Job, Kind, Kpis, Memory, MemoryDetail,
   MemoryKind, MemoryPatch, MemoryWrite, Metric, NewCapability, NewMemory, Ok, Override, Project, ProjectDetail, Range,
   Session, SessionDetail, Timeline,
 } from './types'
@@ -25,18 +25,30 @@ const FORCE_MOCK = import.meta.env.VITE_MOCK === '1'
 let mock = FORCE_MOCK
 export const usingMock = () => mock
 
+// Shared mode: the dashboard sends the stored API key; a 401 asks App for one. Local mode never sees a 401.
+export const getKey = () => { try { return localStorage.getItem('ctc-key') ?? '' } catch { return '' } }
+export const setKey = (k: string) => { try { k ? localStorage.setItem('ctc-key', k) : localStorage.removeItem('ctc-key') } catch { /* private mode */ } }
+let onUnauthorized: () => void = () => {}
+export const setAuthListener = (cb: () => void) => { onUnauthorized = cb }
+const unauthorized = (): never => {
+  onUnauthorized()
+  throw new ApiError(401, 'unauthorized', 'An API key is required.')
+}
+
 function fromMock<T>(method: string, path: string, body: unknown): T {
   mock = true
+  if (import.meta.env.VITE_MOCK_MODE === 'shared' && !getKey()) unauthorized() // the mock plays shared mode too
   return handle(method, path, body) as T
 }
 
-async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function req<T>(method: string, path: string, body?: unknown, prefix = '/api'): Promise<T> {
   if (FORCE_MOCK) return fromMock<T>(method, path, body)
   let r: Response
   try {
-    r = await fetch('/api' + path, {
+    const key = getKey()
+    r = await fetch(prefix + path, {
       method,
-      headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+      headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...(key ? { authorization: `Bearer ${key}` } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(1500),
     })
@@ -47,6 +59,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
   // The Vite dev proxy answers 5xx without JSON when nothing listens on :18310; the daemon always sends JSON errors.
   if (!r.ok && !isJson && r.status >= 500) return fromMock<T>(method, path, body)
   mock = false
+  if (r.status === 401) unauthorized()
   const data: unknown = isJson ? await r.json() : undefined
   if (!r.ok) {
     const err = (data as { error?: { code?: string; message?: string } } | undefined)?.error
@@ -109,6 +122,14 @@ export const api = {
   updateMemory: (id: string, patch: MemoryPatch) => req<Memory>('PATCH', `/memories/${seg(id)}`, patch),
   deleteMemory: (id: string) => req<Ok>('DELETE', `/memories/${seg(id)}`),
   restoreMemory: (id: string) => req<Memory>('POST', `/memories/${seg(id)}/restore`),
+
+  // Health (outside /api, unversioned dashboard routes don't apply: it is the machine-facing /v1 route)
+  health: () => req<Health>('GET', '/health', undefined, '/v1'),
+
+  // Keys (shared mode only; 404 in local mode)
+  keys: () => req<ApiKey[]>('GET', '/keys'),
+  createKey: (name: string) => req<ApiKey>('POST', '/keys', { name }),
+  revokeKey: (id: number) => req<Ok>('DELETE', `/keys/${id}`),
 
   // Index + jobs
   reindex: (project: string | null) => req<{ job_id: string }>('POST', '/index', { project }),

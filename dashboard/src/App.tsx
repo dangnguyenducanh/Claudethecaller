@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, errText } from './api'
+import { api, errText, setAuthListener, setKey } from './api'
 import Library from './Library'
 import Memories from './Memories'
 import Overview from './Overview'
@@ -32,7 +32,10 @@ export default function App() {
   const [menu, setMenu] = useState<string | null>(null)
   const [rev, setRev] = useState(0) // bumps after a project rename/delete so every view refetches
 
-  const loadProjects = () => api.projects().then(setProjects)
+  const [needKey, setNeedKey] = useState(false)
+  useEffect(() => { setAuthListener(() => setNeedKey(true)) }, [])
+
+  const loadProjects = () => api.projects().then(setProjects).catch(() => {}) // a 401 is handled by the key panel
   useEffect(() => { loadProjects() }, [])
   const afterProjectChange = (from: string, to: string | null) => {
     setMenu(null)
@@ -53,6 +56,8 @@ export default function App() {
 
   const names = projects.map(p => p.name)
   const props: ViewProps = { project, range, setRange, projects: names }
+
+  if (needKey) return <KeyPanel />
 
   return (
     <div className="app">
@@ -130,6 +135,23 @@ function ProjectMenu({ name, onChanged }: { name: string; onChanged: (from: stri
       <input value={to} aria-label="New project name" onChange={e => setTo(e.target.value)} onKeyDown={e => e.key === 'Enter' && rename()} />
       <div className="actions"><button className="btn" onClick={rename}>Rename</button><button className="btn danger" onClick={forget}>Forget</button></div>
       {err && <div className="err">{err}</div>}
+    </div>
+  )
+}
+
+/** Shared mode: the daemon answered 401, so ask for an API key and reload with it. */
+function KeyPanel() {
+  const [k, setK] = useState('')
+  const save = () => { if (k.trim()) { setKey(k.trim()); location.reload() } }
+  return (
+    <div className="keypanel">
+      <div className="card pad form">
+        <div className="brand" style={{ padding: 0 }}>claudethecaller</div>
+        <div className="card-title">Enter API key</div>
+        <div className="card-sub">This daemon runs in shared mode. Create a key with <span className="mono">ctc keys new</span> or ask its owner.</div>
+        <input type="password" autoFocus value={k} placeholder="ctc_…" aria-label="API key" onChange={e => setK(e.target.value)} onKeyDown={e => e.key === 'Enter' && save()} />
+        <div className="actions"><button className="btn" style={{ borderColor: 'var(--accent)' }} onClick={save}>Save and reload</button></div>
+      </div>
     </div>
   )
 }

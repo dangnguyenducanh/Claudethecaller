@@ -1,6 +1,6 @@
 import { ApiError } from './api'
 import type {
-  Activity, Capability, CapabilityDetail, Decision, DedupPair, Job, Kind, Kpis, Memory, MemoryDetail, MemoryKind,
+  Activity, ApiKey, Capability, CapabilityDetail, Decision, DedupPair, Health, Job, Kind, Kpis, Memory, MemoryDetail, MemoryKind,
   MemoryWrite, Project, ProjectDetail, Session, SessionDetail, StageRow, Step, Timeline, WorkflowStep,
 } from './types'
 
@@ -183,14 +183,33 @@ const words = (t: string) => new Set(t.toLowerCase().match(/\w+/g) ?? [])
 const overlap = (a: string, b: string) => { const A = words(a), B = words(b); return [...A].filter(w => B.has(w)).length / Math.max(1, Math.min(A.size, B.size)) }
 
 // ---- jobs ----
-const jobs = new Map<string, { kind: string; created: number; result: Record<string, unknown> }>()
+type MockJob = { kind: string; created: number; result: Record<string, unknown> | null; fixed?: { status: Job['status']; progress: number; error?: string } }
+const jobs = new Map<string, MockJob>([
+  ['job-a1', { kind: 'index', created: Date.now() - 7_200_000, result: { added: 4, changed: 9, removed: 1, vectors: 23, library_version: '3f9ac71e' }, fixed: { status: 'done', progress: 1 } }],
+  ['job-a2', { kind: 'enrich', created: Date.now() - 3_600_000, result: null, fixed: { status: 'failed', progress: 0.35, error: 'llama-server: connection refused (127.0.0.1:18302)' } }],
+  ['job-a3', { kind: 'memory_backfill', created: Date.now() - 90_000, result: null, fixed: { status: 'running', progress: 0.4 } }],
+  ['job-a4', { kind: 'memory_import', created: Date.now() - 1_800_000, result: { imported: 12 }, fixed: { status: 'done', progress: 1 } }],
+])
 const jobView = (id: string): Job => {
   const j = jobs.get(id) ?? fail(404, 'not_found', `no job ${id}`)
   const t = Date.now() - j.created
-  const status = t < 600 ? 'queued' : t < 3000 ? 'running' : 'done'
-  return { id, kind: j.kind, status, progress: status === 'done' ? 1 : status === 'queued' ? 0 : +((t - 600) / 2400).toFixed(2),
-    result: status === 'done' ? j.result : null, error: null, created_at: new Date(j.created).toISOString() }
+  const f = j.fixed ?? { status: t < 600 ? 'queued' : t < 3000 ? 'running' : 'done', progress: t < 600 ? 0 : t < 3000 ? +((t - 600) / 2400).toFixed(2) : 1 } as NonNullable<MockJob['fixed']>
+  return { id, kind: j.kind, status: f.status, progress: f.progress, result: f.status === 'done' ? j.result : null, error: f.error ?? null, created_at: new Date(j.created).toISOString() }
 }
+
+// ---- health + keys ----
+const SHARED = import.meta.env.VITE_MOCK_MODE === 'shared'
+const DOWN = String(import.meta.env.VITE_MOCK_DOWN ?? '').split(',') // e.g. VITE_MOCK_DOWN=redis,llm to see red dots
+const health = (): Health => {
+  const svc = (n: string) => (DOWN.includes(n) ? 'down' : 'ok') as 'ok' | 'down'
+  return { db: svc('db'), redis: svc('redis'), embedder: svc('embedder'), reranker: svc('reranker'), llm: svc('llm'),
+    library_version: hash8(String(caps.length)) + hash8('lib'), mode: SHARED ? 'shared' : 'local' }
+}
+let keys: ApiKey[] = [
+  { id: 1, name: 'laptop', created_at: new Date(now.getTime() - 30 * DAY).toISOString(), revoked_at: null },
+  { id: 2, name: 'ci-runner', created_at: new Date(now.getTime() - 12 * DAY).toISOString(), revoked_at: null },
+  { id: 3, name: 'old-desktop', created_at: new Date(now.getTime() - 80 * DAY).toISOString(), revoked_at: new Date(now.getTime() - 40 * DAY).toISOString() },
+]
 
 // ---- reads ----
 const DAYS: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90, all: 90 }
@@ -415,6 +434,22 @@ export function handle(method: string, path: string, body: unknown): unknown {
     }
     case 'GET /jobs': return [...jobs.keys()].reverse().map(jobView).filter(j => (!p.get('status') || j.status === p.get('status')) && (!p.get('kind') || j.kind === p.get('kind')))
     case 'GET /jobs/:id': return jobView(id)
+
+    case 'GET /health': return health()
+    case 'GET /keys': return SHARED ? keys : fail(404, 'not_found', 'API keys exist only in shared mode')
+    case 'POST /keys': {
+      if (!SHARED) fail(404, 'not_found', 'API keys exist only in shared mode')
+      const name = String(b.name ?? '').trim()
+      if (!name) fail(422, 'invalid', 'name is required')
+      const k: ApiKey = { id: Math.max(0, ...keys.map(x => x.id)) + 1, name, created_at: new Date().toISOString(), revoked_at: null }
+      keys = [k, ...keys]
+      return { ...k, key: `ctc_${hash8(name + Date.now())}${hash8(String(Math.random()))}${hash8(String(Math.random()))}` } // shown once
+    }
+    case 'DELETE /keys/:id': {
+      const k = keys.find(x => x.id === Number(id)) ?? fail(404, 'not_found', `no key ${id}`)
+      k.revoked_at = new Date().toISOString()
+      return { ok: true }
+    }
   }
   return fail(404, 'not_found', `mock: no route for ${method} ${path}`)
 }

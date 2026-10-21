@@ -43,6 +43,7 @@ export interface Capability {
 export interface CapabilityDetail extends Capability {
   name: string; invoke: string; path: string; body: string; summary: string | null; triggers: string[]
   editable: boolean; vectors: number; cluster_members: string[]; recent_decisions: Decision[]
+  steps?: WorkflowStep[] | null // workflows only; the backend will add it (until then the editor can't read an existing workflow's order)
 }
 export interface WorkflowStep { cap: string; agent?: string }
 export interface NewCapability {
@@ -74,3 +75,8 @@ export interface Job {
   result: Record<string, unknown> | null; error: string | null; created_at: string
 }
 export interface IndexResult { added: number; changed: number; removed: number; vectors: number; library_version: string }
+
+export type Svc = 'ok' | 'down'
+export interface Health { db: Svc; redis: Svc; embedder: Svc; reranker: Svc; llm: Svc; library_version: string; mode: 'local' | 'shared' }
+export interface ApiKey { id: number; name: string; created_at: string; revoked_at: string | null; key?: string } // key only on create, shown once
+export interface NewApiKey { name: string }

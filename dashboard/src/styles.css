@@ -161,3 +161,7 @@ pre.code { margin: 0; padding: 12px; background: var(--card-2); border: 1px soli
 .menu .mono { word-break: break-word; white-space: normal; }
 .menu input { width: 100%; }
 .mem-meta { flex-wrap: wrap; } .mem-meta .mono { white-space: nowrap; }
+.keypanel { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+.keypanel .card { width: min(380px, 100%); }
+.keypanel input { background: var(--card-2); border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 10px; outline: 0; }
+.keypanel input:focus { border-color: var(--accent); }
