@@ -48,7 +48,7 @@ async def index_library(store: Store, embedder: Embedder, project_dir: Path | No
     roots = default_roots(proj or Path.cwd(), Path(claude_home) if claude_home else None)
     if not proj or (proj / ".claude").resolve() == roots[0][0].resolve():  # a project at $HOME: its .claude is the user root
         roots = [r for r in roots if not r[1].startswith("project@")]
-    caps, _ = scan_library(roots)
+    caps, _ = await asyncio.to_thread(scan_library, roots)  # ~1k file reads: off the event loop (the daemon's 20 ms Redis timeout)
     if proj:  # a cloned repo is untrusted: its .claude-plugin manifest must not pull in files from outside the project
         caps = [c for c in caps if not c.namespace.startswith("project@") or Path(c.path).is_relative_to(proj / ".claude")]
     # The user + plugin scan owns every non-project namespace: one that is no longer installed is deleted (an uninstalled
