@@ -1,0 +1,12 @@
+# Search knobs (PLAN.md B4). K2 writes tuned values here.
+k: 5
+depth: 50            # candidates per channel (dense, keyword)
+rerank_top: 20
+rrf_k: 60
+abstain_below: null  # rerank-score floor; null = off (bge-reranker scores are uncalibrated, see CLAUDE.md)
+gate_path: models/abstain.joblib   # calibrated abstain gate from K2; used when the file exists
+gate_min_p: 0.5                    # K2 overwrites with the tuned threshold
+agent_min_rerank: 0.5              # B6: attach an agent hit only above this
+blend: {prompt: 0.6, session: 0.25, project: 0.15}   # B7 query vector
+memory_weight: 0.1                 # B8 recall() weight on the query vector
+topic_shift_below: 0.55            # B7: cosine(turn, session mean) below this clears the session

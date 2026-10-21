@@ -22,9 +22,9 @@
 | Embed + rerank | TEI (Docker): `ThakiCloud/SKILLRET-Embedding-0.6B` (1024-dim) on `:18300`, `BAAI/bge-reranker-v2-m3` on `:18301` |
 | Local LLM (offline only) | llama.cpp `llama-server` on `:18302`, `Qwen2.5-3B-Instruct` Q4_K_M; Claude API only when `ANTHROPIC_API_KEY` is set |
 | Database | Supabase project `claudethecaller` (`iecwnlyqjbigeiobmurn`, ap-southeast-1): Postgres 17 + pgvector (HNSW, cosine) + full-text search with `unaccent`; tables in schema `ctc`; Python `psycopg[binary]` + `pgvector`; IPv4 session pooler, `CTC_DATABASE_URL` in `.env` |
-| DB driver | `psycopg[binary,pool]` async: `AsyncConnectionPool` (min 1, max 5 per worker); shared mode uses the transaction pooler (`:6543`) with `prepare_threshold=None` |
+| DB driver | `psycopg[binary,pool]` async: `AsyncConnectionPool` (min 1, max 5 per worker), `prepare_threshold=None`; session pooler in both modes (each connection sets `search_path`, `hnsw.ef_search`, `statement_timeout`, which the transaction pooler would drop) |
 | Cache | Redis 8 (`redis:8.2`, Query Engine built in) on `127.0.0.1:18303`, `--maxmemory 256mb --maxmemory-policy allkeys-lru --save "" --appendonly no`; client `redis[hiredis]` (`redis.asyncio`); `CTC_REDIS_URL` in `.env` |
-| Daemon | Python 3.12, FastAPI + `uvicorn[standard]` (uvloop, httptools), `orjson` responses, official `mcp` SDK (FastMCP); local: Unix socket `~/.claudethecaller/ctc.sock` + `127.0.0.1:18310`; shared: `:18310` only, N workers |
+| Daemon | Python 3.12, FastAPI + `uvicorn[standard]` (uvloop, httptools), `orjson` responses, official `mcp` SDK 2.x (`MCPServer`, formerly FastMCP); local: Unix socket `~/.claudethecaller/ctc.sock` + `127.0.0.1:18310`; shared: `:18310` only, N workers |
 | HTTP clients | one `httpx.AsyncClient` per model server for the daemon's life (keep-alive), 2 s timeout |
 | Hook | `curl` one-liner, fail-open |
 | Benchmark + training | `ranx`, `datasets`, scikit-learn |
@@ -69,7 +69,8 @@ claudethecaller/
 │   │   ├── store.py           # Postgres CRUD, vector + keyword queries
 │   │   └── cache.py           # L1 (in-process LRU) + L2 (Redis): keys, semantic cache, write stream, invalidation
 │   ├── retrieval/
-│   │   └── hybrid.py          # dense + FTS → RRF → filters → rerank → abstain
+│   │   ├── hybrid.py          # dense + FTS → RRF → filters → rerank → abstain
+│   │   └── gate.py            # calibrated abstain gate (features + joblib model from K2)
 │   ├── reranking/
 │   │   └── reranker.py        # TEI reranker client                         (done)
 │   ├── decision/
@@ -83,10 +84,14 @@ claudethecaller/
 │   │   ├── enrich.py          # enrichment + dedup
 │   │   └── extract.py         # memory extraction
 │   └── server/
-│       ├── app.py             # FastAPI app, socket + :18310, lifespan
-│       ├── hooks.py           # /v1/hook/*, follow tracking, stream writer
-│       ├── mcp.py             # FastMCP find_capabilities
-│       └── api.py             # /api/* for the dashboard
+│       ├── state.py           # State: store, cache, model clients, llm; one per worker
+│       ├── app.py             # FastAPI app, socket + :18310, lifespan, shared-mode auth
+│       ├── hooks.py           # /v1/hook/*, /v1/route, /v1/search, follow tracking
+│       ├── writer.py          # Redis stream → Postgres batch writer (direct write when Redis is down)
+│       ├── jobs.py            # job table + Redis job stream + the one-at-a-time LLM worker
+│       ├── mcp.py             # MCPServer find_capabilities
+│       ├── api.py             # /api/*: projects, overview, decisions, sessions, index, jobs, keys
+│       └── library.py         # /api/*: capabilities CRUD, overrides, dedup, memories CRUD
 ├── evaluation/
 │   ├── loaders.py             # SkillRet, MetaTool
 │   ├── label.py               # transcript labeler
@@ -165,14 +170,14 @@ Four tracks. H = owner step. Commit after each step.
   - On startup `FT.CREATE ctc_sem …` (ignore "Index already exists").
   - `__main__` self-check (`python -m ctc.storage.cache`): asserts set/get round trip, semantic hit for a vector at cosine 0.99, miss for a different `libv`, and that with a bad URL every call returns `None`/no-op without raising.
 
-- [ ] **B5 — daemon** (`src/ctc/server/`: `app.py`, `hooks.py`, `mcp.py`, `api.py`; endpoints in API design)
+- [ ] **B5 — daemon** (`src/ctc/server/`: `state.py`, `app.py`, `hooks.py`, `writer.py`, `jobs.py`, `mcp.py`, `api.py`, `library.py`; endpoints in API design, background work in AI integration flow)
   - Local mode: one FastAPI app served twice from one event loop: `asyncio.gather(uvicorn.Server(Config(app, uds=sock)).serve(), uvicorn.Server(Config(app, port=18310)).serve())`. Shared mode: `uvicorn ctc.server.app:app --port 18310 --workers N` (no socket).
   - Lifespan builds one `Ctx` per worker: async `Store` pool, `Cache`, long-lived `httpx.AsyncClient`s; starts the stream writer task and the invalidation subscriber; runs `mcp.session_manager.run()`.
   - `POST /v1/hook/prompt`: `ref = sha256(session_id + prompt)[:8]`; cache chain (Cache design: prefetch → semantic → embed cache → `search`); store the bundle under `bundle:{ref}`; `enqueue("decision", …)`; return text `[claudethecaller] Suggested: <invokes> — call find_capabilities(ref="<ref>") for the plan`, or empty when abstained. Any exception → empty 200.
   - `POST /v1/hook/tool`, `POST /v1/hook/stop`: `enqueue("event", …)`; follow tracking (B6). Return 204 immediately.
   - Stream writer: `XREADGROUP` group `writers`, consumer = hostname:pid, up to 100 entries or 1 s, one `executemany` per kind, then `XACK`; on start `XAUTOCLAIM` entries idle > 30 s (a crashed worker's). Redis down → `enqueue` writes straight to the DB as a FastAPI background task.
   - Shared mode auth middleware: `Authorization: Bearer ctc_…` → `sha256` → `key:{hash}` in cache (TTL 300 s) else `ctc.api_keys`; sets `request.state.user_id`; rate limit `INCR rl:{user}:{epoch_min}` + `EXPIRE 60`, over `rate_limit_per_min` → 429 (hooks: empty 200 instead). Local mode: `user_id = "local"`, no auth (socket file mode 0600, port bound to 127.0.0.1).
-  - `/mcp`: `FastMCP("claudethecaller")` with tool `find_capabilities(task, blocker=None, ref=None)`, mounted via `streamable_http_app()`.
+  - `/mcp`: `MCPServer("claudethecaller")` (mcp 2.x) with tool `find_capabilities(task, blocker=None, ref=None)`, mounted via `streamable_http_app()`; `session_manager.run()` inside the lifespan.
   - `/api/*`: dashboard endpoints from API design; each is one SQL query; writes call `cache.invalidate`.
   - Static `dashboard/dist` mounted at `/` once it exists.
 
@@ -361,6 +366,32 @@ All JSON uses `orjson`. Errors: `{"error": {"code": "not_found", "message": "…
 - Not in the dashboard yet, so not in the API until both sides land together: `cost_by_tier` (needs A2).
 
 
+## AI integration flow (used by B5, B6, A1–A3, K2)
+
+**Rule:** no LLM call on the per-prompt path. Prompts get embedding + search + rerank + a scikit-learn model at most; every LLM call is a background job.
+
+**Per prompt** (`/v1/hook/prompt`, budget 120 ms):
+1. Claude Code's `UserPromptSubmit` hook `curl`s the raw hook JSON to the daemon socket.
+2. Cache chain (Cache design) → embed (TEI, `emb:` cache) → blend with session + project vectors (B7) + recalled memories (B8, weight 0.1).
+3. `search` (B4): dense + keyword candidates → RRF → filters → rerank.
+4. **Abstain gate** (`retrieval/gate.py`): features per query = top rerank, top dense cosine, top RRF, gap top1−top2 (rerank and dense), number of keyword hits, prompt length in tokens; `LogisticRegression` trained by K2 on dev rows (own transcripts: gold empty = negative; MetaTool reliability rows = negative; SkillRet and own rows with gold = positive), saved with its threshold to `models/abstain.joblib` (gitignored). Suggest only when `p ≥ gate_min_p`; `p` is the bundle's `confidence`. No model file → abstain off (current behaviour).
+5. `decide` (B6) → Bundle (steps, agent, difficulty + model tier from A2's model when present) → `bundle:{ref}` + `sem:{ref}` + `enqueue("decision")`.
+6. Claude sees one suggestion line; `find_capabilities(ref)` over MCP returns the full plan from cache.
+7. `PostToolUse` (`Skill` / `Agent` / `Task`) → follow tracking → `decisions.followed`.
+
+**Background jobs** (`server/jobs.py`): a `ctc.jobs` row is the truth; its id goes on the Redis stream `ctc:jobs` (Redis down → the worker polls `ctc.jobs where status = 'queued'`). One worker task per daemon (llama-server has one slot), each job: `status = running`, handler with a `jobs.timeout_s` timeout (index jobs exempt), 1 retry, `failed` after `dead_after` attempts with the error text. Handlers `async (state, payload, progress) -> result dict`:
+
+| Job `kind` | Trigger | Handler | LLM |
+|---|---|---|---|
+| `index` | `POST /api/index`, `ctc index`, daemon start | scan → `upsert` → `build_index` → `publish_inval("lib")` | no |
+| `enrich` | after an `index` job that added/changed caps; `POST /api/capabilities/{id}/enrich` | A1 `enrich` for caps whose `enricher_version` is stale → dedup → `build_index` | yes |
+| `extract` | `/v1/hook/stop` (session ended) | A3 `extract_candidates(session)` → `write_memory` each | yes |
+| `backfill` | `POST /api/memories/backfill` | `extract` over the last N sessions with transcripts | yes |
+| `import_memory` | `POST /api/memories/import`, daemon start | B8 `import_claude_memory` | no |
+
+- LLM provider: `cfg()["llm"]` (local llama-server; `anthropic:<model>` when `ANTHROPIC_API_KEY` is set). Every prompt goes through `Llm.json`, which redacts secrets; transcripts never leave the machine with the local default.
+- `extract` reads `transcript_path` from the Stop hook (local mode only; shared mode skips it: the daemon can't read client files).
+
 ## Memory design (used by B7, B8, A3)
 
 - **Layers:** project profile (slow), session state (last 20 turns; topic shift at cosine < 0.55), decision history (±0.05 per follow/ignore, clamp ±0.2), long-term memory.
@@ -371,7 +402,7 @@ All JSON uses `orjson`. Errors: `{"error": {"code": "not_found", "message": "…
 
 | Dataset | Use |
 |---|---|
-| SkillRet (`ThakiCloud/SKILLRET`, 16k skills, 4,392 test queries) | main retrieval benchmark; train split for A4 |
+| SkillRet (`ThakiCloud/SKILLRET`, 6,006 test skills + 10,123 train, 4,392 test queries, 7,187 qrels pairs) | main retrieval benchmark; train split for A4 |
 | MetaTool reliability subset | "should any tool fire?" → abstain calibration |
 | Own transcripts | in-domain set, LLM-judged, 200 hand-checked |
 | SRA-Bench, ToolRet | after M1 |

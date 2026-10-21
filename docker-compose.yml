@@ -1,3 +1,5 @@
+name: claudethecaller
+
 services:
   tei-embedder:
     image: ghcr.io/huggingface/text-embeddings-inference:89-1.8.2
@@ -56,3 +58,8 @@ services:
             - driver: nvidia
               device_ids: ["0"]
               capabilities: [gpu]
+
+  redis:
+    image: redis:8.2
+    ports: ["127.0.0.1:18303:6379"]
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru", "--save", "", "--appendonly", "no"]
