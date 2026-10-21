@@ -77,7 +77,8 @@ def router_version(st: State) -> str:
         gate = os.stat(st.cfg["gate_path"]).st_mtime_ns
     except OSError:
         gate = 0
-    knobs = [st.cfg[k] for k in ("k", "depth", "rerank_top", "rrf_k", "abstain_below", "agent_min_rerank")]
+    knobs = [st.cfg.get(k) for k in ("k", "depth", "rerank_top", "rrf_k", "abstain_below", "agent_min_rerank", "ranking",
+                                     "memory_in_query", "memory_weight", "blend")]
     return hashlib.md5(f"{st.store.library_version}|{gate}|{knobs}".encode()).hexdigest()
 
 
@@ -103,7 +104,8 @@ async def route(st: State, prompt: str, session_id: str, cwd: str, user_id: str 
         b = Bundle(**{**hit, "ref": ref, "intent": q})
     else:
         texts = [m["text"] for m in await _recall(st, qv, pid, user_id)]
-        mv = np.mean([v / max(np.linalg.norm(v), 1e-9) for v in await _embed(st, texts)], axis=0) if texts else None
+        mv = np.mean([v / max(np.linalg.norm(v), 1e-9) for v in await _embed(st, texts)], axis=0) \
+            if texts and c.get("memory_in_query", True) else None
         ctx = st.ctx(cwd, user_id)
         res = await search(q, ctx, qv=blend(qv, sv, pv, mv), k=k or c["k"], depth=c["depth"], rerank_top=c["rerank_top"],
                            abstain_below=c["abstain_below"])
@@ -200,12 +202,28 @@ def _usage(path: Path) -> tuple[str, int]:
     return model, sum(per_msg.values())
 
 
+EXTRACT_EVERY_S = 1800
+INFLIGHT_SQL = ("select 1 from jobs where user_id = %s and kind = 'extract' and status in ('queued', 'running')"
+                " and payload->>'session_id' = %s limit 1")
+
+
+async def _want_extract(st: State, sid: str, end: bool, user_id: str) -> bool:
+    """Stop fires after every turn: extract at most once per EXTRACT_EVERY_S per session (Redis SET NX; Redis down =
+    skip, fail-open). SessionEnd always extracts. Both skip while an extract job for the session is queued or running.
+    ponytail: a session killed without SessionEnd loses its last < 30 min to extraction until `backfill` re-reads it."""
+    if not end and not await st.cache._safe(st.cache.r.set(f"ctc:extract:{sid}", 1, nx=True, ex=EXTRACT_EVERY_S)):
+        return False
+    return await st.store.fetchval(INFLIGHT_SQL, (user_id, sid)) is None
+
+
 async def _stop(st: State, body: dict, user_id: str) -> None:
+    """Stop and SessionEnd (same endpoint; Claude Code names the event in hook_event_name)."""
     try:
         sid, cwd, tp = (str(body.get(f) or "") for f in ("session_id", "cwd", "transcript_path"))
         if not sid:
             return
-        await write(st, "event", {"session_id": sid, "type": "stop", "payload": {}})
+        end = body.get("hook_event_name") == "SessionEnd"
+        await write(st, "event", {"session_id": sid, "type": "session_end" if end else "stop", "payload": {}})
         model, tokens, path = "", 0, None
         if st.cfg["mode"] == "local" and tp:  # shared mode: the transcript is on the client's disk
             p = Path(tp).expanduser().resolve()
@@ -214,9 +232,7 @@ async def _stop(st: State, body: dict, user_id: str) -> None:
                 path = p
                 model, tokens = await asyncio.to_thread(_usage, p)
         await write(st, "session_end", {"id": sid, "model": model, "tokens": tokens})
-        if path:
-            # ponytail: Claude Code fires Stop after every turn, so this re-extracts the session each turn (write_memory
-            # NOOPs repeats); skip when an extract job for the session is still queued if the LLM slot backs up
+        if path and await _want_extract(st, sid, end, user_id):
             await submit(st, "extract", {"session_id": sid, "transcript_path": str(path),
                                          "project_id": project_id(cwd) if cwd else None, "user_id": user_id}, user_id)
     except Exception:
