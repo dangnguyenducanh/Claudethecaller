@@ -140,9 +140,13 @@ function Editor({ project, projects, theme }: ViewProps & { theme: string }) {
         <div className="wf-top card pad">
           <input className="inline-input" placeholder="workflow-name" aria-label="Workflow name" value={name} disabled={!!loaded} onChange={e => setName(e.target.value)} />
           <input className="inline-input wf-desc" placeholder="Description: when should Claude use this workflow?" aria-label="Description" value={desc} disabled={locked} onChange={e => setDesc(e.target.value)} />
-          <select className="inline-input" aria-label="Scope" value={scope} disabled={!!loaded} onChange={e => setScope(e.target.value as 'user' | 'project')}>
-            <option value="user">user (~/.claude)</option><option value="project">project{project ? `: ${project}` : ' (select one)'}</option>
-          </select>
+          {loaded
+            ? <span className="tag" title="Where this workflow lives">{loaded.namespace}</span>
+            : (
+              <select className="inline-input" aria-label="Scope" value={scope} onChange={e => setScope(e.target.value as 'user' | 'project')}>
+                <option value="user">user (~/.claude)</option><option value="project">project{project ? `: ${project}` : ' (select one)'}</option>
+              </select>
+            )}
           <button className="btn" style={{ borderColor: 'var(--accent)' }} onClick={save} disabled={locked}>{loaded ? 'Save' : 'Create'}</button>
           <button className="btn" onClick={reset}>New</button>
           <button className="btn" onClick={async () => setExisting(existing ? null : await api.capabilities({ project, kind: 'workflow' }))}>Open existing</button>

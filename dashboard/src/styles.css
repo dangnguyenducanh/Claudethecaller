@@ -193,3 +193,4 @@ code.code { display: block; padding: 12px; background: var(--card-2); border: 1p
 .react-flow__background pattern circle, .react-flow__background pattern path { stroke: var(--line); fill: var(--line); }
 @media (max-width: 900px) { .wf-body { grid-template-columns: 1fr; height: auto; } .wf-palette { max-height: 220px; } .wf-canvas { height: 480px; } }
 :root[data-theme="light"] .pill.mock { color: #b45309; border-color: #e8c487; }
+.btn:disabled { opacity: .45; cursor: not-allowed; } .btn:disabled:hover { border-color: var(--line); }
