@@ -44,6 +44,7 @@ Durable facts and decisions. Append new decisions under **Decisions** with the d
 - Ports: TEI embedder `:18300`, TEI reranker `:18301`, llama-server `:18302`, daemon `:18310` + `~/.claudethecaller/ctc.sock`. Local state: `~/.claudethecaller/ctc.sock` only; everything else is in Supabase.
 - `ANTHROPIC_API_KEY` is not set on this host.
 - Python 3.12 via `uv`; dashboard via `pnpm`; model servers via `docker compose`.
+- CLI: `uv run ctc status | caps | index | search "<prompt>" | explain "<prompt>"`. Dashboard dev server: `pnpm -C dashboard dev` → `:18320` (mock data until the daemon serves `/api`).
 
 **Stack** (full table in `PLAN.md`): Python core (FastAPI daemon, typer CLI, ranx/scikit-learn eval), TypeScript only for the dashboard, native engines for speed (TEI Rust, llama.cpp); one database: Supabase Postgres + pgvector. Hook = `curl` one-liner, fail-open.
 
@@ -58,3 +59,4 @@ Durable facts and decisions. Append new decisions under **Decisions** with the d
 - 2026-10-21 — `ThakiCloud/SKILLRET-Embedding-0.6B`'s cached `config.json`/`sentence_bert_config.json` needed hand patches for TEI 1.8.2's Candle Qwen3 backend to load: `pad_token_id` null→`151643`, a top-level `rope_theta` mirroring `rope_parameters.rope_theta`, and `max_seq_length: 32768` added to `sentence_bert_config.json` (that file otherwise has no `max_seq_length` field at all). Files are root-owned under `~/.cache/huggingface/.../blobs/`; edit via a throwaway `docker run --rm -v ~/.cache/huggingface:/data alpine sh -c "sed -i ... /data/..."` since the host user can't write them directly. Reapply if that model's cache is ever cleared/re-downloaded.
 - 2026-10-21 — R3 done: `uv run python -m ctc.models` embeds/reranks/`Llm.json`'s against the live `docker compose` stack; our 3 containers use ~6.4 GB GPU (embedder 1538 MiB + reranker 1506 MiB + llama-server 3486 MiB), under the 7 GB budget.
 - 2026-10-21 — One database: Supabase (Postgres + pgvector + full-text search) replaces SQLite and USearch; owner's choice. Cold routing target relaxed to p95 ≤ 150 ms for the ~65 ms network hop; C++/USearch hot path dropped.
+- 2026-10-21 — `bge-reranker-v2-m3` scores are not usable as absolute relevance for tool matching (0.001–0.04 for correct matches); search orders by RRF(dense rank, rerank rank), keywords only add candidates, abstain is off until K2 calibrates it.
