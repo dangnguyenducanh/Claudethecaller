@@ -411,7 +411,7 @@ def daemon_status(as_json: bool = typer.Option(False, "--json", help="Print JSON
 # ---- install ------------------------------------------------------------------
 
 # event -> (route, curl max seconds); ours are recognised by the socket name in the command
-HOOKS = {"UserPromptSubmit": ("prompt", "0.12"), "PostToolUse": ("tool", "0.05"), "Stop": ("stop", "0.05"),
+HOOKS = {"UserPromptSubmit": ("prompt", "0.15"), "PostToolUse": ("tool", "0.05"), "Stop": ("stop", "0.05"),
          "SessionEnd": ("stop", "0.05")}  # same endpoint: it reads hook_event_name
 MCP = "claudethecaller"
 

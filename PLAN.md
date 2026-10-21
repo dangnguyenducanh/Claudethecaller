@@ -227,7 +227,7 @@ Four tracks. H = owner step. Commit after each step.
 - [x] **F1 — CLI** (`src/ctc/cli.py`, typer): `ctc index` (= indexer main), `ctc search "<q>" [--json]`, `ctc explain "<q>"` (table: every hit and dropped item with dense rank, sparse rank, rrf, rerank, reason), `ctc status` (capability and vector counts from the DB, TEI `/health`, library version). `httpx.ConnectError` → `embedder unreachable at <url>` on stderr, exit 1; client timeouts 2 s. Built early: `status | caps | index | search | explain` run today on a local in-memory store (`src/ctc/storage/local.py`, vectors cached in `~/.claudethecaller/embeddings.npz`) until B3 swaps in Supabase in `open_ctx()`.
 - [x] **F2 — daemon + install**: `ctc daemon start` = `subprocess.Popen([python, "-m", "ctc.server.app"], start_new_session=True)`, pid in `~/.claudethecaller/daemon.pid`; `stop` kills it. `ctc install` backs up `~/.claude/settings.json`, then adds (only if missing):
   ```
-  UserPromptSubmit: LC_ALL=C curl -sf -m 0.12 --unix-socket $HOME/.claudethecaller/ctc.sock --data-binary @- http://ctc/v1/hook/prompt || true
+  UserPromptSubmit: LC_ALL=C curl -sf -m 0.15 --unix-socket $HOME/.claudethecaller/ctc.sock --data-binary @- http://ctc/v1/hook/prompt || true
   PostToolUse, Stop: same with /v1/hook/tool and /v1/hook/stop, -m 0.05
   ```
   and runs `claude mcp add --scope user --transport http claudethecaller http://127.0.0.1:18310/mcp` if `claude mcp get claudethecaller` fails.

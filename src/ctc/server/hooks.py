@@ -33,7 +33,7 @@ from ctc.server.writer import write
 
 log = logging.getLogger(__name__)
 router = APIRouter()
-PROMPT_BUDGET_S = 0.12
+PROMPT_BUDGET_S = 0.14  # PLAN Constraints: the hook adds <= 150 ms; curl -m 0.15 leaves 10 ms for the socket + curl
 MAX_Q = 2000  # ponytail: routing reads the first 2000 chars of a prompt (pasted logs); ref still hashes all of it
 _bg: set[asyncio.Task] = set()  # prompt work that outlived its budget, finishing its cache + row writes
 
@@ -103,12 +103,15 @@ async def route(st: State, prompt: str, session_id: str, cwd: str, user_id: str 
     if hit := await cache.semantic_get(qs, libv, pid, user_id):
         b = Bundle(**{**hit, "ref": ref, "intent": q})
     else:
-        texts = [m["text"] for m in await _recall(st, qv, pid, user_id)]
-        mv = np.mean([v / max(np.linalg.norm(v), 1e-9) for v in await _embed(st, texts)], axis=0) \
-            if texts and c.get("memory_in_query", True) else None
         ctx = st.ctx(cwd, user_id)
-        res = await search(q, ctx, qv=blend(qv, sv, pv, mv), k=k or c["k"], depth=c["depth"], rerank_top=c["rerank_top"],
-                           abstain_below=c["abstain_below"])
+        kw = {"k": k or c["k"], "depth": c["depth"], "rerank_top": c["rerank_top"], "abstain_below": c["abstain_below"]}
+        if c.get("memory_in_query", True):
+            texts = [m["text"] for m in await _recall(st, qv, pid, user_id)]
+            mv = np.mean([v / max(np.linalg.norm(v), 1e-9) for v in await _embed(st, texts)], axis=0) if texts else None
+            res = await search(q, ctx, qv=blend(qv, sv, pv, mv), **kw)
+        else:  # memories only ride along in the bundle: recall in parallel with the search (one Supabase hop saved)
+            mems, res = await asyncio.gather(_recall(st, qv, pid, user_id), search(q, ctx, qv=blend(qv, sv, pv), **kw))
+            texts = [m["text"] for m in mems]
         b = await decide(q, res, ctx, qv=qv, memories=texts)
         b.ref = ref
         await cache.semantic_put(ref, qs, libv, pid, b.model_dump(), user_id)

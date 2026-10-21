@@ -80,8 +80,8 @@ def main() -> None:
         hits = "n/a" if sem is None else f"{sem}/{len(ms)} ({sem / len(ms):.0%})"
         lines.append(f"| {t} | {len(ms)} | {p50:.1f} | {p95:.1f} | {max(ms):.1f} | ≤ {TARGET_P95[t]} ({ok}) | {hits} |")
     lines += ["", ("- cold: search + rerank + decide on every prompt, except near-duplicates the semantic cache "
-              "catches within the pass (its hit count). DB here is the local dev Postgres, not Supabase (~65 ms per round trip)."),
-              ("- L2 = semantic-cache path: embedding from cache, then session/project/memory blend (one recall() SQL query) "
+              f"catches within the pass (its hit count). DB: {'Supabase (session pooler)' if 'supabase' in (cfg()['database_url'] or '') else 'local dev Postgres'}; dense search runs in RAM, keywords + overrides + recall are one parallel DB hop."),
+              ("- L2 = semantic-cache path: embedding from cache, then session/project blend "
               "and one FT.SEARCH; no search, no rerank."),
               "- L1 = bundle:{ref} in daemon RAM (the same prompt in the same session again).",
               "- The K2 benchmark shared the TEI/reranker servers during this run, so cold numbers carry that noise."]

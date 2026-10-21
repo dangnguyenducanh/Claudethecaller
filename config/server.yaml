@@ -15,4 +15,4 @@ cache:
 writer: {batch: 100, interval_s: 1.0, reclaim_idle_ms: 30000}
 jobs: {timeout_s: 60, retries: 1, dead_after: 3}
 rate_limit_per_min: 600
-db_pool: {min: 1, max: 5}
+db_pool: {min: 3, max: 5}   # a route runs up to 3 queries at once; a cold Supabase connection costs ~450 ms (TLS + pooler)

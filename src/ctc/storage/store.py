@@ -26,24 +26,15 @@ from ctc.storage.local import _STOP
 SCHEMA_SQL = Path(__file__).with_name("schema.sql")
 _CATALOG_COLS = "id, kind, name, namespace, invoke, description, summary, triggers, cluster_id, path, hash"
 
-# One round trip, two channels. Dense: best cosine per cap over the n nearest vectors (HNSW), top k.
-# Sparse: websearch_to_tsquery over 'tok1 or tok2 …' (never raises on odd input, unlike to_tsquery: unaccent
+# Two channels. Dense: best cosine per cap over the n nearest vectors, computed in RAM (refresh_catalog loads them).
+# Sparse, the only round trip: websearch_to_tsquery over 'tok1 or tok2 …' (never raises on odd input, unlike to_tsquery: unaccent
 # turns 'ʼ' into a quote; and 'ʺ' into '"', which websearch reads as a phrase, hence the replace);
-# null query (no tokens) -> unaccent_i is strict -> no sparse rows.
-CANDIDATES_SQL = """
-with dense as (
-  select cap_id, max(1 - d) as score
-  from (select cap_id, embedding <=> %(qv)s as d from cap_vectors order by d limit %(n)s) v
-  group by cap_id order by score desc limit %(k)s
-), sparse as (
-  select c.id as cap_id, ts_rank_cd(c.tsv, q) as score
-  from capabilities c, websearch_to_tsquery('simple', replace(unaccent_i(%(q)s), '"', ' ')) q
-  where c.tsv @@ q order by score desc limit %(k)s
-)
-select 'd' as ch, cap_id, score from dense
-union all
-select 's', cap_id, score from sparse
-order by ch, score desc
+# no tokens -> no query at all.
+# Dense candidates come from the in-RAM vector matrix (refresh_catalog); only the keyword channel goes to Postgres.
+SPARSE_SQL = """
+select c.id as cap_id, ts_rank_cd(c.tsv, q) as score
+from capabilities c, websearch_to_tsquery('simple', replace(unaccent_i(%(q)s), '"', ' ')) q
+where c.tsv @@ q order by score desc limit %(k)s
 """
 
 UPSERT_SQL = """
@@ -148,7 +139,28 @@ class Store:
     async def refresh_catalog(self) -> None:
         rows = await self.fetch(f"select {_CATALOG_COLS} from capabilities")
         self.catalog = {r["id"]: r for r in rows}
+        # ponytail: every capability vector in RAM per worker (6.3k x 1024 floats = 26 MB) so a route makes no DB hop for
+        # dense search (Supabase is ~40 ms away; the hook budget is 120 ms). Brute force is exact; past ~100k vectors use
+        # a HNSW library or go back to the pgvector index.
+        await self._load_vectors()
         self.library_version = await self.compute_library_version()
+
+    async def _load_vectors(self) -> None:
+        """Binary transfer (4 KB/vector, not ~10 KB of text), keyset chunks so each statement stays under the 2 s timeout."""
+        ids, vecs, last = [], [], ("", "")
+        async with self.pool.connection() as conn, conn.cursor(binary=True) as cur:
+            while True:
+                await cur.execute("select cap_id, text_hash, embedding from cap_vectors where (cap_id, text_hash) > (%s, %s)"
+                                  " order by cap_id, text_hash limit 2000", last)
+                rows = await cur.fetchall()
+                if not rows:
+                    break
+                ids += [r["cap_id"] for r in rows]
+                vecs += [np.asarray(r["embedding"].to_numpy(), dtype=np.float32) for r in rows]  # binary loader -> pgvector Vector
+                last = (rows[-1]["cap_id"], rows[-1]["text_hash"])
+        self._vids = np.array(ids, dtype=object)
+        self._vecs = np.stack(vecs) if vecs else np.zeros((0, 1), np.float32)
+        self._vdirty = False
 
     def get(self, cap_id: str) -> dict:
         return self.catalog[cap_id]
@@ -176,8 +188,16 @@ class Store:
         # ponytail: first 32 distinct tokens; ts_rank_cd cost grows superlinearly with OR terms (100 -> ~0.3 s, a pasted
         # traceback -> seconds). A longer prompt's tail only reaches the dense channel.
         toks = list(dict.fromkeys(t for t in re.findall(r"\w+", query.lower()) if t not in _STOP))[:32]
-        rows = await self.fetch(CANDIDATES_SQL, {"qv": np.asarray(qv, dtype=np.float32), "n": k * 4, "k": k, "q": " or ".join(toks) or None})
-        return ([(r["cap_id"], float(r["score"])) for r in rows if r["ch"] == "d"], [(r["cap_id"], float(r["score"])) for r in rows if r["ch"] == "s"])
+        sparse = await self.fetch(SPARSE_SQL, {"q": " or ".join(toks), "k": k}) if toks else []
+        dense: dict[str, float] = {}
+        if self._vdirty:  # vectors written since the last load (build_index): reload once, here
+            await self._load_vectors()
+        if len(self._vids):
+            sims = self._vecs @ (np.asarray(qv, dtype=np.float32) / (np.linalg.norm(qv) or 1.0))  # stored L2-normalized
+            top = np.argpartition(-sims, min(k * 4, len(sims)) - 1)[: k * 4]
+            for i in top[np.argsort(-sims[top])]:  # best vector per capability, like the old SQL's max(1 - d)
+                dense.setdefault(self._vids[i], float(sims[i]))
+        return list(dense.items())[:k], [(r["cap_id"], float(r["score"])) for r in sparse]
 
     async def overrides(self, project_id: str, user_id: str = "local") -> dict[str, str]:
         rows = await self.fetch(
@@ -245,12 +265,14 @@ class Store:
             "insert into cap_vectors (cap_id, text_hash, model, text, embedding) values (%s, %s, %s, %s, %s) on conflict do nothing",
             [(c, h, m, t, unit(v)) for c, h, m, t, v in rows],
         )
+        self._vdirty = True
 
     async def delete_vectors(self, keys: list[tuple[str, str]]) -> None:
         await self.execute(
             "delete from cap_vectors where (cap_id, text_hash) in (select * from unnest(%s::text[], %s::text[]))",
             ([k[0] for k in keys], [k[1] for k in keys]),
         )
+        self._vdirty = True
 
     async def counts(self) -> dict:
         return await self.fetchrow("select (select count(*) from capabilities) as capabilities, (select count(*) from cap_vectors) as vectors")
@@ -328,6 +350,7 @@ if __name__ == "__main__":
                 n += 1
                 return await orig(self, *a, **kw)
 
+            await s.candidates(qv, "warm", k=5)  # loads the vectors written above (dirty flag) before counting
             psycopg.AsyncCursor.execute = counted
             dense, sparse = await s.candidates(qv, "how do I make a CAFE", k=5)
             psycopg.AsyncCursor.execute = orig
