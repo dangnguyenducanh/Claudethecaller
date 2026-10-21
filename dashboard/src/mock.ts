@@ -1,3 +1,4 @@
+import { ApiError } from './api'
 import type { Activity, Capability, Decision, Kind, Kpis, Memory, Override, Project, Session, StageRow, Step, Timeline } from './types'
 
 // Deterministic fake data with the exact shapes of the daemon's /api responses (types.ts).
@@ -237,5 +238,5 @@ export function handle(method: string, path: string, body: unknown): unknown {
     return memories.find(m => m.id === seg[1])
   }
   if (seg[0] === 'memories' && method === 'DELETE') { memories = memories.filter(m => m.id !== seg[1]); return { ok: true } }
-  throw new Error(`mock: no route for ${method} ${path}`)
+  throw new ApiError(404, 'not_found', `mock: no route for ${method} ${path}`)
 }

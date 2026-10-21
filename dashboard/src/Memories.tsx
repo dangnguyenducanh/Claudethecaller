@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api } from './api'
+import { api, errText } from './api'
 import type { ViewProps } from './App'
 import type { Memory } from './types'
 import { Header, Search, Segmented, fmtDay } from './ui'
@@ -12,18 +12,27 @@ export default function Memories({ project }: ViewProps) {
   const [kind, setKind] = useState<(typeof KINDS)[number]>('all')
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  const [errs, setErrs] = useState<Record<string, string>>({})
 
   useEffect(() => { api.memories(project, q).then(setMems) }, [project, q])
 
-  const update = async (m: Memory, patch: Partial<Pick<Memory, 'text' | 'pinned'>>) => {
+  const attempt = async (m: Memory, fn: () => Promise<void>) => {
+    try {
+      await fn()
+      setErrs(({ [m.id]: _, ...rest }) => rest)
+    } catch (e) {
+      setErrs(es => ({ ...es, [m.id]: errText(e) }))
+    }
+  }
+  const update = (m: Memory, patch: Partial<Pick<Memory, 'text' | 'pinned'>>) => attempt(m, async () => {
     const next = await api.updateMemory(m.id, patch)
     setMems(ms => ms.map(x => (x.id === m.id ? next : x)))
-  }
-  const remove = async (m: Memory) => {
+  })
+  const remove = (m: Memory) => attempt(m, async () => {
     if (!confirm('Delete this memory? It stops shaping routing right away.')) return
     await api.deleteMemory(m.id)
     setMems(ms => ms.filter(x => x.id !== m.id))
-  }
+  })
 
   const shown = mems.filter(m => kind === 'all' || m.kind === kind)
   return (
@@ -44,6 +53,7 @@ export default function Memories({ project }: ViewProps) {
               ? <textarea value={draft} onChange={e => setDraft(e.target.value)} autoFocus />
               : <div>{m.text}</div>}
             {m.supersedes && <div className="subline">replaces {m.supersedes}</div>}
+            {errs[m.id] && <div className="err">{errs[m.id]}</div>}
             <div className="mem-foot">
               <span className="mono">conf {m.confidence.toFixed(2)}</span>
               <span className="mono">used {m.use_count}×</span>

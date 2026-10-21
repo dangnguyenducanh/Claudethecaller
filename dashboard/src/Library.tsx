@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api } from './api'
+import { api, errText } from './api'
 import type { ViewProps } from './App'
 import type { Capability, Kind, Override } from './types'
 import { Header, Search, Segmented, fmtInt } from './ui'
@@ -11,13 +11,19 @@ export default function Library({ project }: ViewProps) {
   const [caps, setCaps] = useState<Capability[]>([])
   const [q, setQ] = useState('')
   const [kind, setKind] = useState<(typeof KINDS)[number]>('all')
+  const [errs, setErrs] = useState<Record<string, string>>({})
 
   useEffect(() => { api.capabilities(project, q).then(setCaps) }, [project, q])
 
   async function setOverride(c: Capability, action: Override) {
     const next = c.override === action ? null : action
-    const updated = await api.setOverride(c.id, project, next)
-    setCaps(cs => cs.map(x => (x.id === c.id ? { ...x, ...updated } : x)))
+    try {
+      const updated = await api.setOverride(c.id, project, next)
+      setCaps(cs => cs.map(x => (x.id === c.id ? { ...x, ...updated } : x)))
+      setErrs(({ [c.id]: _, ...rest }) => rest)
+    } catch (e) {
+      setErrs(es => ({ ...es, [c.id]: errText(e, { ns: c.namespace }) }))
+    }
   }
 
   const shown = caps.filter(c => kind === 'all' || c.kind === (kind as Kind))
@@ -46,6 +52,7 @@ export default function Library({ project }: ViewProps) {
                     <button key={a} className={'btn' + (a !== 'pin' ? ' danger' : '')} style={{ marginRight: 4, ...(c.override === a ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }}
                       onClick={() => setOverride(c, a)}>{a}</button>
                   ))}
+                  {errs[c.id] && <div className="err">{errs[c.id]}</div>}
                 </td>
               </tr>
             ))}

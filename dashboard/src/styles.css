@@ -129,3 +129,5 @@ td.num, th.num { text-align: right; font-family: var(--mono); white-space: nowra
 }
 .grid2 > .card > .tablewrap { max-height: 640px; }
 .mem-foot .btn { color: var(--text); }
+.err { color: var(--bad); font-size: 11px; }
+.okmsg { color: var(--good); font-size: 11px; }
