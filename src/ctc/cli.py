@@ -3,8 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+import difflib
 import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import time
 from collections import Counter
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -19,7 +28,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from ctc.config import cfg
+from ctc.config import ROOT, cfg
 from ctc.embedding.embedder import Embedder
 from ctc.ingestion import indexer
 from ctc.ingestion.scanner import default_roots, scan_library
@@ -298,6 +307,211 @@ def explain(query: str = typer.Argument(..., help="A coding prompt."),
     for stage, v in res.ms.items():
         timing.add_row(f"[{MUTED}]{stage}[/]", bar(v / total, {"embed": BLUE, "candidates": GREEN, "filter": ORANGE, "rerank": PURPLE}.get(stage, PINK), 40), f"{v:.1f}")
     out.print(card(timing, "Timing", f"{total:.0f} ms total"))
+
+
+# ---- daemon -------------------------------------------------------------------
+
+daemon = typer.Typer(no_args_is_help=True, help="Start, stop or check the local daemon.")
+app.add_typer(daemon, name="daemon")
+
+
+def _pid_file() -> Path:
+    return Path(cfg()["socket"]).parent / "daemon.pid"
+
+
+def _alive() -> int | None:
+    """Pid from daemon.pid if that process exists and is our daemon (a stale pid may be reused)."""
+    try:
+        pid = int(_pid_file().read_text())
+        os.kill(pid, 0)
+        return pid if b"ctc.server.app" in Path(f"/proc/{pid}/cmdline").read_bytes() else None
+    except (OSError, ValueError):
+        return None
+
+
+def _health() -> dict | None:
+    try:
+        with httpx.Client(transport=httpx.HTTPTransport(uds=cfg()["socket"]), timeout=2) as h:
+            return h.get("http://ctc/v1/health").raise_for_status().json()
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+def _health_line(h: dict) -> str:
+    return "  ".join(f"{dot(GREEN if v == 'ok' else BAD)} [{MUTED}]{k}[/]" for k, v in h.items() if k not in ("library_version", "mode"))
+
+
+@daemon.command("start")
+def daemon_start() -> None:
+    """Start the daemon in the background (socket + 127.0.0.1:port), log to ~/.claudethecaller/daemon.log."""
+    c, pid_file = cfg(), _pid_file()
+    if h := _health():
+        out.print(f"{dot(GREEN)} daemon already running  [{FAINT}]pid {_alive() or '?'} · {c['socket']}[/]\n{_health_line(h)}")
+        return
+    if pid := _alive():
+        err.print(f"[{BAD}]●[/] pid {pid} is alive but not answering on {c['socket']}  [{FAINT}]run[/] [bold]ctc daemon stop[/]")
+        raise typer.Exit(1)
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    log = pid_file.with_name("daemon.log")
+    with log.open("ab") as f:
+        p = subprocess.Popen([sys.executable, "-m", "ctc.server.app"], cwd=ROOT, start_new_session=True,
+                             stdin=subprocess.DEVNULL, stdout=f, stderr=f)
+    pid_file.write_text(f"{p.pid}\n")
+    with out.status(f"[{MUTED}]waiting for the daemon…[/]", spinner_style=BLUE):
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline and p.poll() is None and not (h := _health()):
+            time.sleep(0.25)
+    if not h:
+        if p.poll() is not None:
+            pid_file.unlink(missing_ok=True)
+        err.print(f"[{BAD}]●[/] daemon {'exited' if p.poll() is not None else 'not answering after 20 s'}  [{FAINT}]see {log}[/]")
+        raise typer.Exit(1)
+    out.print(f"{dot(GREEN)} daemon started  [{FAINT}]pid {p.pid} · {c['socket']} · http://127.0.0.1:{c['port']}[/]\n{_health_line(h)}")
+
+
+@daemon.command("stop")
+def daemon_stop() -> None:
+    """SIGTERM the daemon from daemon.pid and wait for it to exit."""
+    pid_file = _pid_file()
+    if not (pid := _alive()):
+        pid_file.unlink(missing_ok=True)
+        out.print(f"{dot(FAINT)} daemon not running" + (f"  [{FAINT}]but something answers on {cfg()['socket']} (started by hand?)[/]" if _health() else ""))
+        return
+    os.kill(pid, signal.SIGTERM)
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and _alive():
+        time.sleep(0.1)
+    if _alive():
+        err.print(f"[{BAD}]●[/] pid {pid} still running after 15 s  [{FAINT}]kill -9 {pid}[/]")
+        raise typer.Exit(1)
+    pid_file.unlink(missing_ok=True)
+    out.print(f"{dot(FAINT)} daemon stopped  [{FAINT}]pid {pid}[/]")
+
+
+@daemon.command("status")
+def daemon_status(as_json: bool = typer.Option(False, "--json", help="Print JSON.")) -> None:
+    """Pid and /v1/health of the running daemon."""
+    c, pid, h = cfg(), _alive(), _health()
+    if as_json:
+        print(json.dumps({"pid": pid, "health": h}, indent=2))
+        return
+    t = grid(("", "l:12"), ("", "l:*3"))
+    t.show_header = False
+    t.add_row("pid", f"{pid}" if pid else f"[{FAINT}]none[/]")
+    t.add_row("socket", f"[{FAINT}]{c['socket']}[/]  " + (f"{dot(GREEN)} up" if h else f"{dot(BAD)} down"))
+    t.add_row("http", f"[{FAINT}]http://127.0.0.1:{c['port']} · dashboard + /mcp[/]")
+    if h:
+        t.add_row("health", _health_line(h))
+        t.add_row("library", f"[{FAINT}]{h.get('library_version', '')[:8]} · {h.get('mode')} mode[/]")
+    out.print(card(t, "Daemon", tag("running", GREEN) if h else tag("stopped", FAINT)))
+    if not h:
+        raise typer.Exit(1)
+
+
+# ---- install ------------------------------------------------------------------
+
+# event -> (route, curl max seconds); ours are recognised by the socket name in the command
+HOOKS = {"UserPromptSubmit": ("prompt", "0.12"), "PostToolUse": ("tool", "0.05"), "Stop": ("stop", "0.05")}
+MCP = "claudethecaller"
+
+
+def _hook_cmd(route: str, t: str) -> str:
+    return f"LC_ALL=C curl -sf -m {t} --unix-socket $HOME/.claudethecaller/ctc.sock --data-binary @- http://ctc/v1/hook/{route} || true"
+
+
+def _ours(h: dict) -> bool:
+    return "ctc.sock" in str(h.get("command", ""))
+
+
+def _settings() -> tuple[Path, dict]:
+    p = Path(cfg()["claude_home"]) / "settings.json"
+    return p, json.loads(p.read_text()) if p.exists() else {}
+
+
+def _save(p: Path, old: dict, new: dict, dry_run: bool) -> bool:
+    """Print the diff; unless dry_run, back up the old file and replace it atomically. False when nothing changes."""
+    a, b = (json.dumps(d, indent=2, ensure_ascii=False).splitlines() for d in (old, new))
+    diff = list(difflib.unified_diff(a, b, str(p), str(p), lineterm="", n=2))
+    for line in diff[2:]:
+        out.print(Text(line, style=GREEN if line[0] == "+" else BAD if line[0] == "-" else FAINT), soft_wrap=True)
+    if not diff or dry_run:
+        return bool(diff)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if p.exists():
+        backup = p.with_name(f"{p.name}.ctc-backup-{datetime.now(UTC):%Y%m%dT%H%M%S.%fZ}")
+        shutil.copy2(p, backup)
+        out.print(f"{dot(FAINT)} backup  [{FAINT}]{backup}[/]")
+    tmp = p.with_name(p.name + ".ctc-tmp")
+    tmp.write_text(json.dumps(new, indent=2, ensure_ascii=False) + "\n")
+    if p.exists():
+        shutil.copymode(p, tmp)
+    os.replace(tmp, p)
+    return True
+
+
+def _real_home() -> bool:
+    return Path(cfg()["claude_home"]) == Path("~/.claude").expanduser()
+
+
+@app.command()
+def install(dry_run: bool = typer.Option(False, "--dry-run", help="Print the settings.json diff, write nothing."),
+            yes: bool = typer.Option(False, "--yes", "-y", help="Also run `claude mcp add` (real ~/.claude only).")) -> None:
+    """Add the claudethecaller hooks to Claude Code's settings.json (only missing ones) and register the MCP server."""
+    c = cfg()
+    p, old = _settings()
+    new = copy.deepcopy(old)
+    hooks = new.setdefault("hooks", {})
+    added = []
+    for event, (route, t) in HOOKS.items():
+        groups = hooks.get(event, [])
+        if not any(_ours(h) for g in groups for h in g.get("hooks", [])):
+            hooks[event] = [*groups, {**({"matcher": "*"} if event == "PostToolUse" else {}),
+                                      "hooks": [{"type": "command", "command": _hook_cmd(route, t)}]}]
+            added.append(event)
+    out.print(header("Install", "Claude Code hooks", f"{p}" + ("  · dry run" if dry_run else "")))
+    if added:
+        _save(p, old, new, dry_run)
+        out.print(f"{dot(GREEN)} {'would add' if dry_run else 'added'} {', '.join(added)}")
+    else:
+        out.print(f"{dot(GREEN)} hooks already installed  [{FAINT}]nothing to change[/]")
+
+    add = ["claude", "mcp", "add", "--scope", "user", "--transport", "http", MCP, f"http://127.0.0.1:{c['port']}/mcp"]
+    if not (_real_home() and yes and not dry_run and shutil.which("claude")):
+        why = ("dry run" if dry_run else "not the real ~/.claude" if not _real_home()
+               else "claude not on PATH" if not shutil.which("claude") else "pass --yes to run it")
+        out.print(f"{dot(FAINT)} MCP  [{FAINT}]{why}; run:[/] [bold]{' '.join(add)}[/]")
+    elif subprocess.run(["claude", "mcp", "get", MCP], check=False, capture_output=True).returncode == 0:
+        out.print(f"{dot(GREEN)} MCP server {MCP} already registered")
+    else:
+        r = subprocess.run(add, check=False, capture_output=True, text=True)
+        out.print(f"{dot(GREEN)} MCP server {MCP} added" if r.returncode == 0 else f"{dot(BAD)} claude mcp add failed: {r.stderr.strip()}")
+        if r.returncode:
+            raise typer.Exit(1)
+
+
+@app.command()
+def uninstall(dry_run: bool = typer.Option(False, "--dry-run", help="Print the settings.json diff, write nothing.")) -> None:
+    """Remove exactly the claudethecaller hooks from settings.json."""
+    p, old = _settings()
+    new = copy.deepcopy(old)
+    hooks = new.get("hooks", {})
+    for event in list(hooks):
+        kept = []
+        for g in hooks[event]:
+            hs = [h for h in g.get("hooks", []) if not _ours(h)]
+            if hs or not g.get("hooks"):  # drop only the groups we emptied
+                kept.append({**g, "hooks": hs} if "hooks" in g else g)
+        if kept != hooks[event]:
+            if kept:
+                hooks[event] = kept
+            else:
+                del hooks[event]
+    if "hooks" in new and not hooks and old.get("hooks") != hooks:
+        del new["hooks"]
+    out.print(header("Uninstall", "Claude Code hooks", f"{p}" + ("  · dry run" if dry_run else "")))
+    changed = _save(p, old, new, dry_run)
+    out.print(f"{dot(GREEN)} {('would remove' if dry_run else 'removed') + ' our hooks' if changed else 'no claudethecaller hooks found'}")
+    out.print(f"{dot(FAINT)} MCP  [{FAINT}]run:[/] [bold]claude mcp remove --scope user {MCP}[/]")
 
 
 if __name__ == "__main__":
