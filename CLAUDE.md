@@ -40,11 +40,12 @@ Durable facts and decisions. Append new decisions under **Decisions** with the d
 
 **Environment**
 - Shared GPU host: RTX 5880 Ada 49 GB, ~21 GB held by other services. Our budget is ≤ 7 GB total. Never stop or touch other containers (`crm_*`, `mass_chatbot_*`, `khoahoctutien-*`, `de-tai-hoc-vien-*`).
-- Ports: TEI embedder `:18300`, TEI reranker `:18301`, llama-server `:18302`, daemon `:18310` + `~/.claudethecaller/ctc.sock`. State lives in `~/.claudethecaller/` (`state.db`, `*.usearch`).
+- Database: Supabase project `claudethecaller` (`iecwnlyqjbigeiobmurn`, ap-southeast-1, free tier), tables in schema `ctc`. This host has no IPv6, so connect through the IPv4 session pooler; the connection string (with password) lives only in `.env` as `CTC_DATABASE_URL`. Round trip ~65 ms.
+- Ports: TEI embedder `:18300`, TEI reranker `:18301`, llama-server `:18302`, daemon `:18310` + `~/.claudethecaller/ctc.sock`. Local state: `~/.claudethecaller/ctc.sock` only; everything else is in Supabase.
 - `ANTHROPIC_API_KEY` is not set on this host.
 - Python 3.12 via `uv`; dashboard via `pnpm`; model servers via `docker compose`.
 
-**Stack** (full table in `PLAN.md`): Python core (FastAPI daemon, typer CLI, ranx/scikit-learn eval), TypeScript only for the dashboard, native engines for speed (USearch C++, SQLite FTS5, TEI Rust, llama.cpp). Hook = `curl` one-liner, fail-open.
+**Stack** (full table in `PLAN.md`): Python core (FastAPI daemon, typer CLI, ranx/scikit-learn eval), TypeScript only for the dashboard, native engines for speed (TEI Rust, llama.cpp); one database: Supabase Postgres + pgvector. Hook = `curl` one-liner, fail-open.
 
 **Decisions**
 - 2026-10-20 — Built from scratch: ratel, MCPGateway, metamcp and similar are references only, never dependencies (portfolio project).
@@ -56,3 +57,4 @@ Durable facts and decisions. Append new decisions under **Decisions** with the d
 - 2026-10-21 — TEI image pinned to `ghcr.io/huggingface/text-embeddings-inference:89-1.8.2`: the newer `89-1.9.0` hits `CUDA_ERROR_SYSTEM_DRIVER_MISMATCH` on this host's driver (580.178.04) and silently falls back to CPU. 1.8.2 loads on GPU fine (`Starting Flash... on Cuda(...)` in logs). Don't bump the TEI tag without checking the container logs show CUDA, not CPU.
 - 2026-10-21 — `ThakiCloud/SKILLRET-Embedding-0.6B`'s cached `config.json`/`sentence_bert_config.json` needed hand patches for TEI 1.8.2's Candle Qwen3 backend to load: `pad_token_id` null→`151643`, a top-level `rope_theta` mirroring `rope_parameters.rope_theta`, and `max_seq_length: 32768` added to `sentence_bert_config.json` (that file otherwise has no `max_seq_length` field at all). Files are root-owned under `~/.cache/huggingface/.../blobs/`; edit via a throwaway `docker run --rm -v ~/.cache/huggingface:/data alpine sh -c "sed -i ... /data/..."` since the host user can't write them directly. Reapply if that model's cache is ever cleared/re-downloaded.
 - 2026-10-21 — R3 done: `uv run python -m ctc.models` embeds/reranks/`Llm.json`'s against the live `docker compose` stack; our 3 containers use ~6.4 GB GPU (embedder 1538 MiB + reranker 1506 MiB + llama-server 3486 MiB), under the 7 GB budget.
+- 2026-10-21 — One database: Supabase (Postgres + pgvector + full-text search) replaces SQLite and USearch; owner's choice. Cold routing target relaxed to p95 ≤ 150 ms for the ~65 ms network hop; C++/USearch hot path dropped.

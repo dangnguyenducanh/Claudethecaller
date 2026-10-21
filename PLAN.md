@@ -2,7 +2,7 @@
 
 **Goal:** a local router that predicts what a coding agent needs from project memory and the live session, and hands Claude an explainable bundle (workflow → ordered skills → subagents → difficulty and model tier) through one MCP tool plus a prompt hook, managed by a CLI and a dashboard.
 
-**Architecture:** one warm Python daemon does routing, deciding and memory. Native engines do the heavy work: USearch (vectors), SQLite FTS5 (keywords), TEI (embed/rerank), llama.cpp (local LLM). The hook is a `curl` one-liner; MCP and the dashboard are served by the same daemon. LLMs never run on the per-prompt path.
+**Architecture:** one warm Python daemon does routing, deciding and memory. One database: Supabase Postgres (tables, pgvector for vectors, full-text search for keywords). Local engines: TEI (embed/rerank), llama.cpp (local LLM). The hook is a `curl` one-liner; MCP and the dashboard are served by the same daemon. LLMs never run on the per-prompt path.
 
 ---
 
@@ -21,22 +21,20 @@
 |---|---|
 | Embed + rerank | TEI (Rust, Docker), FP16 |
 | Local LLM (offline only) | llama.cpp `llama-server`, `Qwen2.5-3B-Instruct` Q4_K_M, `-c 32768 -np 1`; Claude API only when `ANTHROPIC_API_KEY` is set |
-| Vectors | USearch (C++, Python binding), memory-mapped |
-| Keywords + all state | SQLite FTS5 + WAL |
+| Database (tables, vectors, keywords) | Supabase project `claudethecaller` (`iecwnlyqjbigeiobmurn`, ap-southeast-1), Postgres 17 + pgvector (HNSW, cosine) + full-text search with `unaccent`; tables in schema `ctc` (not exposed by the Data API); Python `psycopg` + `pgvector`, via the IPv4 pooler (`CTC_DATABASE_URL` in `.env`) |
 | Daemon (route, decide, memory, API, MCP) | Python 3.12, FastAPI + uvicorn, official `mcp` SDK; Unix socket + `127.0.0.1:18310` |
 | Hook | `curl` one-liner, fail-open |
 | Eval + training | `ranx`, `datasets`, scikit-learn |
 | CLI | `typer` |
 | Dashboard + workflow editor | TypeScript: React + Vite + Recharts + React Flow, Playwright e2e |
 | Packaging | `uv`, `pnpm`, `docker-compose.yml` |
-| Optional hot path | C++ via nanobind, only if profiled |
 
 ## Constraints
 
 - Local models ≤ 3B; our GPU use ≤ 7 GB (shared host). GPU use = `nvidia-smi --query-compute-apps` summed over this project's `docker compose top` PIDs, never whole-GPU.
 - Hook adds ≤ 150 ms and fails open (daemon down → empty output, exit 0).
-- Routing p95 ≤ 10 ms on prefetch hit, ≤ 100 ms cold.
-- Local by default; `Llm.json` strips secrets from every LLM call.
+- Routing p95 ≤ 10 ms on prefetch hit (served from daemon RAM), ≤ 150 ms cold (one SQL round trip to Singapore is ~65 ms).
+- Models run locally. Capabilities, decisions and memories live in Supabase; eval data in `data/` stays local; `Llm.json` strips secrets from every LLM call; the DB password lives only in `.env` (gitignored).
 - IDs are namespaced: `plugin:name`, `user:name`, `project@<sha8>:name`. Claude-facing names use `invoke` (`name` for user/project, else the id).
 - Any prompt language.
 
@@ -56,9 +54,9 @@
 ## Memory design (M3)
 
 - **Layers:** project profile (CLAUDE.md, manifests → project vector), session state (last 20 turns, running vector; topic shift at cosine < 0.55), decision history (±0.05 per follow/ignore, clamp ±0.2), long-term memory.
-- **Long-term memory:** `memories(id, scope, project, kind, text, hash, source, supersedes, confidence, pinned, created_at, updated_at, last_used_at, use_count, deleted_at)` + `memory.usearch`. Write: ≥ 0.95 NOOP (bump `use_count`), 0.85–0.95 UPDATE, contradiction SUPERSEDE (old soft-deleted), else ADD. Read: top 5 for global + current project, score = similarity × recency (half-life 30 days, pinned exempt) × (1 + log(1 + use_count)); weight 0.1 on the query vector. Claude's own memory files are imported read-only.
+- **Long-term memory:** `ctc.memories(id, scope, project, kind, text, hash, source, supersedes, confidence, pinned, created_at, updated_at, last_used_at, use_count, deleted_at, embedding vector)`. Write: ≥ 0.95 NOOP (bump `use_count`), 0.85–0.95 UPDATE, contradiction SUPERSEDE (old soft-deleted), else ADD. Read: top 5 for global + current project, score = similarity × recency (half-life 30 days, pinned exempt) × (1 + log(1 + use_count)); weight 0.1 on the query vector. Claude's own memory files are imported read-only.
 - **Query vector:** normalize(0.6·prompt + 0.25·session + 0.15·project).
-- **Storage:** SQLite `~/.claudethecaller/state.db`; `skills.usearch` memory-mapped, rebuilt to tmp then `os.replace`; the daemon is the only writer of `memory.usearch`.
+- **Storage:** Supabase tables in schema `ctc`; memory vectors in a pgvector column with an HNSW index.
 
 ## Files
 
@@ -66,8 +64,9 @@
 pyproject.toml  docker-compose.yml
 ctc/capability.py  scan skills/agents/commands/workflows      (done)
 ctc/models.py      Embedder, Reranker, Llm clients             (done)
-ctc/store.py       SQLite CRUD + FTS5
-ctc/indexer.py     USearch build
+ctc/schema.sql     tables, pgvector + FTS indexes (schema `ctc`, idempotent)
+ctc/store.py       Postgres CRUD, vector + keyword queries
+ctc/indexer.py     embed capabilities into the DB
 ctc/retrieve.py    hybrid search
 ctc/cli.py         `ctc`
 ctc/daemon.py  ctc/decide.py  ctc/memory.py  ctc/ltm.py  ctc/enrich.py
@@ -78,7 +77,7 @@ tests/test_*.py
 
 ## Tests
 
-**Logic tests** (`uv run pytest`, fakes only, no network or GPU):
+**Logic tests** (`uv run pytest`; fake embedder/reranker/LLM, no GPU; DB tests run in a throwaway schema `ctc_test_<pid>` in the Supabase project, dropped after):
 
 | File | Checks |
 |---|---|
@@ -98,7 +97,7 @@ tests/test_*.py
 | NDCG@10 | hybrid + rerank ≥ dense-only | SkillRet test | m1 |
 | False-trigger | ≤ 10% | MetaTool test half + test rows with no gold | m1 |
 | GPU use | ≤ 7 GB | during eval | m1 |
-| Route p95 cold | ≤ 100 ms | replay through daemon | m2 |
+| Route p95 cold | ≤ 150 ms | replay through daemon | m2 |
 | Route p95 prefetch hit | ≤ 10 ms | replay | m3 |
 | Memory lift | Recall@5 with memories ≥ without | own test rows | m3 |
 | Extraction precision | ≥ 0.80 | 50 hand-checked memories | m3 |
@@ -109,23 +108,24 @@ tests/test_*.py
 
 Four tracks. Each step ends when its **Done when** exits 0; commit, go on. H = owner step.
 
-**Order:** B3 → B4 → K1 → F1 → H1 → K2 → H2 → B5 → B6 → F2 → K3 → H3 → A1, A2 → B7 → B8 → A3 → H4 → K4 → F3 → F4 → H6 → F5 → B9.
+**Order:** B3 → B4 → K1 → F1 → H1 → K2 → H2 → B5 → B6 → F2 → K3 → H3 → A1, A2 → B7 → B8 → A3 → H4 → K4 → F3 → F4 → H6 → F5.
 
 **Branches:** `m1-retrieval-core` (B1–B4, K1–K2, F1), `m2-agent-integration` (B5–B6, F2, K3), `m3-memory` (B7–B8, A3, K4), `m4-dashboard` (F3–F4), `ai-<name>` per AI step; PR into `main` at the end of each.
 
-**Rules:** stay in the step's scope; never weaken a test; never edit `eval/gates.toml` or `data/own-eval*` after K1; no secrets, `data/`, weights or `*.usearch` in commits; never write the real `~/.claude/` (use a temp `HOME`); if only the owner can unblock it, say so and stop.
+**Rules:** stay in the step's scope; never weaken a test; never edit `eval/gates.toml` or `data/own-eval*` after K1; no secrets, `.env`, `data/` or weights in commits; never write the real `~/.claude/` (use a temp `HOME`); if only the owner can unblock it, say so and stop.
 
 ### Backend — API + databases
 
 - [x] **B1** — uv package + capability scanner (`ctc/capability.py`, 632 capabilities found).
 - [x] **B2** — model servers (`docker-compose.yml`) + clients (`ctc/models.py`), ~6.4 GB GPU.
-- [ ] **B3** — SQLite store (CRUD for capabilities, overrides, sessions, events, decisions, memories) + USearch index on name + description (+ enrichment once A1 exists). **Done when:** `uv run pytest tests/test_index.py` exits 0 AND `uv run python -m ctc.indexer` prints the real index's vector count
+- [x] **B2b** — Supabase project `claudethecaller` created (free tier); pgvector 0.8.2, unaccent, pg_trgm available.
+- [ ] **H0** — owner puts the pooler connection string (Supabase dashboard → Connect → Session pooler) in `.env` as `CTC_DATABASE_URL`
+- [ ] **B3** — `ctc/schema.sql` + Postgres store (CRUD for capabilities, overrides, sessions, events, decisions, memories) + vectors (pgvector HNSW) on name + description (+ enrichment once A1 exists); swap `usearch` for `psycopg[binary]` + `pgvector` in `pyproject.toml`. **Done when:** `uv run pytest tests/test_index.py` exits 0 AND `uv run python -m ctc.indexer` prints the vector count stored in Supabase
 - [ ] **B4** — hybrid search: dense 50 ∥ FTS 50 → RRF → drop blocked → collapse clusters → rerank top 20 → pins first → abstain below τ (0.3 until K2) → top 5. **Done when:** `uv run pytest tests/test_retrieve.py` exits 0 AND `uv run python -m ctc.retrieve "fix a flaky test"` has `superpowers:systematic-debugging`, `superpowers:test-driven-development` or `ecc:tdd-workflow` in its top 5
 - [ ] **B5** — daemon: `/hook/{event}`, `/route`, `/bundle/{ref}`, `/mcp`, `/api/*` CRUD. **Done when:** hook rows of `tests/test_route.py` pass AND `echo '{"prompt":"fix a flaky test","session_id":"t"}' | curl -s --unix-socket ~/.claudethecaller/ctc.sock --data-binary @- http://ctc/hook/prompt` prints `[claudethecaller] Suggested:`
 - [ ] **B6** — bundle + `find_capabilities` MCP tool + follow tracking. **Done when:** `uv run pytest tests/test_route.py` exits 0
 - [ ] **B7** — project profile, session state, prefetch, semantic cache. **Done when:** topic-shift test passes AND replay shows prefetch-hit p95 ≤ 10 ms
 - [ ] **B8** — long-term memory store (write/recall/import). **Done when:** `uv run pytest tests/test_ltm.py` exits 0
-- [ ] **B9** — C++ hot path, only if `py-spy` shows Python fusion > 20% of route p95. **Done when:** same rankings, lower p95
 
 ### Benchmark — measure the search
 
@@ -169,21 +169,19 @@ class Store:
     def set_cluster(self, cap_id: str, cluster_id: str) -> None
     def embedding(self, text_hash: str, model: str) -> np.ndarray | None
     def put_embedding(self, text_hash: str, model: str, v: np.ndarray) -> None
-    def fts(self, query: str, k: int) -> list[tuple[str, float]]     # tokens quoted, OR-joined; blank → []
+    def fts(self, query: str, k: int) -> list[tuple[str, float]]     # websearch_to_tsquery over unaccent text; blank → []
+    def dense(self, qv: np.ndarray, k: int) -> list[tuple[str, float]]   # pgvector cosine, max score per capability
     def library_version(self) -> str
     def set_override(self, project: str, cap_id: str, action: Override | None) -> None
     def overrides(self, project: str) -> dict[str, Override]
-async def build_index(store: Store, embedder: Embedder, dir: Path) -> int   # vector count
-class DenseIndex:
-    def __init__(self, dir: Path): ...
-    def search(self, q: np.ndarray, k: int) -> list[tuple[str, float]]    # max score per capability
+async def build_index(store: Store, embedder: Embedder) -> int   # vectors written
 ```
-FTS5 tokenizer `unicode61 remove_diacritics 2`. One vector per capability text (name + description + summary) plus one per trigger; embed only changed text hashes.
+`Store(os.environ["CTC_DATABASE_URL"])`, schema `ctc`, `schema.sql` applied on connect (idempotent). Keyword search: a generated `tsvector` over `unaccent(name || description || summary || triggers)` with a GIN index. One vector per capability text (name + description + summary) plus one per trigger; embed only changed text hashes. Dense + FTS run in one SQL round trip.
 
 ### Search (B4)
 ```python
 @dataclass
-class Ctx: store: Store; index: DenseIndex; embedder: Embedder; reranker: Reranker; project: str
+class Ctx: store: Store; embedder: Embedder; reranker: Reranker; project: str
 @dataclass
 class Hit: cap_id: str; score: float; stages: dict[str, float]
 @dataclass
