@@ -1,6 +1,6 @@
 # claudethecaller
 
-Local skill/workflow router for coding agents. **`PLAN.md` is the single source of truth** (product spec, stack, gates, build order, tasks). Read the sections a task names. Benchmark labels in `data/own-eval*` are written by step K1 and hand-checked by the owner (H1).
+Local skill/workflow router for coding agents. **`PLAN.md` is the single source of truth** (product spec, stack, build order, how to code each step). Read the sections a task names. Benchmark labels in `data/own-eval*` are written by step K1 and hand-checked by the owner (H1).
 
 ## How work happens here
 
