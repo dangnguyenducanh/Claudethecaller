@@ -165,3 +165,4 @@ pre.code { margin: 0; padding: 12px; background: var(--card-2); border: 1px soli
 .keypanel .card { width: min(380px, 100%); }
 .keypanel input { background: var(--card-2); border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 10px; outline: 0; }
 .keypanel input:focus { border-color: var(--accent); }
+.health { display: flex; align-items: center; gap: 5px; margin-bottom: 3px; } .health .faint { margin-left: 4px; font-size: 10px; }

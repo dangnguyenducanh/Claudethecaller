@@ -4,7 +4,7 @@ import Library from './Library'
 import Memories from './Memories'
 import Overview from './Overview'
 import Sessions from './Sessions'
-import type { Project, ProjectDetail, Range } from './types'
+import type { Health, Project, ProjectDetail, Range } from './types'
 import { colorOf, fmtTime } from './ui'
 
 const VIEWS = ['overview', 'library', 'sessions', 'memories'] as const
@@ -16,6 +16,18 @@ const ICONS: Record<View, string> = {
   library: 'M4 4h6v16H4zM14 4h6v16h-6z',
   sessions: 'M4 6h16M4 12h16M4 18h10',
   memories: 'M12 3a6 6 0 0 0-6 6c0 2.4 1.3 3.7 2.5 4.8.8.7 1.5 1.6 1.5 2.7V18h4v-1.5c0-1.1.7-2 1.5-2.7C16.7 12.7 18 11.4 18 9a6 6 0 0 0-6-6zM10 21h4',
+}
+
+const SERVICES = ['db', 'redis', 'embedder', 'reranker', 'llm'] as const
+function HealthDots({ h }: { h: Health }) {
+  return (
+    <div className="health" aria-label="Service health">
+      {SERVICES.map(n => (
+        <span key={n} className="dot" title={`${n}: ${h[n]}`} style={{ background: h[n] === 'ok' ? 'var(--good)' : 'var(--bad)' }} />
+      ))}
+      <span className="faint">{h.mode}</span>
+    </div>
+  )
 }
 
 function readTheme() {
@@ -33,6 +45,13 @@ export default function App() {
   const [rev, setRev] = useState(0) // bumps after a project rename/delete so every view refetches
 
   const [needKey, setNeedKey] = useState(false)
+  const [health, setHealth] = useState<Health | null>(null)
+  useEffect(() => { // once at start, then every 30 s; failures keep the last value (the dots only change when the daemon says so)
+    const load = () => api.health().then(setHealth).catch(() => {})
+    load()
+    const t = window.setInterval(load, 30_000)
+    return () => clearInterval(t)
+  }, [])
   useEffect(() => { setAuthListener(() => setNeedKey(true)) }, [])
 
   const loadProjects = () => api.projects().then(setProjects).catch(() => {}) // a 401 is handled by the key panel
@@ -94,7 +113,10 @@ export default function App() {
           ))}
         </div>
         <div className="side-foot">
-          <div>Local board<br />{new Date().toISOString().slice(0, 10)}</div>
+          <div>
+            {health ? <HealthDots h={health} /> : <span>Local board</span>}
+            <div>{health ? `lib ${health.library_version.slice(0, 8)}` : new Date().toISOString().slice(0, 10)}</div>
+          </div>
           <button className="iconbtn" aria-label="Toggle theme" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               {theme === 'dark'
