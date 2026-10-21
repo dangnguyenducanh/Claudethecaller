@@ -132,7 +132,7 @@ Four tracks. H = owner step. Commit after each step.
 
 - [ ] **H0** — owner puts the session-pooler connection string (Supabase dashboard → Connect → Session pooler) in `.env` as `CTC_DATABASE_URL`.
 
-- [ ] **B3 — schema, store, indexer**
+- [x] **B3 — schema, store, indexer**
   - `pyproject.toml`: drop `usearch`; add `psycopg[binary,pool]`, `pgvector`, `python-dotenv`. `[project.scripts] ctc = "ctc.cli:app"`. Create `config/models.yaml`, `config/retrieval.yaml` and `src/ctc/config.py` (`yaml.safe_load` + `python-dotenv`, env vars override).
   - `src/ctc/storage/schema.sql` (idempotent, applied by `Store.__init__`):
     - `create extension if not exists vector with schema extensions; create extension if not exists unaccent with schema extensions; create schema if not exists ctc;`
@@ -151,6 +151,7 @@ Four tracks. H = owner step. Commit after each step.
     - `candidates(qv, query, k=50) -> (dense, sparse)`: one round trip, two CTEs. Dense: `select cap_id, max(1 - (embedding <=> %s)) from (select … order by embedding <=> %s limit k*4) group by cap_id order by 2 desc limit k`. Sparse: tokens = `re.findall(r"\w+", query)` joined with ` | `, `to_tsquery('simple', ctc.unaccent_i(%s))`, ranked by `ts_rank_cd`; blank query → no sparse rows.
     - `overrides(project)`, `set_override(project, cap_id, action)`, `set_enrichment(cap_id, e, version)`, `set_cluster(cap_id, cluster_id)`, `library_version()` (`md5(string_agg(id || hash, ',' order by id))`), `get(cap_id)`.
   - `src/ctc/ingestion/indexer.py` — `async build_index(store, embedder) -> int`: per capability the texts are `"{name}: {description}"` (+ summary) and each trigger; `text_hash = sha256(model + text)`; read existing `(cap_id, text_hash)` pairs, embed only the missing ones in batches of 32 with `embedder.embed(texts, "doc")`, `executemany` insert, delete pairs no longer current. `__main__` (`python -m ctc.ingestion.indexer`): load config, `scan_library(default_roots(Path.cwd()))` → `upsert` → `build_index` → print vector count.
+  - **Done 2026-10-21**: on the local dev Postgres (`ctc-dev-pg`) until H0: schema `ctc` holds 635 capabilities / 6,344 vectors; `uv run python -m ctc.storage.store` self-check passes.
 
 - [x] **B4 — hybrid search** (`src/ctc/retrieval/hybrid.py`)
   - `Ctx(store, embedder, reranker, project)`; `Hit(cap_id, score, stages: dict)`; `SearchResult(hits, abstained, ms, dropped)`.
@@ -163,14 +164,15 @@ Four tracks. H = owner step. Commit after each step.
     5. Best rerank < `abstain_below` → `abstained=True, hits=[]`; else top k. `ms` holds `time.perf_counter` timings per stage.
   - `__main__`: `python -m ctc.retrieval.hybrid "<query>"` prints the top 5 as JSON.
 
-- [ ] **B4b — cache** (`src/ctc/storage/cache.py`, see Cache design)
+- [x] **B4b — cache** (`src/ctc/storage/cache.py`, see Cache design)
   - `docker-compose.yml`: add `redis` (`redis:8.2`, `127.0.0.1:18303:6379`, flags from the Stack table; no GPU). Check `redis-cli -p 18303 MODULE LIST` shows `search`; if the pinned image lacks it, pin the newest 8.x that has it and record the tag in CLAUDE.md.
   - `pyproject.toml`: add `redis[hiredis]`. `config/server.yaml`: mode, ports, every TTL and threshold in Cache design.
   - `class Cache(url, cfg)`: `redis.asyncio.from_url(url, socket_timeout=0.02, socket_connect_timeout=0.05)`; L1 = `OrderedDict` LRU (256 per namespace). Methods: `get_json/set_json(key, value, ttl)` (L1 then L2), `get_vec/set_vec` (float32 bytes), `semantic_get(qv, libv, project) / semantic_put(qv, libv, project, bundle)`, `enqueue(kind, row)` (stream), `invalidate(scope)` (publish). Any Redis error → log once per 10 s, mark down for 10 s, behave as L1-only (`# ponytail:` crude breaker, a real one if flapping shows up).
   - On startup `FT.CREATE ctc_sem …` (ignore "Index already exists").
   - `__main__` self-check (`python -m ctc.storage.cache`): asserts set/get round trip, semantic hit for a vector at cosine 0.99, miss for a different `libv`, and that with a bad URL every call returns `None`/no-op without raising.
+  - **Done 2026-10-21**: Redis 8.2 with the search module; `uv run python -m ctc.storage.cache` self-check passes.
 
-- [ ] **B5 — daemon** (`src/ctc/server/`: `state.py`, `app.py`, `hooks.py`, `writer.py`, `jobs.py`, `mcp.py`, `api.py`, `library.py`; endpoints in API design, background work in AI integration flow)
+- [x] **B5 — daemon** (`src/ctc/server/`: `state.py`, `app.py`, `hooks.py`, `writer.py`, `jobs.py`, `mcp.py`, `api.py`, `library.py`; endpoints in API design, background work in AI integration flow)
   - Local mode: one FastAPI app served twice from one event loop: `asyncio.gather(uvicorn.Server(Config(app, uds=sock)).serve(), uvicorn.Server(Config(app, port=18310)).serve())`. Shared mode: `uvicorn ctc.server.app:app --port 18310 --workers N` (no socket).
   - Lifespan builds one `Ctx` per worker: async `Store` pool, `Cache`, long-lived `httpx.AsyncClient`s; starts the stream writer task and the invalidation subscriber; runs `mcp.session_manager.run()`.
   - `POST /v1/hook/prompt`: `ref = sha256(session_id + prompt)[:8]`; cache chain (Cache design: prefetch → semantic → embed cache → `search`); store the bundle under `bundle:{ref}`; `enqueue("decision", …)`; return text `[claudethecaller] Suggested: <invokes> — call find_capabilities(ref="<ref>") for the plan`, or empty when abstained. Any exception → empty 200.
@@ -180,35 +182,42 @@ Four tracks. H = owner step. Commit after each step.
   - `/mcp`: `MCPServer("claudethecaller")` (mcp 2.x) with tool `find_capabilities(task, blocker=None, ref=None)`, mounted via `streamable_http_app()`; `session_manager.run()` inside the lifespan.
   - `/api/*`: dashboard endpoints from API design; each is one SQL query; writes call `cache.invalidate`.
   - Static `dashboard/dist` mounted at `/` once it exists.
+  - **Done 2026-10-21**: `uv run ctc daemon status`: socket + `:18310` up, health db / redis / embedder / reranker / llm green, serves `/v1`, `/api`, `/mcp` and `dashboard/dist`.
 
-- [ ] **B6 — bundle** (`src/ctc/decision/bundle.py`)
+- [x] **B6 — bundle** (`src/ctc/decision/bundle.py`)
   - `Step(order, cap_id, invoke, kind, agent, reason)`, `Bundle(intent, confidence, difficulty, model_tier, workflow, steps, memories, abstained)`.
   - `async decide(hits, ctx)`: if the top hit is a workflow, load its YAML and emit its declared steps in order; otherwise emit the skill/command hits in rerank order. Attach the best `agent` hit to the steps only if its rerank ≥ 0.5. `reason` = the rerank score plus the matched trigger or description snippet. `confidence` = top rerank. `difficulty = "standard"`, `model_tier = "sonnet"` until A2 exists.
   - `find_capabilities`: return `bundle:{ref}` (L1/L2) when `ref` hits and there is no `blocker`; otherwise `decide(search(task + blocker))`. Append "Use these in order; say why if you skip one."
   - Follow tracking in `/hook/tool`: `tool_name == "Skill"` → `tool_input["skill"]`; `Agent`/`Task` → `subagent_type`; if it equals a step's `invoke` or `agent` in `sess:{id}:last` → `enqueue("followed", {session_id, ref})` → the writer runs `update ctc.decisions set followed = true where session_id = %s and ref = %s`.
+  - **Done 2026-10-21**: `uv run python -m ctc.decision.bundle` self-check passes; difficulty / model tier come from A2's model.
 
-- [ ] **B7 — session memory + prefetch** (`src/ctc/memory/session.py`)
+- [x] **B7 — session memory + prefetch** (`src/ctc/memory/session.py`)
   - `ProjectProfile`: sha256 of CLAUDE.md + `.claude/` memory files + package manifests + `.git/HEAD`; project vector = embed of the first 2,000 chars, cached in `ctc.projects(project, profile_hash, embedding)`.
   - `SessionState` in Redis so any worker can serve the next turn: `sess:{id}:turns` (`LPUSH` float32 bytes + `LTRIM 0 19`, TTL 6 h); mean computed in numpy from the ≤ 20 vectors; cosine(turn, mean) < 0.55 → `DEL` (topic shift). Redis down → L1 `deque(maxlen=20)` per session.
   - Project vector cached as `proj:{project_hash}` (TTL 1 d) in front of `ctc.projects`.
   - Query vector = normalize(0.6·prompt + 0.25·session + 0.15·project) → passed to `search(qv=…)`; the semantic cache (B4b) keys on this blended vector.
+  - **Done 2026-10-21**: `uv run python -m ctc.memory.session` self-check passes.
 
-- [ ] **B8 — long-term memory store** (`src/ctc/memory/longterm.py`)
+- [x] **B8 — long-term memory store** (`src/ctc/memory/longterm.py`)
   - `Memory(id, scope, project, kind, text, confidence, pinned, source)`.
   - `async write_memory(m, ctx)`: embed; nearest live neighbour in scope (`order by embedding <=> %s limit 1`); ≥ 0.95 → NOOP (`use_count += 1`); `m.supersedes` set (by A3) → SUPERSEDE (old gets `deleted_at`); ≥ 0.85 → UPDATE (newer text, `confidence = min(1, max + 0.1)`); else ADD.
   - `recall(qv, ctx, k=5)`: one SQL computing `sim * (case when pinned then 1 else power(0.5, age_days / 30) end) * (1 + ln(1 + use_count))` over global + current-project rows, `deleted_at is null`.
   - `import_claude_memory(dirs)`: each `~/.claude/projects/*/memory/*.md` → one memory (`kind` from its frontmatter `type`, `source = {kind: "claude-memory", file}`), read-only.
+  - **Done 2026-10-21**: `uv run python -m ctc.memory.longterm` self-check passes; live: 16 imported Claude memories + 36 extracted session memories.
 
 ### Benchmark — measure the search
 
-- [ ] **K1 — datasets, labels, report**
+- [x] **K1 — datasets, labels, report**
   - `evaluation/loaders.py`: `load_dataset("ThakiCloud/SKILLRET", name, split="test")` for `skills`, `queries`, `qrels` → indexed into a separate schema `ctc_skillret` with the same `Store` + `build_index`; MetaTool reliability subset JSON from `github.com/HowieHwong/MetaTool`, cached in `data/raw/metatool/` (gold = none).
   - `evaluation/label.py`: user turns from `~/.claude/projects/**/*.jsonl` (skip `subagents/`, this repo's sessions, meta and tool-result rows, text starting with `<`); judge = `llm_from_env().json(...)` given the full catalog (`id: description[:100]`, ~16k tokens) → `{cap_ids: list[str], reason}`, ids not in the catalog dropped, empty = none. Split by `int(sha256(session_id), 16) % 2` (1 = test). Write `data/processed/own-eval.jsonl` and `data/processed/own-eval-review.csv` (200 test rows: `id,query,gold`).
   - `evaluation/retrieval_eval.py`: run `search()` per query in three modes (dense, hybrid, hybrid + rerank) → `ranx.Run`; `ranx.evaluate(qrels, run, ["recall@1", "recall@5", "recall@10", "ndcg@10", "mrr"])`; false-trigger rate = share of gold-none queries that did not abstain; p50/p95 per stage from `ms`. Write `data/reports/report-<date>.md` with each number next to its target (below). Baselines: SKILLRET-0.6B and bge-m3, dense-only.
+  - **Done 2026-10-21**: 300 own rows labelled by the Qwen-3B judge (noisy until H1), SkillRet test 4,392 queries in `ctc_skillret`; final `data/reports/report-2026-10-21.md` (enriched library, shipped ranking, gate off): SkillRet test NDCG@10 dense 0.787 vs hybrid + rerank 0.773 (R@5 0.802 / 0.792); own test R@5 0.067; false-trigger 100% (no abstain). bge-m3 baseline skipped (no GPU budget).
 - [ ] **H1** — owner hand-checks the 200 rows (`gold` column; `data/` stays local).
 - [ ] **K2 — tune**: sweep `abstain_below` (0.05–0.9), candidate depth (25/50/100) and `rerank_top` (10/20/40) on dev rows; keep the best Recall@5 with false-trigger ≤ 10%; write the winners into `config/retrieval.yaml`. If Recall@5 stays < 0.90, do A1 (then A4). Measured on day one: `bge-reranker-v2-m3` absolute scores carry no signal for tool matching (right and junk matches both 0.001–0.04) and dense cosine is higher for chit-chat ("thanks", 0.58) than for real matches, so neither works as an abstain threshold; search currently orders by RRF(dense rank, rerank rank) with abstain off. K2 picks the abstain rule (e.g. a small classifier on dense/rerank/keyword features, calibrated on MetaTool + own no-capability rows) and tries `Qwen3-Reranker-0.6B` (instruction-aware) against bge.
+  - **Partial 2026-10-21, blocked on H1**: false-trigger 100% (target ≤ 10%), so not done. **Gate rejected**. depth 50 / rerank_top 20 won on dev; the abstain classifier scored CV AUC 0.55 and is off (`models/abstain-2026-10-21-auc055.rejected.joblib`), so every prompt gets a suggestion; `ranking` knob tuned on dev to keyword 0.25 / rerank 1 (CLAUDE.md decisions); Qwen3-Reranker not tried (no GPU budget). Redo on H1 labels.
 - [ ] **H2** — owner reads the report; PR `m1-retrieval-core` → `main`.
-- [ ] **K3 — routing speed** (`evaluation/latency_eval.py`): replay dev prompts through `POST /v1/route` three times (cold: Redis flushed + L1 off; L2: L1 off; L1), `numpy.percentile` of wall time per tier + semantic cache hit rate → report.
+- [x] **K3 — routing speed** (`evaluation/latency_eval.py`): replay dev prompts through `POST /v1/route` three times (cold: Redis flushed + L1 off; L2: L1 off; L1), `numpy.percentile` of wall time per tier + semantic cache hit rate → report.
+  - **Done 2026-10-21**: 77 dev prompts through `/v1/route`: cold p95 105 ms, Redis (semantic) p95 6.9 ms, L1 p95 1.2 ms, all within target (dev DB, no Supabase hop yet); `data/reports/latency-2026-10-21.md`.
 - [ ] **K4 — memory + adoption**: Recall@5 with vs without `recall()` memories in the query vector; extraction precision from H4's file; follow rate = `avg(followed::int)` over `ctc.decisions` since H3.
 
 **Targets** (shown in the report): Recall@5 ≥ 0.90 (200 hand-checked rows) · hybrid + rerank NDCG@10 ≥ dense-only (SkillRet) · false-trigger ≤ 10% · GPU ≤ 7 GB · route p95 ≤ 150 ms cold, ≤ 15 ms Redis hit, ≤ 10 ms L1 hit · semantic cache hit rate reported · memory lift ≥ 0 · extraction precision ≥ 0.80.
@@ -216,12 +225,13 @@ Four tracks. H = owner step. Commit after each step.
 ### Frontend — CLI + dashboard
 
 - [x] **F1 — CLI** (`src/ctc/cli.py`, typer): `ctc index` (= indexer main), `ctc search "<q>" [--json]`, `ctc explain "<q>"` (table: every hit and dropped item with dense rank, sparse rank, rrf, rerank, reason), `ctc status` (capability and vector counts from the DB, TEI `/health`, library version). `httpx.ConnectError` → `embedder unreachable at <url>` on stderr, exit 1; client timeouts 2 s. Built early: `status | caps | index | search | explain` run today on a local in-memory store (`src/ctc/storage/local.py`, vectors cached in `~/.claudethecaller/embeddings.npz`) until B3 swaps in Supabase in `open_ctx()`.
-- [ ] **F2 — daemon + install**: `ctc daemon start` = `subprocess.Popen([python, "-m", "ctc.server.app"], start_new_session=True)`, pid in `~/.claudethecaller/daemon.pid`; `stop` kills it. `ctc install` backs up `~/.claude/settings.json`, then adds (only if missing):
+- [x] **F2 — daemon + install**: `ctc daemon start` = `subprocess.Popen([python, "-m", "ctc.server.app"], start_new_session=True)`, pid in `~/.claudethecaller/daemon.pid`; `stop` kills it. `ctc install` backs up `~/.claude/settings.json`, then adds (only if missing):
   ```
   UserPromptSubmit: LC_ALL=C curl -sf -m 0.12 --unix-socket $HOME/.claudethecaller/ctc.sock --data-binary @- http://ctc/v1/hook/prompt || true
   PostToolUse, Stop: same with /v1/hook/tool and /v1/hook/stop, -m 0.05
   ```
   and runs `claude mcp add --scope user --transport http claudethecaller http://127.0.0.1:18310/mcp` if `claude mcp get claudethecaller` fails.
+  - **Done 2026-10-21**: `ctc daemon start|stop|status` run the live daemon; `ctc install|uninstall` checked against a temp `CTC_CLAUDE_HOME` (adds UserPromptSubmit, PostToolUse, Stop and SessionEnd; a second install changes nothing; uninstall removes only ours). The real `~/.claude` is H3.
 - [ ] **H3** — owner runs the real `ctc install`, uses Claude Code for a day; PR `m2-agent-integration` → `main`.
 - [ ] **F3 — dashboard shell** (`dashboard/`, Vite React TS): pages fetch `/api/*`. KPI cards (routing calls, adoption, lazy misses = suggested but not followed, p95, cost by tier; 7d/30d/90d/all), Recharts `AreaChart` timeline stacked by project, decision log table → drawer with the stage scores, activity heatmap as a CSS grid. `pnpm build` → `dist/`, served by the daemon.
 - [ ] **F4 — control views**: library (search, enable/disable/pin/block per project via `PUT /api/capabilities/{id}/override`, dedup review), sessions (project rail + per-session decisions and memories), memories (edit, pin, delete, supersede history).
@@ -230,9 +240,12 @@ Four tracks. H = owner step. Commit after each step.
 
 ### AI — later
 
-- [ ] **A1 — enrichment + dedup** (`src/ctc/ai/enrich.py`): `Enrichment(summary, triggers[8..12], prerequisites, inputs, outputs)`; `enrich(cap, llm)` = `llm.json(system prompt, name + description + body[:6000], Enrichment)`, at least 2 non-English triggers (validator, 1 retry); `enricher_version = sha256(prompt + schema + llm.spec)[:12]`; `python -m ctc.ai.enrich [--limit N]` enriches stale caps → `set_enrichment`, then dedup: for each doc vector, 5 nearest neighbours in SQL; union-find on pairs ≥ 0.92 → `cluster_id` = smallest id; pairs 0.85–0.92 → `ctc.dedup_review`; then `build_index`.
-- [ ] **A2 — difficulty / model tier**: `scripts/train_difficulty.py` labels dev prompts with `llm.json → {difficulty, model_tier}`, embeds them, fits two `LogisticRegression` models, `joblib.dump` → `models/difficulty.joblib`; `decide` loads it if present.
-- [ ] **A3 — memory extraction** (`src/ctc/ai/extract.py`): `extract_candidates(session_id, llm)`: redacted transcript → `llm.json → [{kind, scope, text, contradicts?}]`; `contradicts` → look up that memory and set `supersedes`; each goes through `write_memory`. `ctc memory backfill --sessions N` → `POST /api/memory/backfill` (the daemon writes).
+- [x] **A1 — enrichment + dedup** (`src/ctc/ai/enrich.py`): `Enrichment(summary, triggers[8..12], prerequisites, inputs, outputs)`; `enrich(cap, llm)` = `llm.json(system prompt, name + description + body[:6000], Enrichment)`, at least 2 non-English triggers (validator, 1 retry); `enricher_version = sha256(prompt + schema + llm.spec)[:12]`; `python -m ctc.ai.enrich [--limit N]` enriches stale caps → `set_enrichment`, then dedup: for each doc vector, 5 nearest neighbours in SQL; union-find on pairs ≥ 0.92 → `cluster_id` = smallest id; pairs 0.85–0.92 → `ctc.dedup_review`; then `build_index`.
+  - **Done 2026-10-21**: 630 of 635 capabilities enriched (5 keep failing the multilingual-trigger validator and are retried next run); vectors 635 → 6,344; dedup: 0 clusters ≥ 0.92, 19 pairs in `dedup_review`.
+- [x] **A2 — difficulty / model tier**: `scripts/train_difficulty.py` labels dev prompts with `llm.json → {difficulty, model_tier}`, embeds them, fits two `LogisticRegression` models, `joblib.dump` → `models/difficulty.joblib`; `decide` loads it if present.
+  - **Done 2026-10-21**: `models/difficulty.joblib` (difficulty + model_tier pipelines); `decide` loads it.
+- [x] **A3 — memory extraction** (`src/ctc/ai/extract.py`): `extract_candidates(session_id, llm)`: redacted transcript → `llm.json → [{kind, scope, text, contradicts?}]`; `contradicts` → look up that memory and set `supersedes`; each goes through `write_memory`. `ctc memory backfill --sessions N` → `POST /api/memory/backfill` (the daemon writes).
+  - **Done 2026-10-21**: backfill of 20 sessions: 36 memories written, 3 updated, 0 failed; Stop extracts at most once per session per 30 min, SessionEnd always does.
 - [ ] **H4** — owner hand-checks 50 memories into `data/processed/own-eval-memories.jsonl`; below 0.80 precision → improve the A3 prompt and redo.
 - [ ] **A4 — fine-tune** (`scripts/finetune_embedder.py`; only if Recall@5 < 0.90 after A1): sentence-transformers `MultipleNegativesRankingLoss` on SkillRet train `(query, skill text)` pairs + own dev rows, 1 epoch, gradient checkpointing, small batch to stay ≤ 7 GB; save to `models/` (gitignored), point TEI at it, re-embed (`model` changes → `build_index` rewrites every vector).
 
