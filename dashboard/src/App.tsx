@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, errText, setAuthListener, setKey } from './api'
+import Jobs from './Jobs'
 import Library from './Library'
 import Memories from './Memories'
 import Overview from './Overview'
@@ -7,7 +8,7 @@ import Sessions from './Sessions'
 import type { Health, Project, ProjectDetail, Range } from './types'
 import { colorOf, fmtTime } from './ui'
 
-const VIEWS = ['overview', 'library', 'sessions', 'memories'] as const
+const VIEWS = ['overview', 'library', 'sessions', 'memories', 'jobs'] as const
 type View = (typeof VIEWS)[number]
 export type ViewProps = { project: string | null; range: Range; setRange: (r: Range) => void; projects: string[] }
 
@@ -15,6 +16,7 @@ const ICONS: Record<View, string> = {
   overview: 'M3 13h4v8H3zM10 3h4v18h-4zM17 9h4v12h-4z',
   library: 'M4 4h6v16H4zM14 4h6v16h-6z',
   sessions: 'M4 6h16M4 12h16M4 18h10',
+  jobs: 'M12 7v5l3 2M21 12a9 9 0 1 1-3-6.7M21 4v5h-5',
   memories: 'M12 3a6 6 0 0 0-6 6c0 2.4 1.3 3.7 2.5 4.8.8.7 1.5 1.6 1.5 2.7V18h4v-1.5c0-1.1.7-2 1.5-2.7C16.7 12.7 18 11.4 18 9a6 6 0 0 0-6-6zM10 21h4',
 }
 
@@ -131,6 +133,7 @@ export default function App() {
         {view === 'library' && <Library {...props} />}
         {view === 'sessions' && <Sessions {...props} />}
         {view === 'memories' && <Memories {...props} />}
+        {view === 'jobs' && <Jobs {...props} />}
       </main>
     </div>
   )
