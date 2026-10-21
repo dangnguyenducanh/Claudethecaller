@@ -79,6 +79,7 @@ const seg = encodeURIComponent
 
 /** Lists come back newest first, `limit` default 200 (max 500); pass the last row's id as `before` for the next page. */
 export const PAGE = 200
+export const CAP_MAX = 500
 type Page = { limit?: number; before?: number | string }
 
 export const api = {
@@ -98,12 +99,14 @@ export const api = {
   deleteDecision: (id: number) => req<Ok>('DELETE', `/decisions/${id}`),
 
   // Capabilities
+  // No `before` paging on this list (PLAN.md): ask for the max; a full page means more exist (narrow with q/kind).
   capabilities: (o: { project: string | null; q?: string; kind?: Kind; namespace?: string; override?: Override; limit?: number }) =>
-    req<Capability[]>('GET', '/capabilities' + qs(o)),
+    req<Capability[]>('GET', '/capabilities' + qs({ limit: CAP_MAX, ...o })),
   capability: (id: string, project: string | null) => req<CapabilityDetail>('GET', `/capabilities/${seg(id)}` + qs({ project })),
   createCapability: (body: NewCapability) => req<Capability>('POST', '/capabilities', body),
   updateCapability: (id: string, patch: CapabilityPatch) => req<Capability>('PATCH', `/capabilities/${seg(id)}`, patch),
   deleteCapability: (id: string) => req<Ok>('DELETE', `/capabilities/${seg(id)}`),
+  enrich: (id: string) => req<{ job_id: string }>('POST', `/capabilities/${seg(id)}/enrich`), // A1: summary + triggers from the LLM
   setOverride: (id: string, project: string | null, action: Override | null) =>
     req<Capability>('PUT', `/capabilities/${seg(id)}/override`, { project, action }),
   dedup: (status: DedupPair['status'] = 'open') => req<DedupPair[]>('GET', '/dedup' + qs({ status })),
@@ -122,6 +125,8 @@ export const api = {
   updateMemory: (id: string, patch: MemoryPatch) => req<Memory>('PATCH', `/memories/${seg(id)}`, patch),
   deleteMemory: (id: string) => req<Ok>('DELETE', `/memories/${seg(id)}`),
   restoreMemory: (id: string) => req<Memory>('POST', `/memories/${seg(id)}/restore`),
+  importMemories: () => req<{ job_id: string }>('POST', '/memories/import', {}), // Claude's own memory files, read-only
+  backfillMemories: (sessions: number) => req<{ job_id: string }>('POST', '/memories/backfill', { sessions }), // A3 over recent transcripts
 
   // Health (outside /api, unversioned dashboard routes don't apply: it is the machine-facing /v1 route)
   health: () => req<Health>('GET', '/health', undefined, '/v1'),

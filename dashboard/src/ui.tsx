@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { Area, AreaChart, ResponsiveContainer } from 'recharts'
 import { usingMock } from './api'
 
@@ -97,10 +97,15 @@ export function Hexmap({ days }: { days: { day: string; count: number }[] }) {
 }
 
 export function Drawer({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
   return (
     <>
       <div className="scrim" onClick={onClose} />
-      <aside className="drawer" role="dialog">
+      <aside className="drawer" role="dialog" aria-modal="true">
         <button className="iconbtn" style={{ alignSelf: 'flex-end' }} onClick={onClose} aria-label="Close">✕</button>
         {children}
       </aside>

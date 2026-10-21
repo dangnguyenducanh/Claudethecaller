@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, errText } from './api'
 import type { ViewProps } from './App'
-import { MemoryCard } from './parts'
+import { MemoryCard, useJob } from './parts'
 import type { Memory, MemoryKind, MemoryWrite, NewMemory } from './types'
 import { Header, Search, Segmented } from './ui'
 
@@ -16,6 +16,15 @@ export default function Memories({ project, projects }: ViewProps) {
   const [showDeleted, setShowDeleted] = useState(false)
   const [adding, setAdding] = useState(false)
   const [rev, setRev] = useState(0)
+  const [jobId, setJobId] = useState<string | null>(null)
+  const [jobErr, setJobErr] = useState('')
+  const job = useJob(jobId)
+  const busy = job?.status === 'queued' || job?.status === 'running'
+  useEffect(() => { if (job?.status === 'done') setRev(r => r + 1) }, [job?.status])
+  const run = async (start: () => Promise<{ job_id: string }>) => {
+    setJobErr('')
+    try { setJobId((await start()).job_id) } catch (e) { setJobErr(errText(e)) }
+  }
 
   useEffect(() => {
     api.memories({ project, q, kind: kind === 'all' ? undefined : kind, pinned: pinnedOnly || undefined, include_deleted: showDeleted || undefined }).then(setMems)
@@ -26,7 +35,17 @@ export default function Memories({ project, projects }: ViewProps) {
       <Header crumb="Memories" title="Memories" sub={`${mems.filter(m => !m.deleted_at).length} long-term memories${project ? ' for ' + project + ' + global' : ''}`}>
         <Search value={q} onChange={setQ} placeholder="Search memories" />
         <button className="btn" onClick={() => setAdding(a => !a)}>Add memory</button>
+        <button className="btn" disabled={busy} onClick={() => run(api.importMemories)} title="Read ~/.claude/projects/*/memory/*.md (never written)">Import Claude memories</button>
+        <button className="btn" disabled={busy} onClick={() => run(() => api.backfillMemories(20))} title="Extract memories from the 20 most recent sessions with the local LLM">Backfill from sessions</button>
       </Header>
+      {job && (
+        <div className={job.status === 'failed' ? 'err' : job.status === 'done' ? 'okmsg' : 'muted'}>
+          {job.status === 'failed' ? `${job.kind.replace('_', ' ')} failed: ${job.error}`
+            : job.status === 'done' ? `${job.kind.replace('_', ' ')} done: ${Object.entries(job.result ?? {}).filter(([, v]) => typeof v === 'number').map(([k, v]) => `${v} ${k}`).join(' · ')}`
+            : `${job.kind.replace('_', ' ')}… ${Math.round(job.progress * 100)}%`}
+        </div>
+      )}
+      {jobErr && <div className="err">{jobErr}</div>}
       {adding && <AddMemory project={project} projects={projects} onSaved={() => setRev(r => r + 1)} />}
       <div className="toolbar">
         <Segmented options={KINDS} value={kind} onChange={setKind} />

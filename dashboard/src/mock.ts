@@ -186,11 +186,16 @@ const overlap = (a: string, b: string) => { const A = words(a), B = words(b); re
 // ---- jobs ----
 type MockJob = { kind: string; created: number; result: Record<string, unknown> | null; fixed?: { status: Job['status']; progress: number; error?: string } }
 const jobs = new Map<string, MockJob>([
-  ['job-a1', { kind: 'index', created: Date.now() - 7_200_000, result: { added: 4, changed: 9, removed: 1, vectors: 23, library_version: '3f9ac71e' }, fixed: { status: 'done', progress: 1 } }],
+  ['job-a1', { kind: 'index', created: Date.now() - 7_200_000, result: { added: 4, changed: 9, removed: 1, vectors: 23, embedded: 13, library_version: '3f9ac71e' }, fixed: { status: 'done', progress: 1 } }],
   ['job-a2', { kind: 'enrich', created: Date.now() - 3_600_000, result: null, fixed: { status: 'failed', progress: 0.35, error: 'llama-server: connection refused (127.0.0.1:18302)' } }],
-  ['job-a3', { kind: 'memory_backfill', created: Date.now() - 90_000, result: null, fixed: { status: 'running', progress: 0.4 } }],
-  ['job-a4', { kind: 'memory_import', created: Date.now() - 1_800_000, result: { imported: 12 }, fixed: { status: 'done', progress: 1 } }],
+  ['job-a3', { kind: 'backfill', created: Date.now() - 90_000, result: null, fixed: { status: 'running', progress: 0.4 } }],
+  ['job-a4', { kind: 'import_memory', created: Date.now() - 1_800_000, result: { written: 12, skipped: 4 }, fixed: { status: 'done', progress: 1 } }],
 ])
+const newJob = (kind: string, result: Record<string, unknown>) => {
+  const jid = `job-${jobs.size + 1}`
+  jobs.set(jid, { kind, created: Date.now(), result })
+  return { job_id: jid }
+}
 const jobView = (id: string): Job => {
   const j = jobs.get(id) ?? fail(404, 'not_found', `no job ${id}`)
   const t = Date.now() - j.created
@@ -428,11 +433,12 @@ export function handle(method: string, path: string, body: unknown): unknown {
     case 'DELETE /memories/:id': { memById(id).deleted_at = new Date().toISOString(); return { ok: true } }
     case 'POST /memories/:id/restore': { const m = memById(id); m.deleted_at = null; return m }
 
-    case 'POST /index': {
-      const jid = `job-${jobs.size + 1}`
-      jobs.set(jid, { kind: 'index', created: Date.now(), result: { added: 2, changed: 5, removed: 0, vectors: caps.length, library_version: hash8(String(caps.length)) } })
-      return { job_id: jid }
-    }
+    case 'POST /index': return newJob('index', { added: 2, changed: 5, removed: 0, vectors: caps.length, embedded: 7, library_version: hash8(String(caps.length)) })
+    case 'POST /capabilities/:id/enrich': { capById(id); return newJob('enrich', { enriched: 1, failed: [] }) }
+    case 'POST /memories/:id': // import | backfill
+      if (id === 'import') return newJob('import_memory', { written: 3, skipped: 9 })
+      if (id === 'backfill') return newJob('backfill', { sessions: Number(b.sessions ?? 20), submitted: 4, skipped: 0 })
+      return fail(404, 'not_found', `no route ${path}`)
     case 'GET /jobs': return [...jobs.keys()].reverse().map(jobView).filter(j => (!p.get('status') || j.status === p.get('status')) && (!p.get('kind') || j.kind === p.get('kind')))
     case 'GET /jobs/:id': return jobView(id)
 

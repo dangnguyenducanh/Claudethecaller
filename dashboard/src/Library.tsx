@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, errText } from './api'
+import { CAP_MAX, api, errText } from './api'
 import type { ViewProps } from './App'
 import { CapabilityForm, DecisionTable, useJob } from './parts'
 import type { Capability, CapabilityDetail, DedupPair, IndexResult, Override } from './types'
@@ -41,7 +41,7 @@ export default function Library({ project, projects }: ViewProps) {
 
   return (
     <>
-      <Header crumb="Library" title="Library" sub={`${fmtInt(caps.length)} capabilities · overrides apply to ${project ?? 'all projects'} on the next route`}>
+      <Header crumb="Library" title="Library" sub={`${fmtInt(caps.length)}${caps.length === CAP_MAX ? '+' : ''} capabilities · overrides apply to ${project ?? 'all projects'} on the next route`}>
         <Search value={q} onChange={setQ} placeholder="Search capabilities" />
         <button className="btn" onClick={() => setCreating(true)}>New capability</button>
         <button className="btn" onClick={reindex} disabled={job?.status === 'queued' || job?.status === 'running'}>Reindex</button>
@@ -106,8 +106,13 @@ function CapabilityDrawer({ id, project, projects, onClose, onChanged }: {
   const [cap, setCap] = useState<CapabilityDetail | null>(null)
   const [editing, setEditing] = useState(false)
   const [err, setErr] = useState('')
+  const [enrichId, setEnrichId] = useState<string | null>(null)
+  const enrichJob = useJob(enrichId)
+  const enriching = enrichJob?.status === 'queued' || enrichJob?.status === 'running'
   const load = () => api.capability(id, project).then(setCap).catch(e => setErr(errText(e)))
   useEffect(() => { load() }, [id, project]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (enrichJob?.status === 'done') { load(); onChanged() } }, [enrichJob?.status]) // eslint-disable-line react-hooks/exhaustive-deps
+  const enrich = async () => { try { setEnrichId((await api.enrich(id)).job_id) } catch (e) { setErr(errText(e)) } }
 
   const remove = async () => {
     if (!cap || !confirm(`Delete ${cap.id}? Its file moves to ~/.claudethecaller/trash/ (restorable from there) and it leaves the index.`)) return
@@ -138,8 +143,13 @@ function CapabilityDrawer({ id, project, projects, onClose, onChanged }: {
             <dt>last 30 days</dt><dd>{cap.calls_30d} suggested · {cap.followed_30d} followed</dd>
             <dt>cluster</dt><dd>{cap.cluster_members.length ? cap.cluster_members.join(', ') : '—'}</dd>
           </dl>
-          <div className="card-title">Summary</div>
-          <div className={cap.summary ? '' : 'faint'}>{cap.summary ?? 'No summary yet (enrichment comes with A1).'}</div>
+          <div className="card-title">Summary <button className="btn" onClick={enrich} disabled={enriching}>{cap.summary ? 'Re-enrich' : 'Enrich'}</button></div>
+          <div className={cap.summary ? '' : 'faint'}>{cap.summary ?? 'No summary yet. Enrich asks the local LLM for a summary and search triggers.'}</div>
+          {enrichJob && enrichJob.status !== 'done' && (
+            <div className={enrichJob.status === 'failed' ? 'err' : 'muted'}>
+              {enrichJob.status === 'failed' ? `Enrich failed: ${enrichJob.error}` : `Enriching… ${Math.round(enrichJob.progress * 100)}%`}
+            </div>
+          )}
           {cap.triggers.length > 0 && <div>{cap.triggers.map(t => <span key={t} className="tag">{t}</span>)}</div>}
           <div className="card-title">File</div>
           <pre className="code">{cap.body}</pre>
