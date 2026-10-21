@@ -9,7 +9,8 @@ const now = new Date()
 now.setHours(18, 0, 0, 0)
 const dayKey = (t: number) => new Date(t).toISOString().slice(0, 10)
 
-const PROJECTS = ['claudethecaller', 'storefront', 'billing-api', 'docs-site', 'infra']
+// Names are the key everywhere; the backend suffixes ~2, ~3 on folder-name collisions, so the mock has one.
+const PROJECTS = ['claudethecaller', 'storefront', 'billing-api', 'docs-site', 'infra', 'storefront~2']
 
 const CAPS: [string, Kind, string][] = [
   ['superpowers:systematic-debugging', 'skill', 'Find the root cause of a bug before proposing a fix'],
