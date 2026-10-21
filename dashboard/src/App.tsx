@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { api } from './api'
+import { api, errText } from './api'
 import Library from './Library'
 import Memories from './Memories'
 import Overview from './Overview'
 import Sessions from './Sessions'
-import type { Project, Range } from './types'
-import { colorOf } from './ui'
+import type { Project, ProjectDetail, Range } from './types'
+import { colorOf, fmtTime } from './ui'
 
 const VIEWS = ['overview', 'library', 'sessions', 'memories'] as const
 type View = (typeof VIEWS)[number]
@@ -29,9 +29,23 @@ export default function App() {
   const [range, setRange] = useState<Range>('30d')
   const [projects, setProjects] = useState<Project[]>([])
   const [theme, setTheme] = useState(readTheme)
+  const [menu, setMenu] = useState<string | null>(null)
+  const [rev, setRev] = useState(0) // bumps after a project rename/delete so every view refetches
 
-  useEffect(() => { api.projects().then(setProjects) }, [])
+  const loadProjects = () => api.projects().then(setProjects)
+  useEffect(() => { loadProjects() }, [])
+  const afterProjectChange = (from: string, to: string | null) => {
+    setMenu(null)
+    if (project === from) setProject(to)
+    loadProjects()
+    setRev(r => r + 1)
+  }
   useEffect(() => { location.hash = view }, [view])
+  useEffect(() => { // back/forward and pasted #links switch views
+    const onHash = () => { const h = location.hash.slice(1) as View; if (VIEWS.includes(h)) setView(h) }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
   useEffect(() => {
     document.documentElement.dataset.theme = theme
     try { localStorage.setItem('ctc-theme', theme) } catch { /* private mode */ }
@@ -61,11 +75,17 @@ export default function App() {
             All projects<span className="count">{projects.reduce((s, p) => s + p.sessions, 0)}</span>
           </button>
           {projects.map(p => (
-            <button key={p.id} className={'navitem' + (project === p.name ? ' on' : '')} onClick={() => setProject(p.name)}>
-              <span className="dot" style={{ background: colorOf(names, p.name) }} />
-              {p.name}
-              <span className="count">{p.sessions}</span>
-            </button>
+            <div key={p.id}>
+              <div className="navrow">
+                <button className={'navitem' + (project === p.name ? ' on' : '')} onClick={() => setProject(p.name)}>
+                  <span className="dot" style={{ background: colorOf(names, p.name) }} />
+                  {p.name}
+                  <span className="count">{p.sessions}</span>
+                </button>
+                <button className={'dots' + (menu === p.name ? ' open' : '')} aria-label={`Project ${p.name} menu`} onClick={() => setMenu(menu === p.name ? null : p.name)}>⋯</button>
+              </div>
+              {menu === p.name && <ProjectMenu name={p.name} onChanged={afterProjectChange} />}
+            </div>
           ))}
         </div>
         <div className="side-foot">
@@ -79,12 +99,37 @@ export default function App() {
           </button>
         </div>
       </nav>
-      <main className="main">
+      <main className="main" key={rev}>
         {view === 'overview' && <Overview {...props} />}
         {view === 'library' && <Library {...props} />}
         {view === 'sessions' && <Sessions {...props} />}
         {view === 'memories' && <Memories {...props} />}
       </main>
+    </div>
+  )
+}
+
+function ProjectMenu({ name, onChanged }: { name: string; onChanged: (from: string, to: string | null) => void }) {
+  const [info, setInfo] = useState<ProjectDetail | null>(null)
+  const [to, setTo] = useState(name)
+  const [err, setErr] = useState('')
+  useEffect(() => { api.project(name).then(setInfo).catch(e => setErr(errText(e))) }, [name])
+
+  const rename = async () => {
+    if (!to.trim() || to === name) return
+    try { const p = await api.renameProject(name, to.trim()); onChanged(name, p.name) } catch (e) { setErr(errText(e)) }
+  }
+  const forget = async () => {
+    if (!confirm(`Forget project ${name}? This deletes its sessions, decisions, events, project memories and overrides from claudethecaller. Files on disk are untouched.`)) return
+    try { await api.deleteProject(name); onChanged(name, null) } catch (e) { setErr(errText(e)) }
+  }
+  return (
+    <div className="menu">
+      {info && <div className="mono">{info.path}<br />{info.decisions} decisions · {info.memories} memories · {info.overrides} overrides
+        {info.last_active && <><br />last active {fmtTime(info.last_active)}</>}</div>}
+      <input value={to} aria-label="New project name" onChange={e => setTo(e.target.value)} onKeyDown={e => e.key === 'Enter' && rename()} />
+      <div className="actions"><button className="btn" onClick={rename}>Rename</button><button className="btn danger" onClick={forget}>Forget</button></div>
+      {err && <div className="err">{err}</div>}
     </div>
   )
 }

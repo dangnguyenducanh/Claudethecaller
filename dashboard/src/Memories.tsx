@@ -1,100 +1,73 @@
 import { useEffect, useState } from 'react'
 import { api, errText } from './api'
 import type { ViewProps } from './App'
-import type { Memory } from './types'
-import { Header, Search, Segmented, fmtDay } from './ui'
+import { MemoryCard } from './parts'
+import type { Memory, MemoryKind, MemoryWrite, NewMemory } from './types'
+import { Header, Search, Segmented } from './ui'
 
 const KINDS = ['all', 'preference', 'convention', 'fact', 'skill_outcome'] as const
+const SAID: Record<MemoryWrite['action'], string> = { ADD: 'Added.', UPDATE: 'Merged into an existing memory.', NOOP: 'Already known; nothing new saved.' }
 
-export default function Memories({ project }: ViewProps) {
+export default function Memories({ project, projects }: ViewProps) {
   const [mems, setMems] = useState<Memory[]>([])
   const [q, setQ] = useState('')
   const [kind, setKind] = useState<(typeof KINDS)[number]>('all')
-  const [editing, setEditing] = useState<string | null>(null)
-  const [draft, setDraft] = useState('')
-  const [errs, setErrs] = useState<Record<string, string>>({})
-
   const [pinnedOnly, setPinnedOnly] = useState(false)
   const [showDeleted, setShowDeleted] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [rev, setRev] = useState(0)
+
   useEffect(() => {
     api.memories({ project, q, kind: kind === 'all' ? undefined : kind, pinned: pinnedOnly || undefined, include_deleted: showDeleted || undefined }).then(setMems)
-  }, [project, q, kind, pinnedOnly, showDeleted])
+  }, [project, q, kind, pinnedOnly, showDeleted, rev])
 
-  const attempt = async (m: Memory, fn: () => Promise<void>) => {
-    try {
-      await fn()
-      setErrs(({ [m.id]: _, ...rest }) => rest)
-    } catch (e) {
-      setErrs(es => ({ ...es, [m.id]: errText(e) }))
-    }
-  }
-  const update = (m: Memory, patch: Partial<Pick<Memory, 'text' | 'pinned'>>) => attempt(m, async () => {
-    const next = await api.updateMemory(m.id, patch)
-    setMems(ms => ms.map(x => (x.id === m.id ? next : x)))
-  })
-  // Soft delete: the card stays as an Undo bar instead of a confirm() dialog.
-  const remove = (m: Memory) => attempt(m, async () => {
-    await api.deleteMemory(m.id)
-    setMems(ms => ms.map(x => (x.id === m.id ? { ...x, deleted_at: new Date().toISOString() } : x)))
-  })
-  const restore = (m: Memory) => attempt(m, async () => {
-    const back = await api.restoreMemory(m.id)
-    setMems(ms => ms.map(x => (x.id === m.id ? back : x)))
-  })
-
-  const shown = mems
   return (
     <>
-      <Header crumb="Memories" title="Memories" sub={`${shown.length} long-term memories${project ? ' for ' + project + ' + global' : ''}`}>
+      <Header crumb="Memories" title="Memories" sub={`${mems.filter(m => !m.deleted_at).length} long-term memories${project ? ' for ' + project + ' + global' : ''}`}>
         <Search value={q} onChange={setQ} placeholder="Search memories" />
+        <button className="btn" onClick={() => setAdding(a => !a)}>Add memory</button>
       </Header>
+      {adding && <AddMemory project={project} projects={projects} onSaved={() => setRev(r => r + 1)} />}
       <div className="toolbar">
         <Segmented options={KINDS} value={kind} onChange={setKind} />
         <label className="toggle"><input type="checkbox" checked={pinnedOnly} onChange={e => setPinnedOnly(e.target.checked)} /> Pinned only</label>
         <label className="toggle"><input type="checkbox" checked={showDeleted} onChange={e => setShowDeleted(e.target.checked)} /> Show deleted</label>
       </div>
       <div className="memlist">
-        {shown.map(m => m.deleted_at ? (
-          <div key={m.id} className="card pad mem undo">
-            <span><span className="tag bad">deleted</span> {m.text.slice(0, 60)}{m.text.length > 60 ? '…' : ''}</span>
-            <button className="btn" onClick={() => restore(m)}>{showDeleted ? 'Restore' : 'Undo'}</button>
-            {errs[m.id] && <div className="err">{errs[m.id]}</div>}
-          </div>
-        ) : (
-          <div key={m.id} className="card pad mem">
-            <div>
-              <span className="tag">{m.kind.replace('_', ' ')}</span>
-              <span className="tag">{m.scope === 'global' ? 'global' : m.project}</span>
-              {m.pinned && <span className="tag good">pinned</span>}
-            </div>
-            {editing === m.id
-              ? <textarea value={draft} onChange={e => setDraft(e.target.value)} autoFocus />
-              : <div>{m.text}</div>}
-            {m.supersedes && <div className="subline">replaces {m.supersedes}</div>}
-            {errs[m.id] && <div className="err">{errs[m.id]}</div>}
-            <div className="mem-foot">
-              <span className="mono">conf {m.confidence.toFixed(2)}</span>
-              <span className="mono">used {m.use_count}×</span>
-              <span title={m.source}>{fmtDay(m.updated_at)}</span>
-              <span className="sp">
-                {editing === m.id ? (
-                  <>
-                    <button className="btn" onClick={() => { update(m, { text: draft }); setEditing(null) }}>Save</button>
-                    <button className="btn" onClick={() => setEditing(null)}>Cancel</button>
-                  </>
-                ) : (
-                  <>
-                    <button className="btn" onClick={() => update(m, { pinned: !m.pinned })}>{m.pinned ? 'Unpin' : 'Pin'}</button>
-                    <button className="btn" onClick={() => { setEditing(m.id); setDraft(m.text) }}>Edit</button>
-                    <button className="btn danger" onClick={() => remove(m)}>Delete</button>
-                  </>
-                )}
-              </span>
-            </div>
-          </div>
-        ))}
+        {mems.map(m => <MemoryCard key={m.id} m={m} onChange={next => setMems(ms => ms.map(x => (x.id === next.id ? next : x)))} />)}
       </div>
-      {!shown.length && <div className="empty">No memories match.</div>}
+      {!mems.length && <div className="empty">No memories match.</div>}
     </>
+  )
+}
+
+function AddMemory({ project, projects, onSaved }: { project: string | null; projects: string[]; onSaved: () => void }) {
+  const [f, setF] = useState<NewMemory>({ scope: project ? 'project' : 'global', project: project ?? projects[0], kind: 'preference', text: '', pinned: false })
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const save = async () => {
+    if (!f.text.trim()) return setMsg({ ok: false, text: 'Write the memory first.' })
+    try {
+      const res = await api.createMemory({ ...f, text: f.text.trim(), project: f.scope === 'project' ? f.project : undefined })
+      setMsg({ ok: true, text: SAID[res.action] })
+      if (res.action === 'ADD') setF({ ...f, text: '' })
+      onSaved()
+    } catch (e) { setMsg({ ok: false, text: errText(e) }) }
+  }
+  return (
+    <div className="card pad form">
+      <div className="row2">
+        <label>Scope<select value={f.scope} onChange={e => setF({ ...f, scope: e.target.value as NewMemory['scope'] })}>
+          <option value="global">global (every project)</option><option value="project">one project</option></select></label>
+        <label>Project<select value={f.project} disabled={f.scope === 'global'} onChange={e => setF({ ...f, project: e.target.value })}>
+          {projects.map(p => <option key={p}>{p}</option>)}</select></label>
+      </div>
+      <div className="row2">
+        <label>Kind<select value={f.kind} onChange={e => setF({ ...f, kind: e.target.value as MemoryKind })}>
+          {KINDS.slice(1).map(k => <option key={k}>{k}</option>)}</select></label>
+        <label className="toggle" style={{ alignSelf: 'end' }}><input type="checkbox" checked={!!f.pinned} onChange={e => setF({ ...f, pinned: e.target.checked })} /> Pinned (never fades)</label>
+      </div>
+      <textarea value={f.text} placeholder="e.g. Staging deploys need a migration dry run first." onChange={e => setF({ ...f, text: e.target.value })} />
+      <div className="actions"><button className="btn" style={{ borderColor: 'var(--accent)' }} onClick={save}>Save</button>{msg && <span className={msg.ok ? 'okmsg' : 'err'}>{msg.text}</span>}</div>
+    </div>
   )
 }

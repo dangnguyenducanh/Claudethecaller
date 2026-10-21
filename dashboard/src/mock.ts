@@ -259,6 +259,12 @@ function memDetail(m: Memory): MemoryDetail {
   return { ...m, history }
 }
 
+// Counts are computed per read, like the backend's grouped subqueries.
+const live = (s: Session): Session => {
+  const ds = decisions.filter(d => d.session_id === s.id)
+  return { ...s, decisions: ds.length, followed: ds.filter(d => d.followed).length, memories: memories.filter(m => m.source === `session ${s.id}` && !m.deleted_at).length }
+}
+
 // ---- writes ----
 function createCap(b: { kind: Kind; scope: 'user' | 'project'; project?: string; name: string; description: string; body?: string; steps?: WorkflowStep[] }): Capability {
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(b.name ?? '')) fail(422, 'invalid', 'name must match ^[a-z0-9][a-z0-9-]{0,63}$')
@@ -372,10 +378,10 @@ export function handle(method: string, path: string, body: unknown): unknown {
       return { ok: true }
     }
 
-    case 'GET /sessions': return page(sessions.filter(s => (!project || s.project === project) && match(q, s.title, s.model) && (!p.get('range') || inRange([s], DAYS[range]).length)), p)
+    case 'GET /sessions': return page(sessions.map(live).filter(s => (!project || s.project === project) && match(q, s.title, s.model) && (!p.get('range') || inRange([s], DAYS[range]).length)), p)
     case 'GET /sessions/:id': {
       const s = sessions.find(x => x.id === id) ?? fail(404, 'not_found', `no session ${id}`)
-      return { ...s, decisions: decisions.filter(d => d.session_id === id), memories: memories.filter(m => m.source === `session ${id}`) } satisfies SessionDetail
+      return { ...live(s), decisions: decisions.filter(d => d.session_id === id), memories: memories.filter(m => m.source === `session ${id}`) } satisfies SessionDetail
     }
     case 'DELETE /sessions/:id': {
       if (!sessions.some(s => s.id === id)) fail(404, 'not_found', `no session ${id}`)

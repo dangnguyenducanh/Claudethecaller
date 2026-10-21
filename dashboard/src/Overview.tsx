@@ -3,7 +3,8 @@ import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis } from 'recharts'
 import { PAGE, api } from './api'
 import type { ViewProps } from './App'
 import type { Activity, Decision, Kpis, Metric, Range, Timeline } from './types'
-import { Drawer, Header, Hexmap, KpiCard, Search, Segmented, colorOf, fmtDay, fmtInt, fmtMs, fmtPct, fmtTime } from './ui'
+import { DecisionDetail, DecisionTable } from './parts'
+import { Drawer, Header, Hexmap, KpiCard, Search, Segmented, colorOf, fmtDay, fmtInt, fmtMs, fmtPct } from './ui'
 
 const RANGES = ['7d', '30d', '90d', 'all'] as const satisfies readonly Range[]
 const METRICS = ['calls', 'adoption', 'latency'] as const satisfies readonly Metric[]
@@ -103,23 +104,7 @@ export default function Overview({ project, range, setRange, projects }: ViewPro
             </div>
           </div>
           <div className="tablewrap">
-            <table>
-              <thead><tr><th>Prompt</th><th>Suggested</th><th>Result</th><th className="num">Latency</th></tr></thead>
-              <tbody>
-                {decisions.map(d => (
-                  <tr key={d.id} className="click" onClick={() => setOpen(d)}>
-                    <td>
-                      <div className="title">{d.prompt}</div>
-                      <div className="subline">{d.project} · {fmtTime(d.at)} · {d.model_tier}</div>
-                      <div className="bar" style={{ width: `${Math.round(d.confidence * 60)}%`, background: colorOf(projects, d.project) }} />
-                    </td>
-                    <td>{d.steps.slice(0, 2).map(s => <span key={s.cap_id} className="tag">{s.invoke}</span>)}{d.steps.length > 2 && <span className="faint">+{d.steps.length - 2}</span>}</td>
-                    <td>{d.abstained ? <span className="tag">abstained</span> : d.followed ? <span className="tag good">followed</span> : <span className="tag warn">ignored</span>}</td>
-                    <td className="num">{fmtMs(d.latency_ms)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <DecisionTable rows={decisions} projects={projects} onOpen={setOpen} />
             {!decisions.length && <div className="empty">No decisions match.</div>}
             {more && <button className="btn more" onClick={() => loadDecisions(decisions[decisions.length - 1].id)}>Load more</button>}
           </div>
@@ -145,44 +130,7 @@ export default function Overview({ project, range, setRange, projects }: ViewPro
 
       {open && (
         <Drawer onClose={() => setOpen(null)}>
-          <div>
-            <div className="card-sub">{open.project} · {fmtTime(open.at)} · session {open.session_id}</div>
-            <h2 style={{ margin: '6px 0 0', fontSize: 18 }}>{open.prompt}</h2>
-          </div>
-          <div>
-            <span className="tag">{open.difficulty}</span><span className="tag">model: {open.model_tier}</span>
-            <span className="tag">confidence {open.confidence.toFixed(2)}</span><span className="tag">{fmtMs(open.latency_ms)}</span>
-            {open.abstained ? <span className="tag">abstained</span> : open.followed ? <span className="tag good">followed</span> : <span className="tag warn">ignored</span>}
-          </div>
-          <div className="card-title">Bundle</div>
-          {open.steps.length ? (
-            <div className="steps">
-              {open.steps.map(s => (
-                <div key={s.order} className="step">
-                  <div className="n">{s.order}</div>
-                  <div>
-                    <div className="title mono">{s.invoke} <span className="tag">{s.kind}</span>{s.agent && <span className="tag">agent: {s.agent}</span>}</div>
-                    <div className="subline">{s.reason}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : <div className="empty">Router abstained: no capability scored above the threshold.</div>}
-          <div className="card-title">Why these (search stages)</div>
-          <div className="card tablewrap">
-            <table>
-              <thead><tr><th>Capability</th><th className="num">Dense</th><th className="num">Keyword</th><th className="num">RRF</th><th className="num">Rerank</th></tr></thead>
-              <tbody>
-                {open.stages.map(r => (
-                  <tr key={r.cap_id}>
-                    <td><span className="mono">{r.cap_id}</span>{r.dropped && <div className="subline">dropped: {r.dropped}</div>}</td>
-                    <td className="num">{r.dense_rank ?? '—'}</td><td className="num">{r.sparse_rank ?? '—'}</td>
-                    <td className="num">{r.rrf.toFixed(4)}</td><td className="num">{r.rerank?.toFixed(2) ?? '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DecisionDetail d={open} onDeleted={id => { setDecisions(ds => ds.filter(x => x.id !== id)); setOpen(null) }} />
         </Drawer>
       )}
     </>

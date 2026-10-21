@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
-import { PAGE, api } from './api'
+import { PAGE, api, errText } from './api'
 import type { ViewProps } from './App'
-import type { Session } from './types'
-import { Header, Search, colorOf, fmtInt, fmtTime, fmtTokens } from './ui'
+import { DecisionDetail, DecisionTable, MemoryCard } from './parts'
+import type { Decision, Session, SessionDetail } from './types'
+import { Drawer, Header, Search, colorOf, fmtInt, fmtTime, fmtTokens } from './ui'
 
 export default function Sessions({ project, projects }: ViewProps) {
   const [sessions, setSessions] = useState<Session[]>([])
   const [q, setQ] = useState('')
-
   const [more, setMore] = useState(false)
+  const [open, setOpen] = useState<string | null>(null)
+
   const load = (before?: string) =>
     api.sessions({ project, q, before }).then(rows => {
       setSessions(ss => (before ? [...ss, ...rows] : rows))
@@ -27,10 +29,10 @@ export default function Sessions({ project, projects }: ViewProps) {
           <thead><tr><th>Session</th><th className="num">Turns</th><th className="num">Tokens</th><th className="num">Routes</th><th className="num">Followed</th><th className="num">Memories</th></tr></thead>
           <tbody>
             {sessions.map(s => (
-              <tr key={s.id}>
+              <tr key={s.id} className="click" onClick={() => setOpen(s.id)}>
                 <td>
                   <div className="title">{s.title}</div>
-                  <div className="subline">{s.project} · {fmtTime(s.started_at)} · {s.model}</div>
+                  <div className="subline">{s.project} · {fmtTime(s.started_at)} · {s.model || 'model unknown'}</div>
                   <div className="bar" style={{ width: `${(s.turns / maxTurns) * 70}%`, background: colorOf(projects, s.project) }} />
                 </td>
                 <td className="num">{s.turns}</td>
@@ -45,6 +47,46 @@ export default function Sessions({ project, projects }: ViewProps) {
         {!sessions.length && <div className="empty">No sessions match.</div>}
         {more && <button className="btn more" onClick={() => load(sessions[sessions.length - 1].id)}>Load more</button>}
       </div>
+      {open && <SessionDrawer id={open} projects={projects} onClose={() => setOpen(null)}
+        onDeleted={() => { setSessions(ss => ss.filter(s => s.id !== open)); setOpen(null) }} />}
     </>
+  )
+}
+
+function SessionDrawer({ id, projects, onClose, onDeleted }: { id: string; projects: string[]; onClose: () => void; onDeleted: () => void }) {
+  const [s, setS] = useState<SessionDetail | null>(null)
+  const [decision, setDecision] = useState<Decision | null>(null)
+  const [err, setErr] = useState('')
+  useEffect(() => { api.session(id).then(setS).catch(e => setErr(errText(e))) }, [id])
+
+  const remove = async () => {
+    if (!s || !confirm(`Delete this session and its ${s.decisions.length} decisions? Its memories stay.`)) return
+    try { await api.deleteSession(id); onDeleted() } catch (e) { setErr(errText(e)) }
+  }
+
+  return (
+    <Drawer onClose={onClose}>
+      {!s ? <div className={err ? 'err' : 'empty'}>{err || 'Loading…'}</div> : decision ? (
+        <>
+          <button className="btn" style={{ alignSelf: 'flex-start' }} onClick={() => setDecision(null)}>← {s.title}</button>
+          <DecisionDetail d={decision} onDeleted={did => { setS({ ...s, decisions: s.decisions.filter(x => x.id !== did) }); setDecision(null) }} />
+        </>
+      ) : (
+        <>
+          <div>
+            <div className="card-sub">{s.project} · {fmtTime(s.started_at)} · {s.model || 'model unknown'}</div>
+            <h2 style={{ margin: '6px 0 0', fontSize: 18 }}>{s.title}</h2>
+          </div>
+          <div><span className="tag">{s.turns} turns</span><span className="tag">{fmtTokens(s.tokens)} tokens</span><span className="tag">{s.followed}/{s.decisions.length} followed</span></div>
+          <div className="card-title">Decisions <span className="faint mono">{s.decisions.length}</span></div>
+          {s.decisions.length ? <div className="card tablewrap"><DecisionTable rows={s.decisions} projects={projects} onOpen={setDecision} /></div> : <div className="faint">No routed prompts.</div>}
+          <div className="card-title">Memories from this session <span className="faint mono">{s.memories.length}</span></div>
+          {s.memories.length ? s.memories.map(m => (
+            <MemoryCard key={m.id} m={m} onChange={next => setS({ ...s, memories: s.memories.map(x => (x.id === next.id ? next : x)) })} />
+          )) : <div className="faint">None extracted.</div>}
+          <div className="actions"><button className="btn danger" onClick={remove}>Delete session</button>{err && <span className="err">{err}</span>}</div>
+        </>
+      )}
+    </Drawer>
   )
 }
