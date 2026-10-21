@@ -70,6 +70,16 @@ async def _recall(st: State, qv, pid: str, user_id: str) -> list[dict]:
         return []
 
 
+def router_version(st: State) -> str:
+    """Semantic-cache key part: library + gate file + search knobs, so retuning never serves stale bundles (hex: a TAG)."""
+    try:
+        gate = os.stat(st.cfg["gate_path"]).st_mtime_ns
+    except OSError:
+        gate = 0
+    knobs = [st.cfg[k] for k in ("k", "depth", "rerank_top", "rrf_k", "abstain_below", "agent_min_rerank")]
+    return hashlib.md5(f"{st.store.library_version}|{gate}|{knobs}".encode()).hexdigest()
+
+
 async def cached_bundle(st: State, ref: str, user_id: str = "local") -> Bundle | None:
     got = await st.cache.get_json(f"bundle:{_scoped(st, user_id, ref)}")
     return Bundle(**got) if got else None
@@ -87,7 +97,7 @@ async def route(st: State, prompt: str, session_id: str, cwd: str, user_id: str 
         session_vector(sk, qv, cache) if session_id else asyncio.sleep(0),
         project_vector(cwd, st.store, cache, st.embedder, user_id) if cwd else asyncio.sleep(0))
     qs = blend(qv, sv, pv)  # semantic-cache key: no memory part, so a hit costs no recall() round trip
-    libv = st.store.library_version
+    libv = router_version(st)
     if hit := await cache.semantic_get(qs, libv, pid, user_id):
         b = Bundle(**{**hit, "ref": ref, "intent": q})
     else:
