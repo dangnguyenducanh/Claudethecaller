@@ -1,7 +1,7 @@
 """In-memory capability store: scanned capabilities + cached TEI vectors, searched with numpy.
 
-# ponytail: brute-force cosine over ~1k capabilities, no DB. The Supabase store (PLAN.md B3) replaces it
-# behind the same three methods: candidates(), overrides(), get().
+# ponytail: brute-force cosine over ~1k capabilities, no DB. Used when no CTC_DATABASE_URL is set; same surface as the
+# Postgres Store's search path: async candidates()/overrides(), catalog + sync get().
 """
 
 from __future__ import annotations
@@ -32,7 +32,9 @@ def tokens(text: str) -> set[str]:
 class LocalStore:
     def __init__(self, project_dir: Path):
         self.caps, self.warnings = scan_library(default_roots(project_dir))
-        self.by_id = {c.id: c for c in self.caps}
+        self.catalog = {c.id: {"id": c.id, "kind": c.kind, "name": c.name, "namespace": c.namespace, "invoke": c.invoke,
+                               "description": c.description, "summary": None, "triggers": [], "cluster_id": None,
+                               "path": c.path, "hash": c.hash} for c in self.caps}
         self.toks = [tokens(c.name.replace("-", " ") + " " + c.description) for c in self.caps]
         self.vecs = np.zeros((0, 0), dtype="float32")
 
@@ -57,7 +59,7 @@ class LocalStore:
         np.savez(CACHE, keys=np.array(keys), vecs=self.vecs)
         return len(missing)
 
-    def candidates(self, qv: np.ndarray, query: str, k: int) -> tuple[list[tuple[str, float]], list[tuple[str, float]]]:
+    async def candidates(self, qv: np.ndarray, query: str, k: int) -> tuple[list[tuple[str, float]], list[tuple[str, float]]]:
         sims = self.vecs @ (qv / (np.linalg.norm(qv) or 1.0))
         dense = [(self.caps[i].id, float(sims[i])) for i in np.argsort(-sims)[:k]]
         qt = tokens(query)
@@ -65,9 +67,8 @@ class LocalStore:
         sparse = [(self.caps[i].id, round(s, 4)) for s, i in scored[:k]]
         return dense, sparse
 
-    def overrides(self, project: str) -> dict[str, str]:
-        return {}  # overrides live in the DB (B3); none locally
+    async def overrides(self, project_id: str, user_id: str = "local") -> dict[str, str]:
+        return {}  # overrides live in the DB; none locally
 
     def get(self, cap_id: str) -> dict:
-        c = self.by_id[cap_id]
-        return {"id": c.id, "kind": c.kind, "name": c.name, "namespace": c.namespace, "invoke": c.invoke, "description": c.description, "cluster_id": None}
+        return self.catalog[cap_id]

@@ -1,9 +1,10 @@
-"""Hybrid search: dense + keyword candidates → RRF → filters → rerank → abstain (PLAN.md B4)."""
+"""Hybrid search: dense + keyword candidates → RRF → filters → rerank → abstain gate (PLAN.md B4, AI flow step 4)."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 import time
 from dataclasses import dataclass, field
@@ -11,17 +12,24 @@ from pathlib import Path
 
 import numpy as np
 
+from ctc.config import cfg
 from ctc.embedding.embedder import Embedder
-from ctc.ingestion.scanner import project_namespace
+from ctc.ingestion.scanner import project_id, project_namespace
 from ctc.reranking.reranker import Reranker
+from ctc.retrieval import gate
+from ctc.storage.local import LocalStore
+from ctc.storage.store import Store
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
 class Ctx:
-    store: object  # anything with candidates(), overrides(), get(): LocalStore now, Supabase Store after B3
+    store: Store | LocalStore  # async candidates()/overrides(), sync get()
     embedder: Embedder
     reranker: Reranker
-    project: str
+    project: str  # project dir
+    user_id: str = "local"
 
 
 @dataclass
@@ -38,6 +46,7 @@ class SearchResult:
     ms: dict[str, float]
     dropped: list[tuple[Hit, str]]
     considered: list[Hit]  # every reranked hit, so `ctc explain` can show why it abstained
+    p: float | None = None  # abstain-gate probability when a gate model is installed
 
 
 def rrf(rankings: list[list[str]], k: int = 60) -> dict[str, float]:
@@ -62,22 +71,24 @@ async def search(q: str, ctx: Ctx, qv: np.ndarray | None = None, k: int = 5, dep
     if qv is None:
         qv = (await ctx.embedder.embed([q], "query"))[0]
     lap("embed")
-    dense, sparse = ctx.store.candidates(qv, q, depth)
+    (dense, sparse), overrides = await asyncio.gather(  # independent: one DB hop, not two
+        ctx.store.candidates(qv, q, depth), ctx.store.overrides(project_id(ctx.project), ctx.user_id))
     lap("candidates")
 
     dense_rank = {c: i for i, (c, _) in enumerate(dense, 1)}
     sparse_rank = {c: i for i, (c, _) in enumerate(sparse, 1)}
     dense_score = dict(dense)
-    overrides = ctx.store.overrides(ctx.project)
     own_ns = project_namespace(Path(ctx.project))
     hits: list[Hit] = []
     dropped: list[tuple[Hit, str]] = []
     clusters: set[str] = set()
     for cap_id, score in sorted(rrf([list(dense_rank), list(sparse_rank)]).items(), key=lambda x: -x[1]):
-        cap = ctx.store.get(cap_id)
+        cap = ctx.store.catalog.get(cap_id)
         hit = Hit(cap_id, score, {"dense": round(dense_score[cap_id], 4) if cap_id in dense_score else None,
                                   "dense_rank": dense_rank.get(cap_id), "sparse_rank": sparse_rank.get(cap_id), "rrf": round(score, 5)})
-        if overrides.get(cap_id) in ("block", "disable"):
+        if cap is None:  # in the DB, not in this worker's catalog: another process indexed it and the 'lib' inval is pending
+            dropped.append((hit, "not in this worker's catalog yet"))
+        elif overrides.get(cap_id) in ("block", "disable"):
             dropped.append((hit, f"{overrides[cap_id]}ed in this project"))
         elif cap["namespace"].startswith("project@") and cap["namespace"] != own_ns:
             dropped.append((hit, "belongs to another project"))
@@ -106,28 +117,49 @@ async def search(q: str, ctx: Ctx, qv: np.ndarray | None = None, k: int = 5, dep
         top.sort(key=lambda h: overrides.get(h.cap_id) != "pin")  # stable sort: pins first
     lap("rerank")
 
-    # ponytail: no abstain until K2 calibrates one (dense cosine and rerank scores both fail as thresholds).
+    # Dense cosine and rerank scores both fail as thresholds; K2's gate (a classifier over stage features) decides.
     abstained = not top or (abstain_below is not None and max(h.stages["rerank"] for h in top) < abstain_below)
-    return SearchResult([] if abstained else top[:k], abstained, ms, dropped, top)
+    res = SearchResult([] if abstained else top[:k], abstained, ms, dropped, top)
+    if top and (g := gate.load(cfg()["gate_path"])):
+        try:
+            res.p = round(gate.p(g, res, q), 4)
+            if res.p < g["threshold"]:
+                res.hits, res.abstained = [], True
+        except Exception:  # fail-open: a gate that breaks at predict time is skipped, search still answers
+            log.exception("abstain gate failed; no gate for this prompt")
+    return res
 
 
 async def open_ctx(project_dir: Path) -> Ctx:
-    # ponytail: local in-memory store until the Supabase store (B3); swap the store here.
-    from ctc.storage.local import LocalStore
+    """Postgres Store when CTC_DATABASE_URL is set, else the in-memory LocalStore (embeds the library on first use)."""
+    c = cfg()
+    embedder = Embedder(c["embed_url"], c["timeout_s"])
+    if c["database_url"]:
+        store = await Store.open(c["database_url"], pool_min=c["db_pool"]["min"], pool_max=c["db_pool"]["max"])
+    else:
+        store = LocalStore(project_dir)
+        await store.build(embedder)
+    return Ctx(store, embedder, Reranker(c["rerank_url"], c["timeout_s"]), str(project_dir.resolve()))
 
-    store, embedder = LocalStore(project_dir), Embedder()
-    await store.build(embedder)
-    return Ctx(store, embedder, Reranker(), str(project_dir.resolve()))
+
+async def close_ctx(ctx: Ctx) -> None:
+    if isinstance(ctx.store, Store):
+        await ctx.store.close()
+    await ctx.embedder.aclose()
+    await ctx.reranker.aclose()
 
 
 def result_json(q: str, ctx: Ctx, res: SearchResult) -> dict:
     hit = lambda h: {**ctx.store.get(h.cap_id), "score": round(h.score, 4), "stages": h.stages}
-    return {"query": q, "abstained": res.abstained, "hits": [hit(h) for h in res.hits], "ms": res.ms}
+    return {"query": q, "abstained": res.abstained, "p": res.p, "hits": [hit(h) for h in res.hits], "ms": res.ms}
 
 
 async def _main(q: str) -> None:
     ctx = await open_ctx(Path.cwd())
-    print(json.dumps(result_json(q, ctx, await search(q, ctx)), indent=2, ensure_ascii=False))
+    try:
+        print(json.dumps(result_json(q, ctx, await search(q, ctx)), indent=2, ensure_ascii=False))
+    finally:
+        await close_ctx(ctx)
 
 
 if __name__ == "__main__":
