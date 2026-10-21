@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, errText } from './api'
 import type { ViewProps } from './App'
-import type { Capability, Kind, Override } from './types'
+import type { Capability, Override } from './types'
 import { Header, Search, Segmented, fmtInt } from './ui'
 
 const KINDS = ['all', 'skill', 'agent', 'command', 'workflow'] as const
@@ -13,7 +13,7 @@ export default function Library({ project }: ViewProps) {
   const [kind, setKind] = useState<(typeof KINDS)[number]>('all')
   const [errs, setErrs] = useState<Record<string, string>>({})
 
-  useEffect(() => { api.capabilities(project, q).then(setCaps) }, [project, q])
+  useEffect(() => { api.capabilities({ project, q, kind: kind === 'all' ? undefined : kind }).then(setCaps) }, [project, q, kind])
 
   async function setOverride(c: Capability, action: Override) {
     const next = c.override === action ? null : action
@@ -26,7 +26,7 @@ export default function Library({ project }: ViewProps) {
     }
   }
 
-  const shown = caps.filter(c => kind === 'all' || c.kind === (kind as Kind))
+  const shown = caps
   return (
     <>
       <Header crumb="Library" title="Library" sub={`${fmtInt(caps.length)} capabilities indexed · overrides apply to ${project ?? 'all projects'} on the next route`}>

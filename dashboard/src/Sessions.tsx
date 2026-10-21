@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api } from './api'
+import { PAGE, api } from './api'
 import type { ViewProps } from './App'
 import type { Session } from './types'
 import { Header, Search, colorOf, fmtInt, fmtTime, fmtTokens } from './ui'
@@ -8,7 +8,13 @@ export default function Sessions({ project, projects }: ViewProps) {
   const [sessions, setSessions] = useState<Session[]>([])
   const [q, setQ] = useState('')
 
-  useEffect(() => { api.sessions(project, q).then(setSessions) }, [project, q])
+  const [more, setMore] = useState(false)
+  const load = (before?: string) =>
+    api.sessions({ project, q, before }).then(rows => {
+      setSessions(ss => (before ? [...ss, ...rows] : rows))
+      setMore(rows.length === PAGE)
+    })
+  useEffect(() => { load() }, [project, q]) // eslint-disable-line react-hooks/exhaustive-deps
   const maxTurns = Math.max(1, ...sessions.map(s => s.turns))
 
   return (
@@ -37,6 +43,7 @@ export default function Sessions({ project, projects }: ViewProps) {
           </tbody>
         </table>
         {!sessions.length && <div className="empty">No sessions match.</div>}
+        {more && <button className="btn more" onClick={() => load(sessions[sessions.length - 1].id)}>Load more</button>}
       </div>
     </>
   )

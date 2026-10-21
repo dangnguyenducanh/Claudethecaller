@@ -1,5 +1,9 @@
 import { handle } from './mock'
-import type { Activity, Capability, Decision, Kpis, Memory, Metric, Override, Project, Range, Session, Timeline } from './types'
+import type {
+  Activity, Capability, CapabilityDetail, CapabilityPatch, Decision, DedupPair, Job, Kind, Kpis, Memory, MemoryDetail,
+  MemoryKind, MemoryPatch, MemoryWrite, Metric, NewCapability, NewMemory, Ok, Override, Project, ProjectDetail, Range,
+  Session, SessionDetail, Timeline,
+} from './types'
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) {
@@ -51,20 +55,63 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
   return data as T
 }
 
-const qs = (o: Record<string, string | null | undefined>) =>
-  '?' + new URLSearchParams(Object.entries(o).filter(([, v]) => v) as [string, string][]).toString()
+type Param = string | number | boolean | null | undefined
+const qs = (o: Record<string, Param>) => {
+  const p = new URLSearchParams()
+  for (const [k, v] of Object.entries(o)) if (v !== null && v !== undefined && v !== '') p.set(k, String(v))
+  const s = p.toString()
+  return s ? '?' + s : ''
+}
+const seg = encodeURIComponent
+
+/** Lists come back newest first, `limit` default 200 (max 500); pass the last row's id as `before` for the next page. */
+export const PAGE = 200
+type Page = { limit?: number; before?: number | string }
 
 export const api = {
+  // Projects
   projects: () => req<Project[]>('GET', '/projects'),
+  project: (name: string) => req<ProjectDetail>('GET', `/projects/${seg(name)}`),
+  renameProject: (name: string, to: string) => req<Project>('PATCH', `/projects/${seg(name)}`, { name: to }),
+  deleteProject: (name: string) => req<Ok>('DELETE', `/projects/${seg(name)}`),
+
+  // Overview
   kpis: (range: Range, project: string | null) => req<Kpis>('GET', '/kpis' + qs({ range, project })),
   timeline: (range: Range, metric: Metric, project: string | null) => req<Timeline>('GET', '/timeline' + qs({ range, metric, project })),
-  decisions: (range: Range, project: string | null, q: string) => req<Decision[]>('GET', '/decisions' + qs({ range, project, q })),
   activity: (project: string | null) => req<Activity>('GET', '/activity' + qs({ project })),
-  capabilities: (project: string | null, q: string) => req<Capability[]>('GET', '/capabilities' + qs({ project, q })),
+  decisions: (o: { range: Range; project: string | null; q?: string; session_id?: string; followed?: boolean; abstained?: boolean } & Page) =>
+    req<Decision[]>('GET', '/decisions' + qs(o)),
+  decision: (id: number) => req<Decision>('GET', `/decisions/${id}`),
+  deleteDecision: (id: number) => req<Ok>('DELETE', `/decisions/${id}`),
+
+  // Capabilities
+  capabilities: (o: { project: string | null; q?: string; kind?: Kind; namespace?: string; override?: Override; limit?: number }) =>
+    req<Capability[]>('GET', '/capabilities' + qs(o)),
+  capability: (id: string, project: string | null) => req<CapabilityDetail>('GET', `/capabilities/${seg(id)}` + qs({ project })),
+  createCapability: (body: NewCapability) => req<Capability>('POST', '/capabilities', body),
+  updateCapability: (id: string, patch: CapabilityPatch) => req<Capability>('PATCH', `/capabilities/${seg(id)}`, patch),
+  deleteCapability: (id: string) => req<Ok>('DELETE', `/capabilities/${seg(id)}`),
   setOverride: (id: string, project: string | null, action: Override | null) =>
-    req<Capability>('PUT', `/capabilities/${encodeURIComponent(id)}/override`, { project, action }),
-  sessions: (project: string | null, q: string) => req<Session[]>('GET', '/sessions' + qs({ project, q })),
-  memories: (project: string | null, q: string) => req<Memory[]>('GET', '/memories' + qs({ project, q })),
-  updateMemory: (id: string, patch: Partial<Pick<Memory, 'text' | 'pinned'>>) => req<Memory>('PATCH', `/memories/${id}`, patch),
-  deleteMemory: (id: string) => req<{ ok: boolean }>('DELETE', `/memories/${id}`),
+    req<Capability>('PUT', `/capabilities/${seg(id)}/override`, { project, action }),
+  dedup: (status: DedupPair['status'] = 'open') => req<DedupPair[]>('GET', '/dedup' + qs({ status })),
+  resolveDedup: (id: number, action: 'merge' | 'keep_apart') => req<Ok>('POST', `/dedup/${id}`, { action }),
+
+  // Sessions
+  sessions: (o: { project: string | null; q?: string; range?: Range } & Page) => req<Session[]>('GET', '/sessions' + qs(o)),
+  session: (id: string) => req<SessionDetail>('GET', `/sessions/${seg(id)}`),
+  deleteSession: (id: string) => req<Ok>('DELETE', `/sessions/${seg(id)}`),
+
+  // Memories
+  memories: (o: { project: string | null; q?: string; kind?: MemoryKind; scope?: Memory['scope']; pinned?: boolean; include_deleted?: boolean; limit?: number }) =>
+    req<Memory[]>('GET', '/memories' + qs(o)),
+  memory: (id: string) => req<MemoryDetail>('GET', `/memories/${seg(id)}`),
+  createMemory: (body: NewMemory) => req<MemoryWrite>('POST', '/memories', body),
+  updateMemory: (id: string, patch: MemoryPatch) => req<Memory>('PATCH', `/memories/${seg(id)}`, patch),
+  deleteMemory: (id: string) => req<Ok>('DELETE', `/memories/${seg(id)}`),
+  restoreMemory: (id: string) => req<Memory>('POST', `/memories/${seg(id)}/restore`),
+
+  // Index + jobs
+  reindex: (project: string | null) => req<{ job_id: string }>('POST', '/index', { project }),
+  jobs: (o: { status?: Job['status']; kind?: string; limit?: number } = {}) => req<Job[]>('GET', '/jobs' + qs(o)),
+  job: (id: string) => req<Job>('GET', `/jobs/${seg(id)}`),
 }

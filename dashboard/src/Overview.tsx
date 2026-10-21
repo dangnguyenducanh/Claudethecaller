@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis } from 'recharts'
-import { api } from './api'
+import { PAGE, api } from './api'
 import type { ViewProps } from './App'
 import type { Activity, Decision, Kpis, Metric, Range, Timeline } from './types'
 import { Drawer, Header, Hexmap, KpiCard, Search, Segmented, colorOf, fmtDay, fmtInt, fmtMs, fmtPct, fmtTime } from './ui'
 
 const RANGES = ['7d', '30d', '90d', 'all'] as const satisfies readonly Range[]
 const METRICS = ['calls', 'adoption', 'latency'] as const satisfies readonly Metric[]
+const RESULTS = { all: {}, followed: { followed: true }, ignored: { followed: false, abstained: false }, abstained: { abstained: true } } as const
 
 export default function Overview({ project, range, setRange, projects }: ViewProps) {
   const [kpis, setKpis] = useState<Kpis | null>(null)
@@ -15,12 +16,19 @@ export default function Overview({ project, range, setRange, projects }: ViewPro
   const [hidden, setHidden] = useState<Set<string>>(new Set())
   const [q, setQ] = useState('')
   const [decisions, setDecisions] = useState<Decision[]>([])
+  const [result, setResult] = useState<keyof typeof RESULTS>('all')
+  const [more, setMore] = useState(false)
   const [act, setAct] = useState<Activity | null>(null)
   const [open, setOpen] = useState<Decision | null>(null)
 
   useEffect(() => { api.kpis(range, project).then(setKpis); api.activity(project).then(setAct) }, [range, project])
   useEffect(() => { api.timeline(range, metric, project).then(setTl) }, [range, metric, project])
-  useEffect(() => { api.decisions(range, project, q).then(setDecisions) }, [range, project, q])
+  const loadDecisions = (before?: number) =>
+    api.decisions({ range, project, q, ...RESULTS[result], before }).then(rows => {
+      setDecisions(ds => (before ? [...ds, ...rows] : rows))
+      setMore(rows.length === PAGE)
+    })
+  useEffect(() => { loadDecisions() }, [range, project, q, result]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = tl ? tl.days.map((day, i) => ({ day, ...Object.fromEntries(tl.series.map(s => [s.project, s.values[i]])) })) : []
   const big = !kpis ? '—' : metric === 'calls' ? fmtInt(kpis.routing_calls) : metric === 'adoption' ? fmtPct(kpis.adoption_rate) : fmtMs(kpis.p95_ms)
@@ -87,13 +95,18 @@ export default function Overview({ project, range, setRange, projects }: ViewPro
         <div className="card">
           <div className="pad chart-head">
             <div className="card-title">Decisions <span className="faint mono">{decisions.length}</span></div>
-            <Search value={q} onChange={setQ} placeholder="Search prompts or skills" />
+            <div className="toolbar">
+              {(Object.keys(RESULTS) as (keyof typeof RESULTS)[]).map(r => (
+                <button key={r} className={'chip' + (r === result ? ' on' : '')} onClick={() => setResult(r)}>{r}</button>
+              ))}
+              <Search value={q} onChange={setQ} placeholder="Search prompts or skills" />
+            </div>
           </div>
           <div className="tablewrap">
             <table>
               <thead><tr><th>Prompt</th><th>Suggested</th><th>Result</th><th className="num">Latency</th></tr></thead>
               <tbody>
-                {decisions.slice(0, 40).map(d => (
+                {decisions.map(d => (
                   <tr key={d.id} className="click" onClick={() => setOpen(d)}>
                     <td>
                       <div className="title">{d.prompt}</div>
@@ -108,6 +121,7 @@ export default function Overview({ project, range, setRange, projects }: ViewPro
               </tbody>
             </table>
             {!decisions.length && <div className="empty">No decisions match.</div>}
+            {more && <button className="btn more" onClick={() => loadDecisions(decisions[decisions.length - 1].id)}>Load more</button>}
           </div>
         </div>
 
