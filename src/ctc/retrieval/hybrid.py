@@ -49,16 +49,21 @@ class SearchResult:
     p: float | None = None  # abstain-gate probability when a gate model is installed
 
 
-def rrf(rankings: list[list[str]], k: int = 60) -> dict[str, float]:
+def rrf(rankings: list[list[str]], k: int = 60, weights: list[float] | None = None) -> dict[str, float]:
+    """Weighted RRF; a weight-0 ranking still adds its ids (score 0, after the others, in its own order)."""
     scores: dict[str, float] = {}
-    for ranking in rankings:
+    for ranking, w in zip(rankings, weights or [1.0] * len(rankings)):
         for rank, cap_id in enumerate(ranking, 1):
-            scores[cap_id] = scores.get(cap_id, 0.0) + 1 / (k + rank)
+            scores[cap_id] = scores.get(cap_id, 0.0) + w / (k + rank)
     return scores
 
 
 async def search(q: str, ctx: Ctx, qv: np.ndarray | None = None, k: int = 5, depth: int = 50,
-                 rerank_top: int = 20, abstain_below: float | None = None) -> SearchResult:
+                 rerank_top: int = 20, abstain_below: float | None = None, ranking: dict | None = None) -> SearchResult:
+    """`ranking` (default cfg()["ranking"]): keyword_rrf_weight = keyword rank's weight in the RRF that picks the
+    rerank_top pool; rerank_weight = rerank rank's weight next to dense rank (weight 1) in the final order.
+    {0, 0} = dense order; {1, 1} = the pre-2026-10-21 order."""
+    rk = ranking or cfg()["ranking"]
     ms: dict[str, float] = {}
     t = time.perf_counter()
 
@@ -82,7 +87,7 @@ async def search(q: str, ctx: Ctx, qv: np.ndarray | None = None, k: int = 5, dep
     hits: list[Hit] = []
     dropped: list[tuple[Hit, str]] = []
     clusters: set[str] = set()
-    for cap_id, score in sorted(rrf([list(dense_rank), list(sparse_rank)]).items(), key=lambda x: -x[1]):
+    for cap_id, score in sorted(rrf([list(dense_rank), list(sparse_rank)], weights=[1, rk["keyword_rrf_weight"]]).items(), key=lambda x: -x[1]):
         cap = ctx.store.catalog.get(cap_id)
         hit = Hit(cap_id, score, {"dense": round(dense_score[cap_id], 4) if cap_id in dense_score else None,
                                   "dense_rank": dense_rank.get(cap_id), "sparse_rank": sparse_rank.get(cap_id), "rrf": round(score, 5)})
@@ -106,11 +111,12 @@ async def search(q: str, ctx: Ctx, qv: np.ndarray | None = None, k: int = 5, dep
         for h, s in zip(top, await ctx.reranker.score(q, docs)):
             h.stages["rerank"] = round(s, 4)
         # bge-reranker's absolute scores carry no signal for tool matching (measured: right and junk matches both
-        # score ~0.001-0.04), so it only votes with its ORDER. Keywords only widen the candidate pool (common words
-        # like "review"/"test" are noisy); the final order is RRF over dense rank and rerank rank.
+        # score ~0.001-0.04), so it only votes with its ORDER. Keywords never vote in the final order (common words
+        # like "review"/"test" are noisy); the final order is weighted RRF over dense rank and rerank rank.
+        # ponytail: rerank runs even at rerank_weight 0, since bundle reasons and agent_min_rerank read stages["rerank"].
         rerank_order = [h.cap_id for h in sorted(top, key=lambda h: -h.stages["rerank"])]
         dense_order = [h.cap_id for h in sorted(top, key=lambda h: h.stages["dense_rank"] or 10**6)]
-        final = rrf([dense_order, rerank_order])
+        final = rrf([dense_order, rerank_order], weights=[1, rk["rerank_weight"]])
         for h in top:
             h.score = h.stages["final"] = round(final[h.cap_id], 5)
         top.sort(key=lambda h: -h.score)

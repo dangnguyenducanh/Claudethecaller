@@ -2,6 +2,8 @@
 
 uv run python -m evaluation.retrieval_eval index-skillret   # SkillRet test (6,006) -> ctc_skillret, train (10,123) -> ctc_skillret_train
 uv run python -m evaluation.retrieval_eval tune             # DEV ONLY: depth x rerank_top sweep + abstain gate -> config, models/
+uv run python -m evaluation.retrieval_eval ranking          # DEV ONLY: keyword_rrf_weight x rerank_weight sweep -> config `ranking`
+uv run python -m evaluation.retrieval_eval ranking-test [n] # SkillRet TEST, report only: dense vs old {1, 1} vs configured ranking
 uv run python -m evaluation.retrieval_eval run [limit]      # TEST: three modes on SkillRet, own-eval, gold-none -> data/reports/
 """
 
@@ -40,6 +42,8 @@ REPORTS = ROOT / "data" / "reports"
 TODAY = date.today().isoformat()
 DEPTHS, RERANK_TOPS, MAX_FT, SR_DEV_N = (25, 50, 100), (10, 20, 40), 0.10, 500
 TEI_MAX_BATCH = 32  # TEI max_client_batch_size: the shipped Reranker sends one request, so rerank_top > 32 gets HTTP 413
+KW_WEIGHTS, RERANK_WEIGHTS = (0, 0.25, 0.5, 1), (0, 0.25, 0.5, 1, 2)
+OLD_RANKING = {"keyword_rrf_weight": 1, "rerank_weight": 1}
 
 
 def is_test(qid: str) -> bool:  # same rule as the labeler's session split, for MetaTool rows
@@ -68,6 +72,24 @@ class MemoReranker:
         return [self.memo[(q, d)] for d in docs]
 
 
+def memo_candidates(store: Store) -> Store:
+    """Sweep-only: candidates depend on (query, depth) alone, so each is fetched once across ranking configs."""
+    memo, fetch = {}, store.candidates
+
+    async def candidates(qv, q, k=50):
+        if (q, k) not in memo:
+            memo[q, k] = await fetch(qv, q, k)
+        return memo[q, k]
+    store.candidates = candidates
+    return store
+
+
+def sr_dev() -> list[tuple]:
+    """The SkillRet dev sample: SR_DEV_N train queries by sha256(id), against the train skills."""
+    _, queries, qrels = skillret("train")
+    return [(q["id"], q["query"], qrels[q["id"]]) for q in sorted(queries, key=lambda q: hashlib.sha256(q["id"].encode()).hexdigest())[:SR_DEV_N]]
+
+
 async def embed_all(embedder: Embedder, queries: list[str]) -> tuple[np.ndarray, float]:
     """Query vectors in batches of 32 (reused across modes and sweep configs) + amortized ms per query."""
     t = time.perf_counter()
@@ -75,7 +97,8 @@ async def embed_all(embedder: Embedder, queries: list[str]) -> tuple[np.ndarray,
     return np.array(vecs), (time.perf_counter() - t) * 1000 / max(len(queries), 1)
 
 
-async def run_set(ctx: Ctx, items: list[tuple], qvs: np.ndarray, depth: int, rerank_top: int, modes: bool = True) -> list[dict]:
+async def run_set(ctx: Ctx, items: list[tuple], qvs: np.ndarray, depth: int, rerank_top: int, modes: bool = True,
+                  ranking: dict | None = None) -> list[dict]:
     """Per query, sequentially (latency is per stage, so no concurrency): dense order, hybrid order (RRF of dense and
     keyword ids, no rerank), full = search() as shipped (`considered` = reranked order before the gate cut)."""
     out = []
@@ -85,7 +108,7 @@ async def run_set(ctx: Ctx, items: list[tuple], qvs: np.ndarray, depth: int, rer
             dense, sparse = await ctx.store.candidates(qv, q, depth)
             row["dense"] = [c for c, _ in dense]
             row["hybrid"] = [c for c, _ in sorted(rrf([row["dense"], [c for c, _ in sparse]]).items(), key=lambda x: -x[1])]
-        res = await search(q, ctx, qv=qv, k=cfg()["k"], depth=depth, rerank_top=rerank_top, abstain_below=cfg()["abstain_below"])
+        res = await search(q, ctx, qv=qv, k=cfg()["k"], depth=depth, rerank_top=rerank_top, abstain_below=cfg()["abstain_below"], ranking=ranking)
         row.update(full=[h.cap_id for h in res.considered], abstained=res.abstained, p=res.p, x=gate.features(res, q), ms=res.ms)
         out.append(row)
     return out
@@ -158,9 +181,7 @@ async def tune() -> None:
     try:
         assert sr.catalog, "run index-skillret first"
         pos, neg = own_sets(test=False)
-        _, queries, qrels = skillret("train")
-        sample = sorted(queries, key=lambda q: hashlib.sha256(q["id"].encode()).hexdigest())[:SR_DEV_N]
-        sr_items = [(q["id"], q["query"], qrels[q["id"]]) for q in sample]
+        sr_items = sr_dev()
         qv_pos, qv_neg, qv_sr = [(await embed_all(embedder, [q for _, q, _ in items]))[0] for items in (pos, neg, sr_items)]
         sweep = []
         for depth in DEPTHS:
@@ -210,6 +231,68 @@ async def tune() -> None:
         await closed(embedder, reranker, [lib, sr])
 
 
+async def tune_ranking() -> None:
+    """Final-order sweep on dev rows only (SkillRet train sample + own dev) at the configured depth / rerank_top.
+    Winner = best SkillRet dev NDCG@10, then R@5, then own dev NDCG@10 (3 decimals); ties go to the lower weights."""
+    c = cfg()
+    embedder, reranker, (lib, sr) = await opened("ctc", SKILLRET["train"])
+    memo = MemoReranker(reranker)
+    try:
+        assert sr.catalog, "run index-skillret first"
+        sets = {"skillret_dev": (sr, sr_dev()), "own_dev": (lib, own_sets(test=False)[0])}
+        qvs = {n: (await embed_all(embedder, [q for _, q, _ in items]))[0] for n, (_, items) in sets.items()}
+        ctxs = {n: Ctx(memo_candidates(store), embedder, memo, NEUTRAL) for n, (store, _) in sets.items()}
+        sweep, ref = [], {}
+        for kw in KW_WEIGHTS:
+            for rr in RERANK_WEIGHTS:
+                rk, s = {"keyword_rrf_weight": kw, "rerank_weight": rr}, {}
+                for n, (_, items) in sets.items():
+                    rows = await run_set(ctxs[n], items, qvs[n], c["depth"], c["rerank_top"], modes=not ref.get(n), ranking=rk)
+                    ref[n] = ref.get(n) or {m: scores(rows, m) for m in ("dense", "hybrid")}
+                    s[n] = scores(rows, "full")
+                sweep.append({"ranking": rk, **s})
+                print(f"kw {kw:4} rr {rr:4}: SkillRet dev NDCG@10 {s['skillret_dev']['ndcg@10']:.4f} R@5 {s['skillret_dev']['recall@5']:.4f}, "
+                      f"own dev NDCG@10 {s['own_dev']['ndcg@10']:.4f} R@5 {s['own_dev']['recall@5']:.4f}")
+        key = lambda s: tuple(round(s[n][m], 3) for n, m in (("skillret_dev", "ndcg@10"), ("skillret_dev", "recall@5"), ("own_dev", "ndcg@10")))
+        win, old = max(sweep, key=key), next(s for s in sweep if s["ranking"] == OLD_RANKING)
+        f = lambda s: f"{s['skillret_dev']['ndcg@10']:.3f} / {s['skillret_dev']['recall@5']:.3f}"
+        note = (f"K2 ranking sweep {TODAY}, SkillRet dev ({len(sets['skillret_dev'][1])} train q) NDCG@10 / R@5: this {f(win)}, "
+                f"old {{1, 1}} {f(old)}, dense-only {f({n: r['dense'] for n, r in ref.items()})}; own dev NDCG@10 {win['own_dev']['ndcg@10']:.3f} vs old {old['own_dev']['ndcg@10']:.3f}")
+        path = ROOT / "config" / "retrieval.yaml"
+        rk = win["ranking"]
+        text, n = re.subn(r"^ranking:.*$", f"ranking: {{keyword_rrf_weight: {rk['keyword_rrf_weight']}, rerank_weight: {rk['rerank_weight']}}}   # {note}",
+                          path.read_text(), count=1, flags=re.MULTILINE)
+        assert n == 1, f"ranking not in {path}"
+        path.write_text(text)
+        cfg.cache_clear()
+        REPORTS.mkdir(parents=True, exist_ok=True)
+        (REPORTS / f"ranking-{TODAY}.json").write_text(json.dumps({"winner": rk, "reference": ref, "sweep": sweep, "depth": c["depth"], "rerank_top": c["rerank_top"]}, indent=1))
+        print("winner", rk, "->", path)
+    finally:
+        await closed(embedder, reranker, [lib, sr])
+
+
+async def ranking_test(limit: int | None = None) -> None:
+    """SkillRet test, report only (never tunes): dense, plain hybrid, the old {1, 1} order and the configured ranking."""
+    c = cfg()
+    embedder, reranker, (sr,) = await opened(SKILLRET["test"])
+    try:
+        _, queries, qrels = skillret("test")
+        items = [(q["id"], q["query"], qrels[q["id"]]) for q in queries][:limit]
+        qvs, _ = await embed_all(embedder, [q for _, q, _ in items])
+        ctx = Ctx(memo_candidates(sr), embedder, MemoReranker(reranker), NEUTRAL)
+        rows = await run_set(ctx, items, qvs, c["depth"], c["rerank_top"])
+        for r, o in zip(rows, await run_set(ctx, items, qvs, c["depth"], c["rerank_top"], modes=False, ranking=OLD_RANKING)):
+            r["old"] = o["full"]
+        out = {"n": len(rows), "ranking": c["ranking"], "scores": {m: scores(rows, m) for m in ("dense", "hybrid", "old", "full")}}
+        print(json.dumps(out, indent=1))
+        if not limit:
+            path = REPORTS / f"ranking-{TODAY}.json"
+            path.write_text(json.dumps({**(json.loads(path.read_text()) if path.exists() else {}), "skillret_test": out}, indent=1))
+    finally:
+        await closed(embedder, reranker, [sr])
+
+
 async def run(limit: int | None = None) -> None:
     c = cfg()
     embedder, reranker, (lib, sr) = await opened("ctc", SKILLRET["test"])
@@ -230,7 +313,7 @@ async def run(limit: int | None = None) -> None:
             else:
                 out[name]["scores"] = {m: scores(rows, m) for m in MODES} | {"full+gate": scores(rows, "full", gated=True)}
             print(name, json.dumps({k: v for k, v in out[name].items() if k != "latency"}))
-        out["config"] = {k: c[k] for k in ("k", "depth", "rerank_top", "rrf_k", "abstain_below", "gate_min_p")}
+        out["config"] = {k: c[k] for k in ("k", "depth", "rerank_top", "rrf_k", "ranking", "abstain_below", "gate_min_p")}
         out["gate"] = gate.load(c["gate_path"]) is not None
         out["library"] = {"ctc": {"capabilities": len(lib.catalog), "library_version": lib.library_version}, "skillret": len(sr.catalog),
                           "changed_during_run": await lib.compute_library_version() != lib.library_version}  # another process re-indexed
@@ -249,7 +332,7 @@ def report(out: dict, tune: dict | None, limit: int | None) -> str:
 
     def table(name: str) -> list[str]:
         rows = ["| mode | Recall@1 | Recall@5 | Recall@10 | NDCG@10 | MRR | suggests |", "|---|---|---|---|---|---|---|"]
-        label = {"dense": "dense only", "hybrid": "hybrid (RRF dense + keyword)", "full": "full: hybrid + rerank, gate off", "full+gate": "full + gate (shipped)"}
+        label = {"dense": "dense only", "hybrid": "hybrid (RRF dense + keyword)", "full": f"full: shipped order {out['config']['ranking']}, gate off", "full+gate": "full + gate (shipped)"}
         for m, s in out[name]["scores"].items():
             rows.append(f"| {label[m]} | " + " | ".join(f"{s[k]:.3f}" for k in METRICS) + f" | {out[name]['fired'][m]:.0%} |")
         return rows
@@ -264,7 +347,7 @@ def report(out: dict, tune: dict | None, limit: int | None) -> str:
           "(often 5 ids, `ecc:*`-heavy), so Recall@k on own-eval is a noisy lower bound, and the gate was trained on the same "
           "noisy labels. Treat own-eval numbers as provisional until the owner's H1 check."), "",
           (f"Config used: k={cf['k']}, depth={cf['depth']}, rerank_top={cf['rerank_top']}, rrf_k={cf['rrf_k']}, "
-          f"abstain_below={cf['abstain_below']}, gate {'on' if out['gate'] else 'off'} (gate_min_p={cf['gate_min_p']}). "
+          f"ranking={cf['ranking']} (keyword weight in the rerank pool, rerank weight in the final order), abstain_below={cf['abstain_below']}, gate {'on' if out['gate'] else 'off'} (gate_min_p={cf['gate_min_p']}). "
           f"Library `ctc`: {out['library']['ctc']['capabilities']} capabilities (library_version `{out['library']['ctc']['library_version']}`); "
           f"`ctc_skillret`: {out['library']['skillret']} skills. Dev DB `ctc-dev-pg` on localhost (no Supabase hop yet)."), "",
           *(["> **The `ctc` library changed during this run (another process re-indexed it): own-eval numbers are suspect.**", ""]
@@ -331,6 +414,10 @@ if __name__ == "__main__":
         asyncio.run(index_skillret())
     elif cmd == "tune":
         asyncio.run(tune())
+    elif cmd == "ranking":
+        asyncio.run(tune_ranking())
+    elif cmd == "ranking-test":
+        asyncio.run(ranking_test(int(sys.argv[2]) if len(sys.argv) > 2 else None))
     elif cmd == "run":
         asyncio.run(run(int(sys.argv[2]) if len(sys.argv) > 2 else None))
     else:
