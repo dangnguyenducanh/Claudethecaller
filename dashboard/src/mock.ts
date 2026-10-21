@@ -52,6 +52,7 @@ const SEED_CAPS: [string, Kind, string][] = [
   ['ecc:code-review', 'command', 'Review local changes or a pull request'],
   ['ecc:python-review', 'command', 'Run a Python code review'],
   ['user:deploy-staging', 'workflow', 'Build, migrate and deploy to staging'],
+  ['ecc:review-loop', 'workflow', 'Plugin-managed review loop (read-only in the editor)'],
   ['user:changelog', 'command', 'Draft a changelog entry from the last commits'],
   [`${nsOf('claudethecaller')}:release-checklist`, 'workflow', 'Changelog, version bump, tag and publish'],
 ]
@@ -269,7 +270,7 @@ function capRow(c: Cap, project: string | null): Capability {
 }
 function capDetail(c: Cap, project: string | null): CapabilityDetail {
   return { ...capRow(c, project), name: c.name, invoke: invokeOf(c), path: c.path, body: c.body, summary: null, triggers: [],
-    editable: editable(c.namespace), vectors: 1, cluster_members: c.cluster_id ? caps.filter(x => x.cluster_id === c.cluster_id && x.id !== c.id).map(x => x.id) : [],
+    editable: editable(c.namespace), vectors: 1, steps: c.kind === 'workflow' ? c.steps ?? [] : null, cluster_members: c.cluster_id ? caps.filter(x => x.cluster_id === c.cluster_id && x.id !== c.id).map(x => x.id) : [],
     recent_decisions: decisions.filter(d => d.steps.some(s => s.cap_id === c.id)).slice(0, 20) }
 }
 function memDetail(m: Memory): MemoryDetail {

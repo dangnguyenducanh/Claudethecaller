@@ -6,10 +6,11 @@ import Library from './Library'
 import Memories from './Memories'
 import Overview from './Overview'
 import Sessions from './Sessions'
+import Workflows from './Workflows'
 import type { Health, Project, ProjectDetail, Range } from './types'
 import { colorOf, fmtTime } from './ui'
 
-const VIEWS = ['overview', 'library', 'sessions', 'memories', 'jobs', 'keys'] as const
+const VIEWS = ['overview', 'library', 'workflows', 'sessions', 'memories', 'jobs', 'keys'] as const
 type View = (typeof VIEWS)[number]
 const SHARED_ONLY: View[] = ['keys']
 export type ViewProps = { project: string | null; range: Range; setRange: (r: Range) => void; projects: string[] }
@@ -25,6 +26,7 @@ function parseHash(): { view: View; decision: number | null } {
 const ICONS: Record<View, string> = {
   overview: 'M3 13h4v8H3zM10 3h4v18h-4zM17 9h4v12h-4z',
   library: 'M4 4h6v16H4zM14 4h6v16h-6z',
+  workflows: 'M5 5h5v5H5zM14 14h5v5h-5zM7.5 10v3a2 2 0 0 0 2 2H14',
   sessions: 'M4 6h16M4 12h16M4 18h10',
   keys: 'M15 7a4 4 0 1 1-3.4 6L4 20.6V17h3v-2h2v-2h2.6A4 4 0 0 1 15 7z',
   jobs: 'M12 7v5l3 2M21 12a9 9 0 1 1-3-6.7M21 4v5h-5',
@@ -142,6 +144,7 @@ export default function App() {
       <main className="main" key={rev}>
         {view === 'overview' && <Overview {...props} decisionId={decisionId} onDecision={setDecisionId} />}
         {view === 'library' && <Library {...props} />}
+        {view === 'workflows' && <Workflows {...props} theme={theme} />}
         {view === 'sessions' && <Sessions {...props} />}
         {view === 'memories' && <Memories {...props} />}
         {view === 'jobs' && <Jobs {...props} />}
@@ -185,7 +188,7 @@ function KeyPanel() {
       <div className="card pad form">
         <div className="brand" style={{ padding: 0 }}>claudethecaller</div>
         <div className="card-title">Enter API key</div>
-        <div className="card-sub">This daemon runs in shared mode. Create a key with <span className="mono">ctc keys new</span> or ask its owner.</div>
+        <div className="card-sub">This daemon runs in shared mode. Ask whoever runs it for a key.</div>
         <input type="password" autoFocus value={k} placeholder="ctc_…" aria-label="API key" onChange={e => setK(e.target.value)} onKeyDown={e => e.key === 'Enter' && save()} />
         <div className="actions"><button className="btn" style={{ borderColor: 'var(--accent)' }} onClick={save}>Save and reload</button></div>
       </div>
