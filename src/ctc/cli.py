@@ -87,12 +87,12 @@ def caps(query: str = typer.Argument("", help="Filter by text in the id or descr
     if as_json:
         print(json.dumps([{"id": c.id, "kind": c.kind, "invoke": c.invoke, "description": c.description} for c in rows[:limit]], indent=2, ensure_ascii=False))
         return
-    t = Table(title=f"{len(rows)} capabilities" + (f" (showing {limit})" if len(rows) > limit else ""), title_justify="left", header_style="dim")
-    t.add_column("id", style="bold", no_wrap=True)
-    t.add_column("kind")
-    t.add_column("description", overflow="ellipsis", max_width=80, no_wrap=True)
+    t = Table(title=f"{len(rows)} capabilities" + (f" (showing {limit})" if len(rows) > limit else ""), title_justify="left", header_style="dim", expand=True)
+    t.add_column("id", style="bold", no_wrap=True, overflow="ellipsis", ratio=2)
+    t.add_column("kind", width=8)
+    t.add_column("description", overflow="ellipsis", no_wrap=True, ratio=3)
     for c in rows[:limit]:
-        t.add_row(c.id, _kind(c.kind), c.description)
+        t.add_row(c.id, _kind(c.kind), " ".join(c.description.split()))
     out.print(t)
 
 
@@ -116,15 +116,15 @@ def search_cmd(query: str = typer.Argument(..., help="A coding prompt, e.g. \"fi
     if res.abstained:
         out.print(f"[yellow]no confident match[/] — the router would stay quiet. See why: [bold]ctc explain \"{query}\"[/]")
         return
-    t = Table(header_style="dim", title=f"[dim]{sum(res.ms.values()):.0f} ms[/]", title_justify="right")
-    t.add_column("#", justify="right", style="dim")
-    t.add_column("capability", style="bold", no_wrap=True)
-    t.add_column("kind")
-    t.add_column("score", justify="right")
-    t.add_column("what it does", overflow="ellipsis", max_width=70, no_wrap=True)
+    t = Table(header_style="dim", title=f"[dim]{sum(res.ms.values()):.0f} ms[/]", title_justify="right", expand=True)
+    t.add_column("#", justify="right", style="dim", width=2)
+    t.add_column("capability", style="bold", no_wrap=True, overflow="ellipsis", ratio=2)
+    t.add_column("kind", width=8)
+    t.add_column("score", justify="right", width=6)
+    t.add_column("what it does", overflow="ellipsis", no_wrap=True, ratio=3)
     for i, h in enumerate(res.hits, 1):
         cap = ctx.store.get(h.cap_id)
-        t.add_row(str(i), cap["invoke"], _kind(cap["kind"]), f"{h.score:.3f}", cap["description"])
+        t.add_row(str(i), cap["invoke"], _kind(cap["kind"]), f"{h.score:.3f}", " ".join(cap["description"].split()))
     out.print(t)
 
 
@@ -134,10 +134,13 @@ def explain(query: str = typer.Argument(..., help="A coding prompt."),
     """Every search stage for a prompt: why each hit ranked where it did."""
     ctx, res = _search(query, k)
     fmt = lambda v, d=2: "—" if v is None else (f"{v:.{d}f}" if isinstance(v, float) else str(v))
-    t = Table(header_style="dim", title=f"[bold]{query}[/]  " + ("[yellow]abstained[/]" if res.abstained else f"[green]{len(res.hits)} suggested[/]"), title_justify="left")
-    for col, just in [("#", "right"), ("capability", "left"), ("kind", "left"), ("dense", "right"), ("dense #", "right"),
-                      ("keyword #", "right"), ("rrf", "right"), ("rerank", "right"), ("final", "right"), ("", "left")]:
-        t.add_column(col, justify=just, no_wrap=True)
+    t = Table(header_style="dim", title=f"[bold]{query}[/]  " + ("[yellow]abstained[/]" if res.abstained else f"[green]{len(res.hits)} suggested[/]"), title_justify="left", expand=True)
+    t.add_column("#", justify="right", width=2)
+    t.add_column("capability", no_wrap=True, overflow="ellipsis", ratio=1)
+    t.add_column("kind", width=8)
+    for col in ("dense", "dense #", "keyword #", "rrf", "rerank", "final"):
+        t.add_column(col, justify="right", width=9 if col == "keyword #" else 7)
+    t.add_column("", width=24, no_wrap=True, overflow="ellipsis")
     shown = {h.cap_id for h in res.hits}
     for i, h in enumerate(res.considered, 1):
         s = h.stages
