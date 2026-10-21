@@ -43,13 +43,27 @@ class ProjectRename(BaseModel):
     name: str = Field(min_length=1, max_length=200)
 
 
+class KpiDelta(BaseModel):  # KPI_KEYS -> change vs the previous window (fraction); None for range=all
+    routing_calls: float | None
+    adoption_rate: float | None
+    lazy_misses: float | None
+    p95_ms: float | None
+
+
+class KpiSpark(BaseModel):  # KPI_KEYS -> one value per day
+    routing_calls: list[float]
+    adoption_rate: list[float]
+    lazy_misses: list[float]
+    p95_ms: list[float]
+
+
 class Kpis(BaseModel):
     routing_calls: float
     adoption_rate: float  # 0..1, followed / non-abstained
     lazy_misses: float  # non-abstained - followed
     p95_ms: float
-    delta: dict[str, float | None]  # KPI_KEYS -> change vs the previous window (fraction); None for range=all
-    spark: dict[str, list[float]]  # KPI_KEYS -> one value per day
+    delta: KpiDelta
+    spark: KpiSpark
 
 
 class Series(BaseModel):
@@ -92,6 +106,11 @@ class Activity(BaseModel):
     per_active_day: float
 
 
+class WorkflowStep(BaseModel):
+    cap: str
+    agent: str | None = None
+
+
 class Capability(BaseModel):
     id: str
     kind: Kind
@@ -114,11 +133,7 @@ class CapabilityDetail(Capability):
     vectors: int
     cluster_members: list[str]
     recent_decisions: list[Decision]
-
-
-class WorkflowStep(BaseModel):
-    cap: str
-    agent: str | None = None
+    steps: list[WorkflowStep] | None = None  # workflows only
 
 
 class NewCapability(BaseModel):
@@ -251,6 +266,19 @@ class ApiKey(BaseModel):
     created_at: datetime
     revoked_at: datetime | None
     key: str | None = None  # only on create, shown once
+
+
+Svc = Literal["ok", "down"]
+
+
+class Health(BaseModel):
+    db: Svc
+    redis: Svc
+    embedder: Svc
+    reranker: Svc
+    llm: Svc
+    library_version: str
+    mode: Literal["local", "shared"]
 
 
 class NewApiKey(BaseModel):

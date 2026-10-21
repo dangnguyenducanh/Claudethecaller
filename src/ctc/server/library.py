@@ -59,7 +59,6 @@ from ctc.server.schemas import (
     Override,
     OverrideSet,
     Scope,
-    WorkflowStep,
     to_decision,
     to_memory,
 )
@@ -87,10 +86,6 @@ where (%(id)s::text is null or c.id = %(id)s) and (%(kind)s::text is null or c.k
 order by c.updated_at desc, c.id limit %(n)s
 """
 DETAIL_COLS = ", c.name, c.invoke, c.path, c.body, c.summary, c.triggers, (select count(*) from cap_vectors v where v.cap_id = c.id) as vectors"
-
-
-class CapabilityOut(CapabilityDetail):  # ponytail: types.ts has `steps`, schemas.CapabilityDetail not yet; move it there
-    steps: list[WorkflowStep] | None = None
 
 
 async def _caps(st, u: str, pid: str | None, cap_id: str | None = None, detail: bool = False, kind=None, ns=None, ovr=None,
@@ -154,7 +149,7 @@ async def capabilities(request: Request, project: str | None = None, q: str | No
     return await _caps(st, u, await project_id(st, u, project), kind=kind, ns=namespace, ovr=override, q=q, n=max(1, min(limit, 500)))
 
 
-@router.get("/capabilities/{cap_id}", response_model=CapabilityOut)
+@router.get("/capabilities/{cap_id}", response_model=CapabilityDetail)
 async def capability(cap_id: str, request: Request, project: str | None = None):
     st, u = ctx(request)
     rows = await _caps(st, u, await project_id(st, u, project), cap_id, detail=True)

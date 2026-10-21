@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from pathlib import Path
 
@@ -88,6 +89,4 @@ async def run(project_dir: Path) -> dict:
 
 
 if __name__ == "__main__":
-    import asyncio
-
     print(asyncio.run(run(Path.cwd())))

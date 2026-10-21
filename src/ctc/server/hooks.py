@@ -27,6 +27,7 @@ from ctc.memory.longterm import recall
 from ctc.memory.session import blend, project_vector, session_vector
 from ctc.retrieval.hybrid import result_json, search
 from ctc.server.jobs import submit
+from ctc.server.schemas import Health
 from ctc.server.state import State
 from ctc.server.writer import write
 
@@ -283,7 +284,7 @@ async def _probe(aw) -> str:
         return "down"
 
 
-@router.get("/v1/health")
+@router.get("/v1/health", response_model=Health)
 async def health(request: Request) -> dict:
     st = _st(request)
     provider, rest = st.llm.spec.split(":", 1)
