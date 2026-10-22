@@ -23,7 +23,12 @@ HANDLERS = {
     "extract": "ctc.ai.extract:run_job",
     "backfill": "ctc.ai.extract:run_backfill",
     "import_memory": "ctc.memory.longterm:run_import",
+    "history": "ctc.ingestion.history:run_job",
+    "distill": "ctc.ingestion.history:run_distill",
 }
+# ponytail: no timeout for these: a first import or a long session's distill (LLM chunks + replay) passes 60 s; a hung
+# LLM call holds the worker until the openai client's own 600 s timeout. Per-kind timeouts if that bites.
+UNTIMED = {"index", "history", "distill"}
 COLS = "id::text as id, kind, status, progress, result, error, created_at"
 
 
@@ -55,7 +60,7 @@ async def list_jobs(st, status: str | None = None, kind: str | None = None, limi
 
 
 async def _run(st, job_id: str) -> None:
-    """1 + jobs.retries attempts (timeout jobs.timeout_s, index exempt), fewer if `attempts` reaches dead_after;
+    """1 + jobs.retries attempts (timeout jobs.timeout_s, UNTIMED exempt), fewer if `attempts` reaches dead_after;
     then failed with the last error."""
     jc = st.cfg["jobs"]
     job = await st.store.fetchrow(  # atomic claim: N daemons never run one job twice
@@ -80,7 +85,7 @@ async def _run(st, job_id: str) -> None:
         n = await st.store.fetchval("update jobs set attempts = attempts + 1, updated_at = now() where id = %s returning attempts", (job_id,))
         try:
             run = _handler(job["kind"])(st, job["payload"], progress)
-            result = await (run if job["kind"] == "index" else asyncio.wait_for(run, jc["timeout_s"]))
+            result = await (run if job["kind"] in UNTIMED else asyncio.wait_for(run, jc["timeout_s"]))
         except Exception as e:
             err = f"{type(e).__name__}: {e}"
             log.exception("job %s (%s) attempt %d failed", job_id, job["kind"], n)

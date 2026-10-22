@@ -1,5 +1,5 @@
 -- claudethecaller schema (PLAN.md B3). Idempotent; Store.open() replaces {schema} with a code constant (ctc, ctc_skillret).
--- ponytail: `create ... if not exists` cannot add columns to an existing table; migrations come when the first real DB exists.
+-- Columns added after a table first shipped go in `alter table … add column if not exists` (create … if not exists skips them).
 
 -- The whole file runs as one implicit transaction (simple query): the advisory lock serializes concurrent applies
 -- (N workers starting at once otherwise hit 'tuple concurrently updated' / duplicate pg_namespace rows).
@@ -162,6 +162,28 @@ create table if not exists {schema}.jobs (
   updated_at timestamptz not null default now()
 );
 
+-- B9 history import (PLAN.md "History import design"): one row per main transcript; size/mtime cover its subagents/ too
+create table if not exists {schema}.history_files (
+  user_id text not null default 'local',
+  path text not null,
+  session_id text,
+  size bigint not null default 0,   -- bytes of <session>.jsonl + <session>/subagents/*.jsonl
+  mtime bigint not null default 0,  -- newest st_mtime_ns of those files
+  rows int not null default 0,
+  status text not null default 'imported' check (status in ('imported', 'skipped', 'failed')),
+  error text,
+  imported_at timestamptz not null default now(),
+  primary key (user_id, path)
+);
+alter table {schema}.sessions
+  add column if not exists source text not null default 'hook' check (source in ('hook', 'history')),
+  add column if not exists status text not null default 'processed' check (status in ('pending', 'processed', 'failed')),
+  add column if not exists summary text,
+  add column if not exists git_branch text,
+  add column if not exists transcript_path text,
+  add column if not exists processed_at timestamptz;
+alter table {schema}.decisions add column if not exists source text not null default 'hook' check (source in ('hook', 'history'));
+
 create table if not exists {schema}.api_keys (
   id bigserial primary key,
   key_hash text not null unique,
@@ -183,3 +205,4 @@ alter table {schema}.memories enable row level security;
 alter table {schema}.dedup_review enable row level security;
 alter table {schema}.jobs enable row level security;
 alter table {schema}.api_keys enable row level security;
+alter table {schema}.history_files enable row level security;

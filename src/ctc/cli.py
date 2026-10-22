@@ -408,6 +408,84 @@ def daemon_status(as_json: bool = typer.Option(False, "--json", help="Print JSON
         raise typer.Exit(1)
 
 
+# ---- history ------------------------------------------------------------------
+
+history = typer.Typer(no_args_is_help=True, help="Import Claude Code history: sessions, decisions, memories (B9).")
+app.add_typer(history, name="history")
+
+
+def _history_card(s: dict, title: str) -> None:
+    out.print(header("History", title, s["root"]))
+    out.print(Columns([
+        kpi("Transcripts", BLUE, f"{s['files']}", f"{s['imported']} imported"),
+        kpi("Pending", WARN if s["pending"] else FAINT, f"{s['pending']}", "sessions to distill"),
+        kpi("Processed", GREEN, f"{s['processed']}", "titles, intents, memories"),
+        kpi("Failed", BAD if s["failed"] else FAINT, f"{s['failed']}", "retried on the next import"),
+    ]))
+    if j := s["last_job"]:
+        color = {"done": GREEN, "failed": BAD}.get(j["status"], WARN)
+        res = " · ".join(f"{k} {v}" for k, v in (j["result"] or {}).items() if v)
+        out.print(f"{dot(color)} last import {tag(j['status'], color)}  [{FAINT}]{j['created_at'].astimezone():%Y-%m-%d %H:%M} · {res or j['error'] or ''}[/]")
+
+
+@history.command("status")
+def history_status() -> None:
+    """Transcripts found and imported; sessions pending, processed and failed."""
+    from ctc.ingestion import history as hist
+
+    async def go() -> dict:
+        s = await Store.open(cfg()["database_url"], pool_max=1)
+        try:
+            return await hist.status(s, "local", cfg()["claude_home"])
+        finally:
+            await s.close()
+    _history_card(_run(go()), "Claude history")
+
+
+@history.command("import")
+def history_import(no_process: bool = typer.Option(False, "--no-process", help="Scan only: no LLM distill."),
+                   project: str = typer.Option("", "--project", "-p", help="Only this project (name or folder name).")) -> None:
+    """Scan ~/.claude/projects transcripts (seconds), then distill each pending session with the local LLM. A running
+    daemon does the work (its worker owns the one LLM slot); without one it runs here."""
+    from ctc.ingestion import history as hist
+    from ctc.server import jobs
+    from ctc.server.state import close_state, open_state
+
+    async def go() -> tuple[dict, dict]:
+        st = await open_state()
+        try:
+            job_id = await jobs.submit(st, "history", {"process": not no_process, **({"projects": [project]} if project else {})})
+            daemon = _health() is not None
+            with out.status(f"[{MUTED}]scanning transcripts{' (daemon)' if daemon else ''}…[/]", spinner_style=BLUE) as sp:
+                if daemon:  # follow the daemon's jobs: the history job, then its distill jobs
+                    while True:
+                        await asyncio.sleep(1)
+                        j, s = await jobs.get_job(st, job_id), await hist.status(st.store, "local", st.cfg["claude_home"])
+                        busy = await st.store.fetchval("select count(*) from jobs where user_id = 'local' and kind in ('history', 'distill')"
+                                                       " and status in ('queued', 'running')")
+                        sp.update(f"[{MUTED}]daemon: {s['processed']} processed · {s['pending']} pending · {busy} jobs left…[/]")
+                        if j["status"] in ("done", "failed") and (no_process or not busy):
+                            break
+                else:
+                    await jobs._run(st, job_id)
+                    todo = [] if no_process else await st.store.fetch(
+                        "select id::text as id from jobs where user_id = 'local' and kind = 'distill' and status = 'queued' order by created_at")
+                    for i, r in enumerate(todo, 1):
+                        sp.update(f"[{MUTED}]distilling session {i}/{len(todo)} with the local LLM…[/]")
+                        await jobs._run(st, r["id"])
+                    if todo:
+                        await hist.outcomes(st)  # the history job ran phase 3 before these distills
+            return await jobs.get_job(st, job_id), await hist.status(st.store, "local", st.cfg["claude_home"])
+        finally:
+            await close_state(st)
+
+    j, s = _run(go())
+    _history_card(s, "Claude history imported" if j["status"] == "done" else "Claude history import failed")
+    if j["status"] != "done":
+        err.print(f"[{BAD}]●[/] {j['error']}")
+        raise typer.Exit(1)
+
+
 # ---- install ------------------------------------------------------------------
 
 # event -> (route, curl max seconds); ours are recognised by the socket name in the command

@@ -206,17 +206,18 @@ def _usage(path: Path) -> tuple[str, int]:
 
 
 EXTRACT_EVERY_S = 1800
-INFLIGHT_SQL = ("select 1 from jobs where user_id = %s and kind = 'extract' and status in ('queued', 'running')"
+INFLIGHT_SQL = ("select 1 from jobs where user_id = %s and kind = %s and status in ('queued', 'running')"
                 " and payload->>'session_id' = %s limit 1")
 
 
 async def _want_extract(st: State, sid: str, end: bool, user_id: str) -> bool:
     """Stop fires after every turn: extract at most once per EXTRACT_EVERY_S per session (Redis SET NX; Redis down =
-    skip, fail-open). SessionEnd always extracts. Both skip while an extract job for the session is queued or running.
+    skip, fail-open). SessionEnd always distills (B9: title, summary, intents in place of raw prompts, then A3 extraction).
+    Both skip while a job of their kind for the session is queued or running.
     ponytail: a session killed without SessionEnd loses its last < 30 min to extraction until `backfill` re-reads it."""
     if not end and not await st.cache._safe(st.cache.r.set(f"ctc:extract:{sid}", 1, nx=True, ex=EXTRACT_EVERY_S)):
         return False
-    return await st.store.fetchval(INFLIGHT_SQL, (user_id, sid)) is None
+    return await st.store.fetchval(INFLIGHT_SQL, (user_id, "distill" if end else "extract", sid)) is None
 
 
 async def _stop(st: State, body: dict, user_id: str) -> None:
@@ -236,7 +237,7 @@ async def _stop(st: State, body: dict, user_id: str) -> None:
                 model, tokens = await asyncio.to_thread(_usage, p)
         await write(st, "session_end", {"id": sid, "model": model, "tokens": tokens})
         if path and await _want_extract(st, sid, end, user_id):
-            await submit(st, "extract", {"session_id": sid, "transcript_path": str(path),
+            await submit(st, "distill" if end else "extract", {"session_id": sid, "transcript_path": str(path),
                                          "project_id": project_id(cwd) if cwd else None, "user_id": user_id}, user_id)
     except Exception:
         log.exception("hook/stop failed")

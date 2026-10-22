@@ -20,6 +20,7 @@ import openai
 from pydantic import Field, create_model
 
 from ctc.config import ROOT, cfg
+from ctc.ingestion.history import typed_prompt
 from ctc.ingestion.scanner import default_roots, scan_library
 from ctc.llm.client import llm_from_env
 
@@ -32,16 +33,8 @@ def _sha(s: str) -> str:
 
 
 def _text(row: dict) -> str:
-    """The user's typed prompt, or '' for meta / tool-result / system-injected rows."""
-    if row.get("type") != "user" or row.get("isMeta"):
-        return ""
-    c = row.get("message", {}).get("content")
-    parts = [{"type": "text", "text": c}] if isinstance(c, str) else c if isinstance(c, list) else []
-    if any(p.get("type") == "tool_result" for p in parts):
-        return ""
-    # Per part: IDE clients put an injected <ide_opened_file>/<ide_selection> part before the typed one.
-    texts = (p.get("text", "").strip() for p in parts if p.get("type") == "text")
-    return "\n".join(t for t in texts if t and not t.startswith(("<", "[Request interrupted")))[:2000]
+    """The user's typed prompt, or '' for meta / tool-result / system-injected rows (filter shared with B9's import)."""
+    return typed_prompt(row)[:2000]
 
 
 def turns(projects: Path) -> list[dict]:

@@ -65,6 +65,8 @@ async def lifespan(app: FastAPI):
             await submit(st, "index", {})  # no cwd: user + plugin roots (the daemon's cwd is not a project)
             if st.cfg["mode"] == "local":
                 await submit(st, "import_memory", {})
+                if st.cfg["history"]["on_start"]:  # incremental: unchanged transcripts are skipped by (size, mtime)
+                    await submit(st, "history", {})
         st.tasks.append(asyncio.create_task(_warm(st)))
         async with mcp.session_manager.run():
             yield
