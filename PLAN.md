@@ -220,6 +220,8 @@ Four tracks. H = owner step. Commit after each step.
   - **Done 2026-10-21**: 77 dev prompts through `/v1/route`: cold p95 105 ms, Redis (semantic) p95 6.9 ms, L1 p95 1.2 ms, all within target (dev DB, no Supabase hop yet); `data/reports/latency-2026-10-21.md`.
 - [ ] **K4 — memory + adoption**: Recall@5 with vs without `recall()` memories in the query vector; extraction precision from H4's file; follow rate = `avg(followed::int)` over `ctc.decisions` since H3.
 
+**Benchmark priority** (owner, 2026-10-22): SkillRet and MetaTool (clean, large) decide ranking and abstain tuning; own-transcript rows are a secondary in-domain check.
+
 **Targets** (shown in the report): Recall@5 ≥ 0.90 (200 hand-checked rows) · hybrid + rerank NDCG@10 ≥ dense-only (SkillRet) · false-trigger ≤ 10% · GPU ≤ 7 GB · route p95 ≤ 150 ms cold, ≤ 15 ms Redis hit, ≤ 10 ms L1 hit · semantic cache hit rate reported · memory lift ≥ 0 · extraction precision ≥ 0.80.
 
 ### Frontend — CLI + dashboard
