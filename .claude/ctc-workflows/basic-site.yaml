@@ -1,0 +1,80 @@
+name: basic-site
+description: 'Basic HTML/CSS site: coder in Docker, 3 parallel checks, merge, reviewer,
+  approval, publish'
+settings: {permission: container, allow_extra_usage: false, auto_resume: true, max_run_tokens: null}
+nodes:
+- id: start
+  type: trigger
+  pos: [0, 0]
+- id: coder
+  type: agent
+  pos: [240, 0]
+  prompt: 'Build a basic static website in site/: exactly site/index.html and site/styles.css,
+    no JavaScript, no external assets. Brief: {{input}}. Header with nav, hero with
+    a call-to-action, 3 cards, footer. Semantic HTML5 with lang and a viewport meta
+    tag, link styles.css, responsive CSS with CSS variables and one breakpoint at
+    640px, visible focus styles. Under 150 lines per file. Reply with one sentence
+    naming the files.'
+  model: sonnet
+  allowed_tools: [Read, Write, Edit, Glob]
+- id: html-ok
+  type: shell
+  pos: [564, -404]
+  command: 'grep -q ''<html lang='' site/index.html && grep -q viewport site/index.html
+    && echo ''html: lang + viewport ok'''
+  readonly: true
+- id: css-ok
+  type: shell
+  pos: [575, 0]
+  command: 'grep -q ''640px'' site/styles.css && grep -q -- ''--'' site/styles.css
+    && echo ''css: variables + 640px breakpoint ok'''
+  readonly: true
+- id: link-ok
+  type: shell
+  pos: [594, 408]
+  command: grep -q 'styles.css' site/index.html && echo 'html links styles.css'
+  readonly: true
+- id: checks
+  type: merge
+  pos: [1200, 0]
+- id: reviewer
+  type: agent
+  pos: [1440, 0]
+  prompt: 'Review site/index.html and site/styles.css as a front-end reviewer: semantic
+    HTML, accessibility (lang, headings, focus, contrast), responsive layout at 375px
+    and 1280px. Checks from the pipeline: {{checks.inputs}}. Report at most 4 real
+    problems; verdict is pass or fix.'
+  model: sonnet
+  json_schema:
+    type: object
+    properties:
+      verdict:
+        type: string
+        enum: [pass, fix]
+      issues:
+        type: array
+        items: {type: string}
+    required: [verdict, issues]
+  readonly: true
+- id: publish-gate
+  type: approval
+  pos: [1680, 0]
+  message: Reviewer says {{reviewer.structured_output.verdict}}. Publish the site
+    from {{run.branch}}?
+- id: publish
+  type: shell
+  pos: [1920, 0]
+  command: mkdir -p public && cp site/index.html site/styles.css public/ && ls -l
+    public
+edges:
+- {from: start, to: coder}
+- {from: coder, to: html-ok}
+- {from: coder, to: css-ok}
+- {from: coder, to: link-ok}
+- {from: html-ok, to: checks}
+- {from: css-ok, to: checks}
+- {from: link-ok, to: checks}
+- {from: checks, to: reviewer}
+- {from: reviewer, to: publish-gate}
+- {from: publish-gate, to: publish}
+steps: []

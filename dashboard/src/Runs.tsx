@@ -113,12 +113,13 @@ function RunPage({ id, theme, onBack }: { id: number; theme: string; onBack: () 
       {run.status === 'waiting' && (
         <div className="card pad form st-waiting">
           <div className="card-title">Waiting at {wait?.node_id ?? 'an approval'}: {wait?.input || 'approve to go on'}</div>{/* input: the message, templates filled */}
-          <DiffOf load={() => api.runDiff(run.id)} dep={run.status} />
-          <label>Note (optional)<input value={note} onChange={e => setNote(e.target.value)} /></label>
+          {/* one row + a folded diff: the full diff here pushed the canvas below the fold (run 58) */}
           <div className="actions">
+            <input className="inline-input" placeholder="Note (optional)" aria-label="Note" value={note} onChange={e => setNote(e.target.value)} />
             <button className="btn" style={{ borderColor: 'var(--accent)' }} onClick={act(() => api.approveRun(run.id, { approve: true, note: note || undefined }))}>Approve</button>
             <button className="btn danger" onClick={act(() => api.approveRun(run.id, { approve: false, note: note || undefined }))}>Reject</button>
           </div>
+          <details><summary className="muted">Run diff so far</summary><DiffOf load={() => api.runDiff(run.id)} dep={run.status} /></details>
         </div>
       )}
       {run.status === 'quota' && (

@@ -124,6 +124,8 @@ We'll know we're right when:
   - WH2: the owner's first real chain, then the PR.
   - Unverified: `ctc runner upgrade`, `on_error: continue`, a real usage-limit message.
 
+**Final hand-driven test (2026-10-22)** (`docs/screenshots/runner-m3-m6-basic-website-by-hand.mp4`): a basic HTML/CSS site workflow built by hand in the editor — coder in container mode → 3 read-only checks in parallel → merge → read-only reviewer (JSON verdict) → approval → publish. Schedule set and removed, Export refused (approval node), first run rejected at the gate, second run approved and published; the site renders at 1280 px and 390 px. Fixed during it: agent nodes stopped after a plan because the repo's CLAUDE.md says "propose first" (every node is now told it runs unattended); the merge step showed the run input; the approval banner pushed the canvas off-screen.
+
 ## Owner decisions (2026-10-22)
 | # | Question | Decision |
 |---|---|---|

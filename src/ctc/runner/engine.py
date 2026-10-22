@@ -255,6 +255,8 @@ def _input(node: dict, ctx: dict, resume: str | None) -> tuple[str, list[str] | 
         return f"{node.get('path')} {node.get('op')} {node.get('value')!r}", None
     if node["type"] == "approval":
         return render(node.get("message") or "", ctx), None
+    if node["type"] == "merge":  # its inputs are the joined nodes' outputs, shown as the step's output
+        return "", None
     return ctx["input"], None
 
 

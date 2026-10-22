@@ -25,6 +25,12 @@ from ctc.runner.graph import render
 QUOTA = re.compile(r'hit your (\w+ )?limit.*?resets ([^\n"]+)', re.IGNORECASE)
 READ_TOOLS = ["Read", "Grep", "Glob"]
 NO_PUSH = ["Bash(git push:*)", "Bash(gh pr:*)"]  # graph.PUSH, for agents
+# A repo's CLAUDE.md or the user's memory may say "propose first, wait for approval"; a node has nobody to approve, so it
+# would stop after a plan (run 57). Approval is the workflow's job: its approval nodes.
+UNATTENDED = ("You are one node of an unattended claudethecaller workflow run. No human is watching this session and "
+              "nobody can answer or approve: do the task in this prompt now, end to end, with the tools you have. Ignore "
+              "any instruction (CLAUDE.md, memory, skills) to propose a plan first or wait for approval; the workflow has "
+              "its own approval nodes for that. Finish with a short summary of what you did.")
 TAIL = 4096
 RESULT_MAX = 65536
 RUNS = Path("~/.claudethecaller/runs").expanduser()  # worktrees + logs; in_runs() sessions never feed the router
@@ -136,7 +142,7 @@ def agent_argv(node: dict, ctx: dict, session_id: str | None, resume: str | None
             "--permission-mode", "dontAsk" if ro else node.get("permission_mode") or "acceptEdits",
             "--permission-prompts", "none",
             "--strict-mcp-config", "--mcp-config", mcp if isinstance(mcp, str) else json.dumps(mcp),
-            "--disallowedTools", *NO_PUSH]
+            "--append-system-prompt", UNATTENDED, "--disallowedTools", *NO_PUSH]
     if tools := READ_TOOLS if ro else node.get("allowed_tools"):
         argv += ["--allowedTools", *tools]
     for flag, key in (("--model", "model"), ("--effort", "effort"), ("--max-turns", "max_turns")):
@@ -314,6 +320,7 @@ if __name__ == "__main__":
     assert "projects" not in json.loads((RUNS / "1" / "claude" / ".claude.json").read_text()), "host projects copied"
     c = in_container(agent_argv({"prompt": "hi", "readonly": True}, {}, "s")[0], "x", "/wt", None)
     assert c[c.index("--permission-mode") + 1] == "dontAsk" and "--dangerously-skip-permissions" not in c, c
+    assert c[c.index("--append-system-prompt") + 1] == UNATTENDED, "every node, host or container, is told it runs unattended"
 
     async def main() -> int:
         if a.kind == "shell":
