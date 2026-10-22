@@ -1,0 +1,93 @@
+# Required checks for PRs into staging and main (PLAN.md "Git workflow and CI/CD"); scripts/check.sh runs the same locally.
+# Model servers (TEI, llama-server) need a GPU, so nothing here calls them.
+name: ci
+
+on:
+  pull_request:
+    branches: [staging, main]
+  push:
+    branches: [staging, main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: { python-version: "3.12", enable-cache: true }
+      - run: uv sync --frozen
+      - run: uv run ruff check src evaluation scripts tests
+      - run: uv run pytest -q tests
+      - name: Import smoke
+        run: uv run python -c "import ctc.server.app, ctc.cli"
+
+  db-selfchecks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env: { POSTGRES_PASSWORD: ci }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 30
+      redis:
+        image: redis:8.2
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      CTC_DATABASE_URL: postgresql://postgres:ci@127.0.0.1:5432/postgres
+      CTC_REDIS_URL: redis://127.0.0.1:6379/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: { python-version: "3.12", enable-cache: true }
+      - run: uv sync --frozen
+      - run: uv run python -m ctc.storage.store
+      - run: uv run python -m ctc.storage.cache
+      - run: uv run python -m ctc.decision.bundle
+
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: dashboard/pnpm-lock.yaml }
+      - run: pnpm -C dashboard install --frozen-lockfile
+      - run: pnpm -C dashboard build
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ponytail: default pull_request types, so a fixed title needs "Re-run jobs" (adding `edited` would rerun all of CI on every PR edit)
+  pr-title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            perf
+            test
+            chore
+            ci
+            refactor

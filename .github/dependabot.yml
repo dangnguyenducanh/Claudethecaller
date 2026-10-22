@@ -1,0 +1,21 @@
+# Weekly update PRs into staging; the conventional prefix keeps the pr-title check green.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    target-branch: staging
+    open-pull-requests-limit: 2
+    commit-message: { prefix: ci, include: scope }
+  - package-ecosystem: npm
+    directory: /dashboard
+    schedule: { interval: weekly }
+    target-branch: staging
+    open-pull-requests-limit: 3
+    commit-message: { prefix: chore, include: scope }
+  - package-ecosystem: uv
+    directory: /
+    schedule: { interval: weekly }
+    target-branch: staging
+    open-pull-requests-limit: 3
+    commit-message: { prefix: chore, include: scope }
