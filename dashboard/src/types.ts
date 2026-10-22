@@ -6,6 +6,7 @@ export type Kind = 'skill' | 'agent' | 'command' | 'workflow'
 export type Override = 'pin' | 'block' | 'disable'
 export type MemoryKind = 'preference' | 'convention' | 'fact' | 'skill_outcome'
 export type Ok = { ok: true }
+export type Source = 'hook' | 'history' // live hooks vs imported Claude history (PLAN.md "History import design")
 
 export interface Project { id: string; name: string; sessions: number }
 export interface ProjectDetail extends Project { path: string; decisions: number; memories: number; overrides: number; last_active: string | null }
@@ -28,6 +29,7 @@ export interface Decision {
   abstained: boolean; followed: boolean; latency_ms: number
   difficulty: string; model_tier: string; confidence: number
   steps: Step[]; stages: StageRow[]
+  source: Source // history rows store the distilled intent as `prompt`, never the raw text
 }
 
 export interface Activity {
@@ -55,6 +57,7 @@ export interface DedupPair { id: number; a: string; b: string; similarity: numbe
 export interface Session {
   id: string; project: string; title: string; model: string; started_at: string
   turns: number; tokens: number; decisions: number; followed: number; memories: number
+  source: Source; summary: string | null; status: 'pending' | 'processed' | 'failed'; git_branch: string | null
 }
 // Contract says `Session + {decisions: Decision[], memories: Memory[]}`; those names clash with Session's counts, so the arrays win here.
 export type SessionDetail = Omit<Session, 'decisions' | 'memories'> & { decisions: Decision[]; memories: Memory[] }
@@ -74,6 +77,8 @@ export interface Job {
   id: string; kind: string; status: 'queued' | 'running' | 'done' | 'failed'; progress: number
   result: Record<string, unknown> | null; error: string | null; created_at: string
 }
+export interface HistoryStatus { root: string; files: number; imported: number; pending: number; processed: number; failed: number; last_job: Job | null }
+export interface HistoryFile { path: string; session_id: string | null; size: number; status: string; error: string | null; imported_at: string | null }
 export interface IndexResult { added: number; changed: number; removed: number; vectors: number; embedded: number; library_version: string }
 
 export type Svc = 'ok' | 'down'

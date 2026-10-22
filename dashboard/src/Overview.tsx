@@ -8,6 +8,7 @@ import { Drawer, Header, Hexmap, KpiCard, Search, Segmented, colorOf, fmtDay, fm
 
 const RANGES = ['7d', '30d', '90d', 'all'] as const satisfies readonly Range[]
 const METRICS = ['calls', 'adoption', 'latency'] as const satisfies readonly Metric[]
+const SOURCES = { all: undefined, live: 'hook', history: 'history' } as const // decisions only; KPIs, timeline and activity stay all-source
 const RESULTS = { all: {}, followed: { followed: true }, ignored: { followed: false, abstained: false }, abstained: { abstained: true } } as const
 
 export default function Overview({ project, range, setRange, projects, decisionId, onDecision }: ViewProps & { decisionId: number | null; onDecision: (id: number | null) => void }) {
@@ -18,6 +19,7 @@ export default function Overview({ project, range, setRange, projects, decisionI
   const [q, setQ] = useState('')
   const [decisions, setDecisions] = useState<Decision[]>([])
   const [result, setResult] = useState<keyof typeof RESULTS>('all')
+  const [source, setSource] = useState<keyof typeof SOURCES>('all')
   const [more, setMore] = useState(false)
   const [act, setAct] = useState<Activity | null>(null)
   const [open, setOpen] = useState<Decision | null>(null)
@@ -33,11 +35,11 @@ export default function Overview({ project, range, setRange, projects, decisionI
     api.decision(decisionId).then(setOpen).catch(e => setLinkErr(errText(e)))
   }, [decisionId])
   const loadDecisions = (before?: number) =>
-    api.decisions({ range, project, q, ...RESULTS[result], before }).then(rows => {
+    api.decisions({ range, project, q, ...RESULTS[result], source: SOURCES[source], before }).then(rows => {
       setDecisions(ds => (before ? [...ds, ...rows] : rows))
       setMore(rows.length === PAGE)
     })
-  useEffect(() => { loadDecisions() }, [range, project, q, result]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadDecisions() }, [range, project, q, result, source]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = tl ? tl.days.map((day, i) => ({ day, ...Object.fromEntries(tl.series.map(s => [s.project, s.values[i]])) })) : []
   const big = !kpis ? '—' : metric === 'calls' ? fmtInt(kpis.routing_calls) : metric === 'adoption' ? fmtPct(kpis.adoption_rate) : fmtMs(kpis.p95_ms)
@@ -105,6 +107,7 @@ export default function Overview({ project, range, setRange, projects, decisionI
           <div className="pad chart-head">
             <div className="card-title">Decisions <span className="faint mono">{decisions.length}</span></div>
             <div className="toolbar">
+              <Segmented options={Object.keys(SOURCES) as (keyof typeof SOURCES)[]} value={source} onChange={setSource} />
               {(Object.keys(RESULTS) as (keyof typeof RESULTS)[]).map(r => (
                 <button key={r} className={'chip' + (r === result ? ' on' : '')} onClick={() => setResult(r)}>{r}</button>
               ))}

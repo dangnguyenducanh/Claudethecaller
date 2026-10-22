@@ -1,6 +1,6 @@
 import { ApiError } from './api'
 import type {
-  Activity, ApiKey, Capability, CapabilityDetail, Decision, DedupPair, Health, Job, Kind, Kpis, Memory, MemoryDetail, MemoryKind,
+  Activity, ApiKey, Capability, CapabilityDetail, Decision, DedupPair, Health, HistoryFile, HistoryStatus, Job, Kind, Kpis, Memory, MemoryDetail, MemoryKind,
   MemoryWrite, Project, ProjectDetail, Session, SessionDetail, StageRow, Step, Timeline, WorkflowStep,
 } from './types'
 
@@ -130,6 +130,7 @@ for (let d = 89; d >= 0; d--) {
     const n = Math.floor(rand() * 7 * busy * (1 - pi * 0.12))
     if (!n) continue
     const sid = `${hash8(project + day).slice(0, 8)}-${dayKey(day).replaceAll('-', '')}`
+    const source = d > 45 ? 'history' : 'hook' // ponytail: the mock's hooks went in 45 days ago; older sessions came from the history import
     let followed = 0
     for (let k = 0; k < n; k++) {
       const [prompt, ids] = pick(PROMPTS)
@@ -140,18 +141,25 @@ for (let d = 89; d >= 0; d--) {
         id: nextId++, at: new Date(day - (n - k) * 1_500_000).toISOString(), session_id: sid, project, prompt, abstained, followed: fol,
         latency_ms: rand() < 0.45 ? +(2 + rand() * 7).toFixed(1) : +(70 + rand() * 90 + (rand() < 0.08 ? 120 : 0)).toFixed(1),
         difficulty: pick(['trivial', 'standard', 'standard', 'complex', 'critical']), model_tier: pick(['haiku', 'sonnet', 'sonnet', 'opus']),
-        confidence: abstained ? 0.18 : +(0.6 + rand() * 0.35).toFixed(2), steps: abstained ? [] : makeSteps(ids), stages: makeStages(ids),
+        confidence: abstained ? 0.18 : +(0.6 + rand() * 0.35).toFixed(2), steps: abstained ? [] : makeSteps(ids), stages: makeStages(ids), source,
       })
     }
     const first = decisions[decisions.length - n]
     sessions.push({
       id: sid, project, title: first.prompt.slice(0, 80), model: pick(['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']),
       started_at: first.at, turns: n + Math.floor(rand() * 12), tokens: Math.floor((n + 2) * (300_000 + rand() * 900_000)), decisions: n, followed, memories: 0,
+      source, status: 'processed', git_branch: ['main', 'dev', `feat/${project}`][n % 3],
+      summary: `Goal: ${first.prompt}. Worked through ${n} routed prompts in ${project}. ${followed} of the suggested skills were used.`,
     })
   }
 }
 decisions.reverse() // newest first, ids descending
 sessions.reverse()
+// The newest imported sessions still wait for the local LLM (pending: no summary, no decisions yet); one failed it.
+const waiting = sessions.filter(s => s.source === 'history').slice(0, 4)
+waiting.forEach((s, i) => Object.assign(s, { status: i ? 'pending' : 'failed', summary: null, title: `${s.project} · ${s.started_at.slice(0, 10)}` }))
+decisions = decisions.filter(d => !waiting.some(s => s.id === d.session_id))
+const imported = () => sessions.filter(s => s.source === 'history')
 
 // ---- memories ----
 const memText = (m: Memory) => `${m.id} (${m.text.slice(0, 40)})`
@@ -189,6 +197,7 @@ const jobs = new Map<string, MockJob>([
   ['job-a1', { kind: 'index', created: Date.now() - 7_200_000, result: { added: 4, changed: 9, removed: 1, vectors: 23, embedded: 13, library_version: '3f9ac71e' }, fixed: { status: 'done', progress: 1 } }],
   ['job-a2', { kind: 'enrich', created: Date.now() - 3_600_000, result: null, fixed: { status: 'failed', progress: 0.35, error: 'llama-server: connection refused (127.0.0.1:18302)' } }],
   ['job-a3', { kind: 'backfill', created: Date.now() - 90_000, result: null, fixed: { status: 'running', progress: 0.4 } }],
+  ['job-a5', { kind: 'history', created: Date.now() - 2_400_000, result: { files: imported().length, changed: imported().length, events: 412, distill_jobs: 4 }, fixed: { status: 'done', progress: 1 } }],
   ['job-a4', { kind: 'import_memory', created: Date.now() - 1_800_000, result: { written: 12, skipped: 4 }, fixed: { status: 'done', progress: 1 } }],
 ])
 const newJob = (kind: string, result: Record<string, unknown>) => {
@@ -359,7 +368,7 @@ export function handle(method: string, path: string, body: unknown): unknown {
     case 'GET /decisions': {
       const followed = bool(p.get('followed')), abstained = bool(p.get('abstained')), sid = p.get('session_id')
       return page(inRange(ofProject(decisions, project), DAYS[range] ?? 30).filter(d =>
-        (!sid || d.session_id === sid) && (followed === null || d.followed === followed) && (abstained === null || d.abstained === abstained) &&
+        (!sid || d.session_id === sid) && (!p.get('source') || d.source === p.get('source')) && (followed === null || d.followed === followed) && (abstained === null || d.abstained === abstained) &&
         match(q, d.prompt, ...d.steps.map(s => s.cap_id))), p)
     }
     case 'GET /decisions/:id': return decisions.find(d => d.id === Number(id)) ?? fail(404, 'not_found', `no decision ${id}`)
@@ -403,7 +412,7 @@ export function handle(method: string, path: string, body: unknown): unknown {
       return { ok: true }
     }
 
-    case 'GET /sessions': return page(sessions.map(live).filter(s => (!project || s.project === project) && match(q, s.title, s.model) && (!p.get('range') || inRange([s], DAYS[range]).length)), p)
+    case 'GET /sessions': return page(sessions.map(live).filter(s => (!project || s.project === project) && match(q, s.title, s.model) && (!p.get('source') || s.source === p.get('source')) && (!p.get('range') || inRange([s], DAYS[range]).length)), p)
     case 'GET /sessions/:id': {
       const s = sessions.find(x => x.id === id) ?? fail(404, 'not_found', `no session ${id}`)
       return { ...live(s), decisions: decisions.filter(d => d.session_id === id), memories: memories.filter(m => m.source === `session ${id}`) } satisfies SessionDetail
@@ -439,6 +448,17 @@ export function handle(method: string, path: string, body: unknown): unknown {
       if (id === 'import') return newJob('import_memory', { written: 3, skipped: 9 })
       if (id === 'backfill') return newJob('backfill', { sessions: Number(b.sessions ?? 20), submitted: 4, skipped: 0 })
       return fail(404, 'not_found', `no route ${path}`)
+    case 'GET /history': {
+      const n = (st: Session['status']) => imported().filter(s => s.status === st).length
+      const last = [...jobs.keys()].reverse().find(k => jobs.get(k)!.kind === 'history')
+      return { root: '~/.claude/projects', files: imported().length, imported: imported().length, pending: n('pending'), processed: n('processed'),
+        failed: n('failed'), last_job: last ? jobView(last) : null } satisfies HistoryStatus
+    }
+    case 'GET /history/:id': return imported().map(s => ({
+      path: `~/.claude/projects/-home-me-code-${s.project}/${s.id}.jsonl`, session_id: s.id, size: s.tokens % 900_000 + 4_000, status: s.status,
+      error: s.status === 'failed' ? 'distill: intents count mismatch after 1 retry' : null, imported_at: new Date(Date.now() - 2_400_000).toISOString(),
+    })).filter(f => !p.get('status') || f.status === p.get('status')) satisfies HistoryFile[]
+    case 'POST /history/:id': return newJob('history', { files: imported().length, changed: 0, events: 0, distill_jobs: imported().filter(s => s.status !== 'processed').length })
     case 'GET /jobs': return [...jobs.keys()].reverse().map(jobView).filter(j => (!p.get('status') || j.status === p.get('status')) && (!p.get('kind') || j.kind === p.get('kind')))
     case 'GET /jobs/:id': return jobView(id)
 

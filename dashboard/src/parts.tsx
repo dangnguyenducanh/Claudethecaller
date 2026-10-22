@@ -41,7 +41,7 @@ export function DecisionDetail({ d, onDeleted }: { d: Decision; onDeleted: (id: 
         <h2 style={{ margin: '6px 0 0', fontSize: 18 }}>{d.prompt}</h2>
       </div>
       <div>
-        <span className="tag">{d.difficulty}</span><span className="tag">model: {d.model_tier}</span>
+        <span className="tag">{d.source === 'history' ? 'from history · intent' : 'live'}</span><span className="tag">{d.difficulty}</span><span className="tag">model: {d.model_tier}</span>
         <span className="tag">confidence {d.confidence.toFixed(2)}</span><span className="tag">{fmtMs(d.latency_ms)}</span>{resultTag(d)}
       </div>
       <div className="card-title">Bundle</div>

@@ -1,8 +1,8 @@
 import { handle } from './mock'
 import type {
-  Activity, ApiKey, Capability, CapabilityDetail, CapabilityPatch, Decision, DedupPair, Health, Job, Kind, Kpis, Memory, MemoryDetail,
+  Activity, ApiKey, Capability, CapabilityDetail, CapabilityPatch, Decision, DedupPair, Health, HistoryFile, HistoryStatus, Job, Kind, Kpis, Memory, MemoryDetail,
   MemoryKind, MemoryPatch, MemoryWrite, Metric, NewCapability, NewMemory, Ok, Override, Project, ProjectDetail, Range,
-  Session, SessionDetail, Timeline,
+  Session, SessionDetail, Source, Timeline,
 } from './types'
 
 export class ApiError extends Error {
@@ -93,7 +93,7 @@ export const api = {
   kpis: (range: Range, project: string | null) => req<Kpis>('GET', '/kpis' + qs({ range, project })),
   timeline: (range: Range, metric: Metric, project: string | null) => req<Timeline>('GET', '/timeline' + qs({ range, metric, project })),
   activity: (project: string | null) => req<Activity>('GET', '/activity' + qs({ project })),
-  decisions: (o: { range: Range; project: string | null; q?: string; session_id?: string; followed?: boolean; abstained?: boolean } & Page) =>
+  decisions: (o: { range: Range; project: string | null; q?: string; session_id?: string; followed?: boolean; abstained?: boolean; source?: Source } & Page) =>
     req<Decision[]>('GET', '/decisions' + qs(o)),
   decision: (id: number) => req<Decision>('GET', `/decisions/${id}`),
   deleteDecision: (id: number) => req<Ok>('DELETE', `/decisions/${id}`),
@@ -113,7 +113,7 @@ export const api = {
   resolveDedup: (id: number, action: 'merge' | 'keep_apart') => req<Ok>('POST', `/dedup/${id}`, { action }),
 
   // Sessions
-  sessions: (o: { project: string | null; q?: string; range?: Range } & Page) => req<Session[]>('GET', '/sessions' + qs(o)),
+  sessions: (o: { project: string | null; q?: string; range?: Range; source?: Source } & Page) => req<Session[]>('GET', '/sessions' + qs(o)),
   session: (id: string) => req<SessionDetail>('GET', `/sessions/${seg(id)}`),
   deleteSession: (id: string) => req<Ok>('DELETE', `/sessions/${seg(id)}`),
 
@@ -140,4 +140,9 @@ export const api = {
   reindex: (project: string | null) => req<{ job_id: string }>('POST', '/index', { project }),
   jobs: (o: { status?: Job['status']; kind?: string; limit?: number } = {}) => req<Job[]>('GET', '/jobs' + qs(o)),
   job: (id: string) => req<Job>('GET', `/jobs/${seg(id)}`),
+
+  // Claude history import (B9): scan ~/.claude/projects read-only, then distill pending sessions with the local LLM
+  history: () => req<HistoryStatus>('GET', '/history'),
+  importHistory: (o: { process?: boolean; projects?: string[] } = {}) => req<{ job_id: string }>('POST', '/history/import', o),
+  historyFiles: (status?: string) => req<HistoryFile[]>('GET', '/history/files' + qs({ status })),
 }

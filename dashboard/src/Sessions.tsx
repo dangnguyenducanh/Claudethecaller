@@ -5,6 +5,10 @@ import { DecisionDetail, DecisionTable, MemoryCard } from './parts'
 import type { Decision, Session, SessionDetail } from './types'
 import { Drawer, Header, Search, colorOf, fmtInt, fmtTime, fmtTokens } from './ui'
 
+const CLAMP = { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as const
+/** Imported sessions wait for the local LLM to distil them; processed ones need no badge. */
+const statusTag = (s: Pick<Session, 'status'>) => s.status !== 'processed' && <span className={'tag ' + (s.status === 'failed' ? 'bad' : 'warn')} style={{ marginLeft: 6 }}>{s.status}</span>
+
 export default function Sessions({ project, projects }: ViewProps) {
   const [sessions, setSessions] = useState<Session[]>([])
   const [q, setQ] = useState('')
@@ -31,8 +35,9 @@ export default function Sessions({ project, projects }: ViewProps) {
             {sessions.map(s => (
               <tr key={s.id} className="click" onClick={() => setOpen(s.id)}>
                 <td>
-                  <div className="title">{s.title}</div>
-                  <div className="subline">{s.project} · {fmtTime(s.started_at)} · {s.model || 'model unknown'}</div>
+                  <div className="title">{s.title}{statusTag(s)}</div>
+                  {s.summary && <div className="subline" style={CLAMP}>{s.summary}</div>}
+                  <div className="subline">{s.project}{s.git_branch && ` @ ${s.git_branch}`} · {fmtTime(s.started_at)} · {s.model || 'model unknown'}</div>
                   <div className="bar" style={{ width: `${(s.turns / maxTurns) * 70}%`, background: colorOf(projects, s.project) }} />
                 </td>
                 <td className="num">{s.turns}</td>
@@ -74,10 +79,11 @@ function SessionDrawer({ id, projects, onClose, onDeleted }: { id: string; proje
       ) : (
         <>
           <div>
-            <div className="card-sub">{s.project} · {fmtTime(s.started_at)} · {s.model || 'model unknown'}</div>
-            <h2 style={{ margin: '6px 0 0', fontSize: 18 }}>{s.title}</h2>
+            <div className="card-sub">{s.project}{s.git_branch && ` @ ${s.git_branch}`} · {fmtTime(s.started_at)} · {s.model || 'model unknown'}</div>
+            <h2 style={{ margin: '6px 0 0', fontSize: 18 }}>{s.title}{statusTag(s)}</h2>
           </div>
-          <div><span className="tag">{s.turns} turns</span><span className="tag">{fmtTokens(s.tokens)} tokens</span><span className="tag">{s.followed}/{s.decisions.length} followed</span></div>
+          {s.summary ? <div>{s.summary}</div> : s.status === 'pending' && <div className="faint">Not distilled yet: summary, intents and memories come from the next history job.</div>}
+          <div><span className="tag">{s.source === 'history' ? 'from history' : 'live'}</span><span className="tag">{s.turns} turns</span><span className="tag">{fmtTokens(s.tokens)} tokens</span><span className="tag">{s.followed}/{s.decisions.length} followed</span></div>
           <div className="card-title">Decisions <span className="faint mono">{s.decisions.length}</span></div>
           {s.decisions.length ? <div className="card tablewrap"><DecisionTable rows={s.decisions} projects={projects} onOpen={setDecision} /></div> : <div className="faint">No routed prompts.</div>}
           <div className="card-title">Memories from this session <span className="faint mono">{s.memories.length}</span></div>
