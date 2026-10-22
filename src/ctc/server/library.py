@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import shutil
 import uuid
 from datetime import UTC, datetime
@@ -104,9 +105,12 @@ def _known(st, cap_id: str) -> dict:
 
 
 def _inside(path: Path, root: Path) -> None:
-    """Refuse a path whose resolved form (symlinks followed) is not strictly inside the resolved root."""
+    """Refuse a path whose resolved form (symlinks followed) is not strictly inside the resolved root, or that lands in
+    the real ~/.claude before H3 (PLAN.md Constraints: the daemon writes a temp HOME until then)."""
     if root.resolve() not in path.resolve().parents:
         fail(403, "forbidden", f"{path} resolves outside {root}")
+    if path.resolve().is_relative_to(Path("~/.claude").expanduser().resolve()) and os.environ.get("CTC_ALLOW_REAL_CLAUDE_HOME") != "1":
+        fail(403, "forbidden", f"{path} is in the real ~/.claude: set CTC_CLAUDE_HOME to a temp dir (or CTC_ALLOW_REAL_CLAUDE_HOME=1 after H3)")
 
 
 def _local_only(st) -> None:

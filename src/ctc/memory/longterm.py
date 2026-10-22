@@ -181,10 +181,15 @@ async def import_claude_memory(store: Store, embedder: Embedder, dirs: list[Path
 
 
 async def run_import(st, payload: dict, progress) -> dict:
-    """Job kind `import_memory` (server/jobs.py). payload: {dirs?: [path], user_id?}."""
+    """Job kind `import_memory` (server/jobs.py). payload: {dirs?: [path], user_id?}. dirs arrive over POST
+    /api/memories/import (the TCP port is open to every local user), so only dirs under <claude_home>/projects/ are read,
+    symlinks resolved — the same guard as extract.run_job."""
     if st.cfg["mode"] != "local":  # shared mode: never let a client make the daemon read paths on its host
         raise ValueError("import_memory reads files on the daemon host: local mode only")
-    dirs = [Path(d).expanduser() for d in payload["dirs"]] if payload.get("dirs") else None
+    base = Path(st.cfg["claude_home"]).resolve() / "projects"
+    dirs = [Path(d).expanduser().resolve() for d in payload["dirs"]] if payload.get("dirs") else None
+    if bad := [str(d) for d in dirs or [] if not d.is_relative_to(base)]:
+        raise ValueError(f"memory dirs must be under {base}: {bad}")
     return await import_claude_memory(st.store, st.embedder, dirs, payload.get("user_id", "local"), progress)
 
 
@@ -355,7 +360,7 @@ if __name__ == "__main__":
             async def progress(f):
                 prog.append(f)
 
-            res = await run_import(SimpleNamespace(cfg={"mode": "local"}, store=s, embedder=real), {"dirs": [str(mem)], "user_id": "imp"}, progress)
+            res = await run_import(SimpleNamespace(cfg={"mode": "local", "claude_home": str(home)}, store=s, embedder=real), {"dirs": [str(mem)], "user_id": "imp"}, progress)
             assert res == {"written": 0, "skipped": 4, "actions": {"MALFORMED": 1, "NOOP": 3}}, res
             assert prog == [0.25, 0.5, 0.75, 1.0], prog
             assert await s.fetchval("select sum(use_count) from memories where user_id = 'imp'") == 0
@@ -402,6 +407,12 @@ if __name__ == "__main__":
                 raise AssertionError("shared mode imported host files")
             except ValueError:
                 pass
+            for d in ("/etc", str(mem / ".." / ".." / ".." / "..")):  # local mode: only <claude_home>/projects/, `..` resolved
+                try:
+                    await run_import(SimpleNamespace(cfg={"mode": "local", "claude_home": str(home)}, store=s, embedder=real), {"dirs": [d]}, progress)
+                    raise AssertionError(f"imported {d}")
+                except ValueError:
+                    pass
             print("memory rows in", SELF, await s.fetchval("select count(*) from memories"))
         finally:
             await real.aclose()

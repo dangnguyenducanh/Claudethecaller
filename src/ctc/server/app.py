@@ -22,6 +22,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from ctc.config import ROOT, cfg
 from ctc.server import api, hooks, library
@@ -147,6 +148,9 @@ def _mcp_slash(app):
 
 
 app.add_middleware(_mcp_slash)
+if cfg()["mode"] == "local":  # DNS rebinding: a web page can't reach the open 127.0.0.1 port under its own hostname
+    # ponytail: local-mode /api writes are still open to every local user on the TCP port; token or socket-only if that matters
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "ctc"])  # hooks/CLI send Host: ctc
 DIST = Path(os.environ.get("CTC_DASHBOARD_DIST") or ROOT / "dashboard" / "dist")
 if DIST.is_dir():  # after every route: /api, /v1 and /mcp win
     app.mount("/", StaticFiles(directory=DIST, html=True), name="dashboard")

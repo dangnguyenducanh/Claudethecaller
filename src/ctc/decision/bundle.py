@@ -14,7 +14,7 @@ import yaml
 from pydantic import BaseModel
 
 from ctc.config import ROOT, cfg
-from ctc.ingestion.scanner import _split_frontmatter, project_namespace
+from ctc.ingestion.scanner import _split_frontmatter, project_id, project_namespace
 from ctc.retrieval.hybrid import Ctx, Hit, SearchResult
 
 DIFFICULTY_PATH = ROOT / "models" / "difficulty.joblib"  # A2 writes {"difficulty": clf, "model_tier": clf}
@@ -121,7 +121,7 @@ async def decide(q: str, res: SearchResult, ctx: Ctx, qv=None, memories: list[st
         ns = top_cap["namespace"]
         # Declared steps never went through search's filters, so apply the same block/disable + other-project rules here.
         # ponytail: a second overrides() read on the workflow path; reuse search's dict if SearchResult ever carries it.
-        ovr = ctx.store.overrides(ctx.project)
+        ovr = ctx.store.overrides(project_id(ctx.project), ctx.user_id)
         ovr = await ovr if inspect.isawaitable(ovr) else ovr  # LocalStore is sync, the Postgres Store async
         own_ns = project_namespace(Path(ctx.project))
         ok = lambda c: ovr.get(c["id"]) not in ("block", "disable") and not (
@@ -207,7 +207,7 @@ if __name__ == "__main__":
         cap("project@deadbeef:local", "skill", "Another project's skill"),
     ]}
     ovr: dict[str, str] = {}
-    ctx = Ctx(SimpleNamespace(get=caps.__getitem__, overrides=lambda project: ovr), None, None, str(tmp))
+    ctx = Ctx(SimpleNamespace(get=caps.__getitem__, overrides=lambda pid, uid: ovr if (pid, uid) == (project_id(tmp), "local") else {}), None, None, str(tmp))
     hit = lambda id, rr, dr=1: Hit(id, 0.03, {"dense_rank": dr, "sparse_rank": None, "rrf": 0.0164, "rerank": rr})
     sr = lambda hits, dropped=(), abstained=False: SearchResult(hits, abstained, {}, list(dropped), hits)
     run = lambda q, res, **kw: asyncio.run(decide(q, res, ctx, **kw))
@@ -252,8 +252,8 @@ if __name__ == "__main__":
     assert [(s.cap_id, s.agent) for s in run("x", sr([hit("user:guard", 0.6)])).steps] == [("user:tdd", None), ("user:review", "pl:reviewer")]
     ovr.update({"user:tdd": "disable", "pl:reviewer": "block"})
     assert [(s.cap_id, s.agent) for s in run("x", sr([hit("user:guard", 0.6)])).steps] == [("user:review", None)]
-    async def aovr(project):  # the Postgres Store's overrides() is async
-        return {"user:review": "block"}
+    async def aovr(pid, uid):  # the Postgres Store's overrides() is async; keyed by project_id, not the path
+        return {"user:review": "block"} if (pid, uid) == (project_id(tmp), "local") else {}
     actx = Ctx(SimpleNamespace(get=caps.__getitem__, overrides=aovr), None, None, str(tmp))
     b = asyncio.run(decide("x", sr([hit("user:guard", 0.6)]), actx))
     assert [s.cap_id for s in b.steps] == ["user:tdd"], b.steps
