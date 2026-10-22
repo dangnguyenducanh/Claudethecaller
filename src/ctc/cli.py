@@ -7,15 +7,18 @@ import copy
 import difflib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
+import uuid
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import httpx
 import numpy as np
@@ -33,6 +36,8 @@ from ctc.embedding.embedder import Embedder
 from ctc.ingestion import indexer
 from ctc.ingestion.scanner import default_roots, scan_library
 from ctc.retrieval.hybrid import close_ctx, open_ctx, result_json, search
+from ctc.runner import proc
+from ctc.runner.engine import RUNS
 from ctc.storage.cache import Cache
 from ctc.storage.local import CACHE, LocalStore
 from ctc.storage.store import Store
@@ -484,6 +489,113 @@ def history_import(no_process: bool = typer.Option(False, "--no-process", help="
     if j["status"] != "done":
         err.print(f"[{BAD}]●[/] {j['error']}")
         raise typer.Exit(1)
+# ---- workflow runs (PLAN.md m5) -----------------------------------------------
+
+STATUS = {"done": GREEN, "skipped": FAINT, "cancelled": FAINT, "failed": BAD, "timeout": BAD, "quota": WARN,
+          "queued": BLUE, "running": WARN, "waiting": WARN}
+
+
+def _api(method: str, path: str, **kw):
+    """One /api call to the daemon over its socket; an API error (code, message, node) ends the command."""
+    try:
+        with httpx.Client(transport=httpx.HTTPTransport(uds=cfg()["socket"]), timeout=30) as h:
+            r = h.request(method, "http://ctc/api" + path, **kw)
+    except httpx.HTTPError:
+        err.print(f"[{BAD}]●[/] daemon not answering on {cfg()['socket']}  [{FAINT}]run[/] [bold]ctc daemon start[/]")
+        raise typer.Exit(1) from None
+    if r.is_error:
+        e = r.json().get("error", {}) if "json" in r.headers.get("content-type", "") else {}
+        node = f"  [{FAINT}]node {e['node_id']}[/]" if e.get("node_id") else ""
+        err.print(f"[{BAD}]●[/] {e.get('code', r.status_code)}: {e.get('message', r.text)}{node}")
+        raise typer.Exit(1)
+    return r.json()
+
+
+def _workflow_id(name: str) -> str:
+    """A cap id as is; a bare name -> the one workflow of that name (several: list them and stop)."""
+    if ":" in name:
+        return name
+    rows = _api("GET", "/capabilities", params={"kind": "workflow", "q": name, "limit": 500})
+    ids = [c["id"] for c in rows if c["id"].rpartition(":")[2] == name]
+    if len(ids) == 1:
+        return ids[0]
+    err.print(f"[{BAD}]●[/] " + (f"{name} is ambiguous, pass one id: {', '.join(ids)}" if ids
+                                  else f"no workflow named {name}  [{FAINT}]run[/] [bold]ctc index[/]"))
+    raise typer.Exit(1)
+
+
+def _status(s: str) -> str:
+    return f"{dot(STATUS.get(s, MUTED))} {s}"
+
+
+@app.command("run")
+def run_cmd(workflow: str = typer.Argument(..., help="Workflow id or name, e.g. smoke."),
+            text: str = typer.Option("", "--input", "-i", help="The run's {{input}}."),
+            project: str | None = typer.Option(None, "--project", "-p", help="Project name, for a user or plugin workflow."),
+            wait: bool = typer.Option(False, "--wait", "-w", help="Wait for the end and show every node.")) -> None:
+    """Queue a workflow run on the daemon: its own git worktree and branch, your claude login."""
+    cap_id = _workflow_id(workflow)
+    rid = _api("POST", f"/workflows/{quote(cap_id, safe=':@')}/runs", json={"input": text, "project": project, "trigger": "cli"})["run_id"]
+    out.print(f"{dot(BLUE)} run [bold]#{rid}[/] queued  [{FAINT}]{cap_id}[/]")
+    if not wait:
+        return
+    with out.status(f"[{MUTED}]running #{rid}…[/]", spinner_style=BLUE):
+        while (r := _api("GET", f"/runs/{rid}"))["status"] in ("queued", "running"):
+            time.sleep(cfg()["runner"]["poll_s"])
+    t = grid(("node", "l:*2"), ("status", "l:12"), ("tokens", "r:9"), ("error", "l:*4"))
+    for s in r["steps"]:
+        t.add_row(f"[{TEXT}]{s['node_id']}[/][{FAINT}]#{s['visit']}[/]", _status(s["status"]),
+                  f"{sum((s['tokens'] or {}).values()):,}", f"[{FAINT}]{_flat(s['error'] or '')}[/]")
+    out.print(card(t, f"Run #{rid} · {r['workflow']}", " · ".join(x for x in (r["branch"], f"{r['tokens']:,} tokens") if x)))
+    out.print(_status(r["status"]) + (f"  [{FAINT}]{_flat(r['error'])}[/]" if r["error"] else ""))
+    if r["status"] != "done":
+        raise typer.Exit(1)
+
+
+@app.command("runs")
+def runs_cmd(limit: int = typer.Option(20, "--limit", "-n")) -> None:
+    """Recent workflow runs of this claude login."""
+    rows = _api("GET", "/runs", params={"limit": limit})
+    t = grid(("run", "r:6"), ("workflow", "l:*3"), ("status", "l:12"), ("trigger", "l:9"), ("nodes", "r:7"), ("tokens", "r:10"),
+             ("created", "l:16"))
+    for r in rows:
+        t.add_row(f"#{r['id']}", f"[{TEXT}]{r['workflow']}[/]", _status(r["status"]), f"[{MUTED}]{r['trigger']}[/]",
+                  f"{r['nodes_done']}/{r['nodes_total']}", f"{r['tokens']:,}", f"[{FAINT}]{r['created_at'][:16].replace('T', ' ')}[/]")
+    out.print(card(t, "Runs", f"{len(rows)} shown"))
+
+
+@app.command("cancel")
+def cancel_cmd(run_id: int = typer.Argument(..., help="Run id, from ctc runs.")) -> None:
+    """Cancel a workflow run: a running node's process group is stopped; a queued run never starts."""
+    r = _api("POST", f"/runs/{run_id}/cancel")
+    out.print(f"{_status(r['status'])}  [{FAINT}]run #{r['id']} · {r['workflow']}[/]")
+
+
+runner = typer.Typer(no_args_is_help=True, help="The workflow runner's pinned claude CLI.")
+app.add_typer(runner, name="runner")
+
+
+@runner.command("upgrade")
+def runner_upgrade() -> None:
+    """Pin the installed claude: check its claude.ai login, run one tiny readonly haiku prompt with it, then rewrite
+    runner.claude_version in config/server.yaml."""
+    async def smoke() -> tuple[dict, dict | None]:
+        pre = await proc.preflight()  # its version error is what this command fixes; any other error stops here
+        if pre["authMethod"] != "claude.ai" or not pre["claude_version"]:
+            return pre, None
+        argv, prompt = proc.agent_argv({"prompt": "Reply with one short word.", "model": "haiku", "readonly": True}, {}, str(uuid.uuid4()))
+        RUNS.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=RUNS) as d:  # under RUNS: the router hooks ignore it
+            return pre, await proc.run_agent(argv, prompt, d, str(Path(d) / "smoke.jsonl"), 300)
+
+    with out.status(f"[{MUTED}]auth smoke…[/]", spinner_style=BLUE):
+        pre, r = asyncio.run(smoke())
+    if not r or r["status"] != "done":
+        err.print(f"[{BAD}]●[/] auth smoke failed: {pre['error'] if not r else r['error'] or r['status']}")
+        raise typer.Exit(1)
+    p, old = ROOT / "config" / "server.yaml", cfg()["runner"]["claude_version"]
+    p.write_text(re.sub(r'(claude_version:\s*")[^"]*"', lambda m: f'{m.group(1)}{pre["claude_version"]}"', p.read_text(), count=1))
+    out.print(f"{dot(GREEN)} runner pinned to claude [bold]{pre['claude_version']}[/]  [{FAINT}]was {old} · smoke said {r['output']['result']!r}[/]")
 
 
 # ---- install ------------------------------------------------------------------

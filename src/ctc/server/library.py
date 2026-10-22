@@ -2,6 +2,9 @@
 
 Capability writes touch files: user scope under cfg claude_home, project scope under <project path>/.claude; the final
 path must resolve strictly inside that root. Then the one file is re-scanned, upserted and embedded.
+Workflows are saved as plain YAML in ctc-workflows/<name>.yaml (PLAN.md m5 "Workflow file"): `graph` (validated, 422
+invalid_graph) and `settings`, plus the `steps:` the router reads, derived from the graph. Legacy workflows/*.yaml|md
+(frontmatter) stay readable and editable.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ from pathlib import Path
 
 import httpx
 import yaml
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from psycopg.types.json import Jsonb
 
 from ctc.decision.bundle import _workflow_steps
@@ -28,6 +31,8 @@ from ctc.ingestion.scanner import (
 )
 from ctc.memory.longterm import Memory as MemoryRow
 from ctc.memory.longterm import _unit, write_memory
+from ctc.runner.engine import SETTINGS
+from ctc.runner.graph import derived_steps, load, validate
 from ctc.server import jobs
 from ctc.server.api import (
     DEC_COLS,
@@ -46,6 +51,7 @@ from ctc.server.schemas import (
     CapabilityPatch,
     DedupPair,
     DedupResolve,
+    Graph,
     ImportRequest,
     JobRef,
     Kind,
@@ -60,6 +66,7 @@ from ctc.server.schemas import (
     Override,
     OverrideSet,
     Scope,
+    WorkflowSettings,
     to_decision,
     to_memory,
 )
@@ -67,7 +74,7 @@ from ctc.server.schemas import (
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
 
-FILES = {"skill": "skills/{}/SKILL.md", "agent": "agents/{}.md", "command": "commands/{}.md", "workflow": "workflows/{}.yaml"}
+FILES = {"skill": "skills/{}/SKILL.md", "agent": "agents/{}.md", "command": "commands/{}.md", "workflow": "ctc-workflows/{}.yaml"}
 # 30-day usage per cap: unnest each decision's steps once, then hash-join (a per-cap jsonb @> scan is caps x decisions)
 CAP_SQL = """
 with used as (
@@ -113,9 +120,9 @@ def _inside(path: Path, root: Path) -> None:
         fail(403, "forbidden", f"{path} is in the real ~/.claude: set CTC_CLAUDE_HOME to a temp dir (or CTC_ALLOW_REAL_CLAUDE_HOME=1 after H3)")
 
 
-def _local_only(st) -> None:
-    if st.cfg["mode"] != "local":  # shared mode: never write files on the daemon host for a remote client
-        fail(403, "forbidden", "capability files can only be edited in local mode")
+def _local_only(st, what: str = "capability files can only be edited") -> None:
+    if st.cfg["mode"] != "local":  # shared mode: never write files (or run workflows) on the daemon host for a remote client
+        fail(403, "forbidden", f"{what} in local mode")
 
 
 def _cap_root(st, c: dict) -> Path:
@@ -132,6 +139,37 @@ def _cap_root(st, c: dict) -> Path:
 
 def _render(meta: dict, body: str) -> str:
     return "---\n" + yaml.safe_dump(meta, sort_keys=False, allow_unicode=True) + "---\n" + (f"\n{body}" if body else "")
+
+
+def _yaml(meta: dict) -> str:  # a ctc-workflows file: no frontmatter, no body; leaf lists inline (pos: [0, 160])
+    return yaml.safe_dump(meta, sort_keys=False, allow_unicode=True, default_flow_style=None)
+
+
+def check_graph(g: dict) -> dict:
+    """ctc.runner.graph.validate; its first error -> 422 invalid_graph {message, node_id}."""
+    try:
+        errs = validate(g)
+    except (AttributeError, TypeError, KeyError) as e:  # not the shape the walker reads (a hand-edited file)
+        errs = [{"message": f"malformed workflow: {e!r}", "node_id": None}]
+    if errs:
+        raise HTTPException(422, {"code": "invalid_graph", **errs[0]})
+    return g
+
+
+def _wf_meta(graph: Graph | None, settings: WorkflowSettings | None) -> dict:
+    """The workflow file keys a save writes: settings; nodes + edges (validated) and the router's steps derived from them."""
+    meta = {"settings": settings.model_dump()} if settings else {}
+    if graph:
+        g = check_graph(load(graph.model_dump(by_alias=True, exclude_none=True)))
+        meta |= {"nodes": g["nodes"], "edges": g["edges"], "steps": derived_steps(g)}
+    return meta
+
+
+def _wf_doc(path: str) -> dict:
+    try:
+        return load(path)
+    except (OSError, yaml.YAMLError, TypeError, ValueError):  # unreadable, or not a mapping: no graph to show
+        return {"nodes": [], "edges": []}
 
 
 async def _reindex(st, path: Path, kind: str, ns: str) -> None:
@@ -160,11 +198,14 @@ async def capability(cap_id: str, request: Request, project: str | None = None):
     c = rows[0] if rows else fail(404, "not_found", f"no capability {cap_id}")
     decs = await st.store.fetch(f"select {DEC_COLS} from {DEC_FROM} where d.user_id = %s and d.bundle->'steps' @> %s"
                                 " order by d.at desc limit 20", (u, Jsonb([{"cap_id": cap_id}])))
-    cl = c["cluster_id"]
+    cl, wf = c["cluster_id"], c["kind"] == "workflow"
+    doc = _wf_doc(c["path"]) if wf else {}
     return {**c, "editable": c["namespace"] == "user" or c["namespace"].startswith("project@"),
             "cluster_members": sorted(i for i, x in st.store.catalog.items() if cl and x["cluster_id"] == cl and i != cap_id),
             "recent_decisions": [to_decision(r) for r in decs],
-            "steps": [s for s in _workflow_steps(c["path"]) if isinstance(s.get("cap"), str)] if c["kind"] == "workflow" else None}
+            "steps": [s for s in _workflow_steps(c["path"]) if isinstance(s.get("cap"), str)] if wf else None,
+            "graph": {"nodes": doc["nodes"], "edges": doc["edges"]} if wf and doc["nodes"] else None,
+            "settings": SETTINGS | (doc.get("settings") or {}) if wf else None}
 
 
 @router.post("/capabilities", response_model=Capability, status_code=201)
@@ -186,11 +227,13 @@ async def create_capability(b: NewCapability, request: Request):
         fail(409, "conflict", f"{ns}:{b.name} already exists")
     meta = {"name": b.name, "description": b.description}
     if b.kind == "workflow":
-        meta["steps"] = [s.model_dump(exclude_none=True) for s in b.steps or []]
+        meta |= _wf_meta(b.graph, b.settings)
+        if not b.graph:
+            meta["steps"] = [s.model_dump(exclude_none=True) for s in b.steps or []]
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with path.open("x", encoding="utf-8") as f:
-            f.write(_render(meta, b.body or ""))
+            f.write(_yaml(meta) if b.kind == "workflow" else _render(meta, b.body or ""))
     except FileExistsError:
         fail(409, "conflict", f"{path} already exists")
     await _reindex(st, path, b.kind, ns)
@@ -206,14 +249,23 @@ async def update_capability(cap_id: str, b: CapabilityPatch, request: Request):
     path = Path(c["path"])
     _inside(path, _cap_root(st, c))
     try:
-        meta, body = _split_frontmatter(path.read_text(encoding="utf-8"), lenient=True) or fail(422, "invalid", f"{path} has no frontmatter")
+        text = path.read_text(encoding="utf-8")
     except OSError:
         fail(404, "not_found", f"{path} is gone; reindex")
+    plain = c["kind"] == "workflow" and not text.startswith("---")  # ctc-workflows/*.yaml: plain YAML
+    try:
+        meta, body = (yaml.safe_load(text), "") if plain else _split_frontmatter(text, lenient=True) or (None, "")
+    except yaml.YAMLError:
+        meta = None
+    if not isinstance(meta, dict):  # never overwrite a file we could not read
+        fail(422, "invalid", f"{path} has no YAML {'mapping' if plain else 'frontmatter'} to edit")
     if b.description is not None:
         meta["description"] = b.description
-    if b.steps is not None and c["kind"] == "workflow":
-        meta["steps"] = [s.model_dump(exclude_none=True) for s in b.steps]
-    path.write_text(_render(meta, body if b.body is None else b.body), encoding="utf-8")
+    if c["kind"] == "workflow":
+        meta |= _wf_meta(b.graph, b.settings)
+        if b.steps is not None and not b.graph:
+            meta["steps"] = [s.model_dump(exclude_none=True) for s in b.steps]
+    path.write_text(_yaml(meta) if plain else _render(meta, body if b.body is None else b.body), encoding="utf-8")
     await _reindex(st, path, c["kind"], c["namespace"])
     return await _cap(st, u, cap_id)
 

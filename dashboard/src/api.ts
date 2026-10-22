@@ -1,12 +1,12 @@
 import { handle } from './mock'
 import type {
-  Activity, ApiKey, Capability, CapabilityDetail, CapabilityPatch, Decision, DedupPair, Health, HistoryFile, HistoryStatus, Job, Kind, Kpis, Memory, MemoryDetail,
-  MemoryKind, MemoryPatch, MemoryWrite, Metric, NewCapability, NewMemory, Ok, Override, Project, ProjectDetail, Range,
-  Session, SessionDetail, Source, Timeline,
+  Activity, ApiKey, Capability, CapabilityDetail, CapabilityPatch, Decision, DedupPair, Diff, Health, HistoryFile, HistoryStatus,
+  Job, Kind, Kpis, Memory, MemoryDetail, MemoryKind, MemoryPatch, MemoryWrite, Metric, NewCapability, NewMemory, Ok, Override,
+  Project, ProjectDetail, Range, Run, RunDetail, RunStatus, RunTrigger, Session, SessionDetail, Source, StepLog, Timeline,
 } from './types'
 
 export class ApiError extends Error {
-  constructor(public status: number, public code: string, message: string) {
+  constructor(public status: number, public code: string, message: string, public node_id: string | null = null) { // node_id: 422 invalid_graph
     super(message)
   }
 }
@@ -24,6 +24,8 @@ export function errText(e: unknown, ctx: { ns?: string } = {}): string {
 const FORCE_MOCK = import.meta.env.VITE_MOCK === '1'
 let mock = FORCE_MOCK
 export const usingMock = () => mock
+// ponytail: the mock has no runner, so run pages say this instead of showing sample runs.
+export const NEED_DAEMON = 'The runner needs the daemon: start it with uv run ctc daemon start.'
 
 // Shared mode: the dashboard sends the stored API key; a 401 asks App for one. Local mode never sees a 401.
 export const getKey = () => { try { return localStorage.getItem('ctc-key') ?? '' } catch { return '' } }
@@ -41,8 +43,13 @@ function fromMock<T>(method: string, path: string, body: unknown): T {
   return handle(method, path, body) as T
 }
 
+// A write that times out may still have been applied by the daemon (a capability save writes a file, then re-indexes
+// and embeds it: seconds, not ms). So once the daemon has answered, a failed write is an error, never a mock answer.
+const lost = () => new ApiError(0, 'unreachable', 'The daemon did not answer in time; the change may still have been saved. Reload to check.')
+
 async function req<T>(method: string, path: string, body?: unknown, prefix = '/api'): Promise<T> {
   if (FORCE_MOCK) return fromMock<T>(method, path, body)
+  const write = method !== 'GET'
   let r: Response
   try {
     const key = getKey()
@@ -50,20 +57,24 @@ async function req<T>(method: string, path: string, body?: unknown, prefix = '/a
       method,
       headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...(key ? { authorization: `Bearer ${key}` } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(1500),
+      signal: AbortSignal.timeout(write ? 15000 : 1500),
     })
   } catch {
+    if (write && !mock) throw lost()
     return fromMock<T>(method, path, body) // network error or timeout: daemon not running
   }
   const isJson = (r.headers.get('content-type') ?? '').includes('json')
   // The Vite dev proxy answers 5xx without JSON when nothing listens on :18310; the daemon always sends JSON errors.
-  if (!r.ok && !isJson && r.status >= 500) return fromMock<T>(method, path, body)
+  if (!r.ok && !isJson && r.status >= 500) {
+    if (write && !mock) throw lost()
+    return fromMock<T>(method, path, body)
+  }
   mock = false
   if (r.status === 401) unauthorized()
   const data: unknown = isJson ? await r.json() : undefined
   if (!r.ok) {
-    const err = (data as { error?: { code?: string; message?: string } } | undefined)?.error
-    throw new ApiError(r.status, err?.code ?? `http_${r.status}`, err?.message ?? r.statusText)
+    const err = (data as { error?: { code?: string; message?: string; node_id?: string } } | undefined)?.error
+    throw new ApiError(r.status, err?.code ?? `http_${r.status}`, err?.message ?? r.statusText, err?.node_id ?? null)
   }
   return data as T
 }
@@ -145,4 +156,12 @@ export const api = {
   history: () => req<HistoryStatus>('GET', '/history'),
   importHistory: (o: { process?: boolean; projects?: string[] } = {}) => req<{ job_id: string }>('POST', '/history/import', o),
   historyFiles: (status?: string) => req<HistoryFile[]>('GET', '/history/files' + qs({ status })),
+  // Workflow runs (PLAN.md "Workflow runner (m5)" → API; M1 endpoints). The daemon only: the mock has no runs.
+  startRun: (capId: string, body: { input?: string; project?: string; trigger?: RunTrigger }) => req<{ run_id: number }>('POST', `/workflows/${seg(capId)}/runs`, body),
+  runs: (o: { workflow?: string; status?: RunStatus; trigger?: RunTrigger } & Page = {}) => req<Run[]>('GET', '/runs' + qs(o)),
+  run: (id: number) => req<RunDetail>('GET', `/runs/${id}`),
+  stepLog: (id: number, sid: number, offset: number) => req<StepLog>('GET', `/runs/${id}/steps/${sid}/log` + qs({ offset })),
+  stepDiff: (id: number, sid: number) => req<Diff>('GET', `/runs/${id}/steps/${sid}/diff`),
+  runDiff: (id: number) => req<Diff>('GET', `/runs/${id}/diff`),
+  cancelRun: (id: number) => req<Run>('POST', `/runs/${id}/cancel`),
 }

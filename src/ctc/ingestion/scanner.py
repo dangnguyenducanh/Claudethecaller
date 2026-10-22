@@ -19,6 +19,7 @@ _GLOBS: list[tuple[Kind, str, bool]] = [
     ("skill", "skills/*/SKILL.md", True),
     ("agent", "agents/*.md", False),
     ("command", "commands/*.md", False),
+    ("workflow", "ctc-workflows/*.yaml", False),  # the runner's graphs (PLAN.md m5); first, so they win a name clash
     ("workflow", "workflows/*.md", False),
     ("workflow", "workflows/*.yaml", False),
 ]
@@ -83,6 +84,13 @@ def _make_capability(path: Path, kind: Kind, namespace: str, default_name: str) 
     except OSError:  # dangling symlink, no permission, deleted mid-scan
         return None
     parsed = _split_frontmatter(text, lenient=True)
+    plain = parsed is None and path.suffix == ".yaml"  # ctc-workflows/*.yaml: one YAML mapping, no frontmatter or body
+    if plain:
+        try:
+            data = yaml.safe_load(text)
+        except (yaml.YAMLError, ValueError, RecursionError):
+            data = None
+        parsed = (data, "") if isinstance(data, dict) else None
     if parsed is None:
         return None
     meta, body = parsed
@@ -91,7 +99,7 @@ def _make_capability(path: Path, kind: Kind, namespace: str, default_name: str) 
         return None
     raw_name = meta.get("name")
     name = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else default_name
-    digest = hashlib.sha256(f"{description}\n{body}".encode()).hexdigest()
+    digest = hashlib.sha256((text if plain else f"{description}\n{body}").encode()).hexdigest()  # plain: a graph edit is a change
     return Capability(
         id=f"{namespace}:{name}",
         kind=kind,

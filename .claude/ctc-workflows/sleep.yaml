@@ -1,0 +1,9 @@
+name: sleep
+description: Workflow runner cancel test - one shell node that sleeps for 10 minutes
+settings: {permission: worktree, allow_extra_usage: false, auto_resume: true, max_run_tokens: null}
+nodes:
+  - {id: start, type: trigger, input: "", pos: [0, 160]}
+  - {id: nap, type: shell, command: "sleep 600", timeout_s: 900, pos: [200, 160]}
+edges:
+  - {from: start, to: nap}
+steps: []

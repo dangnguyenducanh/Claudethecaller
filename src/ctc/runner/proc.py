@@ -1,0 +1,278 @@
+"""Node processes for the workflow runner (PLAN.md m5 "Agent node runtime", WB3): the installed, pinned `claude -p`
+and `bash -c`, each in its own process group so a timeout or cancel stops everything it started.
+
+CTC_CLAUDE_BIN overrides the claude binary (scripts/fake_claude_quota.sh, scripts/fake_claude_overage.sh).
+CLI: `python -m ctc.runner.proc agent "<prompt>" [--model haiku]`, `python -m ctc.runner.proc shell "<cmd>" --timeout N`.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import pwd
+import re
+import signal
+import time
+from asyncio.subprocess import DEVNULL, PIPE
+from datetime import datetime, timedelta
+
+from ctc.config import cfg
+from ctc.runner.graph import render
+
+QUOTA = re.compile(r'hit your (\w+ )?limit.*?resets ([^\n"]+)', re.IGNORECASE)
+READ_TOOLS = ["Read", "Grep", "Glob"]
+NO_PUSH = ["Bash(git push:*)", "Bash(gh pr:*)"]  # graph.PUSH, for agents
+TAIL = 4096
+RESULT_MAX = 65536
+
+
+def _bin() -> str:
+    b = os.environ.get("CTC_CLAUDE_BIN", "claude")
+    return os.path.abspath(b) if os.sep in b else b  # agents run with cwd = the worktree: a relative path must not follow it
+
+
+def child_env() -> dict:
+    """os.environ minus every ANTHROPIC_* (API key, auth token, base URL) and CLAUDE* variable (CLAUDE_CODE_SIMPLE is
+    bare mode; CLAUDECODE and the session ids tie a child to the Claude session that started the daemon), keeping
+    CLAUDE_CONFIG_DIR; plus the real HOME and no auto-update. The caller adds CTC_RUN=<run id>."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("ANTHROPIC_", "CLAUDE")) or k == "CLAUDE_CONFIG_DIR"}
+    return env | {"HOME": pwd.getpwuid(os.getuid()).pw_dir, "DISABLE_AUTOUPDATER": "1"}
+
+
+async def _stdout(*argv: str) -> str:
+    p = await asyncio.create_subprocess_exec(*argv, stdin=DEVNULL, stdout=PIPE, stderr=DEVNULL, env=child_env())
+    try:
+        return (await asyncio.wait_for(p.communicate(), 30))[0].decode()
+    except TimeoutError:
+        p.kill()
+        raise
+
+
+async def preflight() -> dict:
+    """`claude auth status` and `claude --version` against config runner.claude_version:
+    {authMethod, email, claude_version, ok, error}."""
+    r = {"authMethod": None, "email": None, "claude_version": None, "ok": False, "error": None}
+    try:
+        st = json.loads(await _stdout(_bin(), "auth", "status", "--json"))
+        r.update(authMethod=st.get("authMethod"), email=st.get("email"),
+                 claude_version=(await _stdout(_bin(), "--version")).split()[0])
+    except (OSError, ValueError, IndexError, AttributeError, TimeoutError) as e:
+        r["error"] = f"claude is not usable: {e!r}"
+        return r
+    pin = cfg()["runner"]["claude_version"]
+    if not st.get("loggedIn"):
+        r["error"] = "claude is not logged in"
+    elif r["authMethod"] != "claude.ai":
+        r["error"] = f"authMethod is {r['authMethod']}; runs need a claude.ai login"
+    elif r["claude_version"] != pin:
+        r["error"] = f"claude {r['claude_version']} is not the pinned {pin} (config/server.yaml runner.claude_version)"
+    r["ok"] = r["error"] is None
+    return r
+
+
+def _name(cap_id: str) -> str:
+    """How Claude Code names a capability id: user and project ones by their bare name (= scanner Capability.invoke)."""
+    ns, _, name = str(cap_id).rpartition(":")
+    return name if ns == "user" or ns.startswith("project@") else str(cap_id)
+
+
+def agent_argv(node: dict, ctx: dict, session_id: str, resume: str | None = None) -> tuple[list[str], str]:
+    """(argv, prompt) for an agent node; never --bare. The prompt goes on stdin: --allowedTools takes any number of
+    values, and one argv string is capped at 128 KB. `resume` (a session id) forks that session."""
+    prompt = render(node.get("prompt") or "", ctx)
+    if cap := node.get("cap"):
+        prompt = f"/{_name(cap)} {prompt}"
+    ro = node.get("readonly")
+    mcp = node.get("mcp_config") or {"mcpServers": {}}
+    argv = [_bin(), "-p", "--output-format", "stream-json", "--verbose", "--session-id", session_id,
+            "--permission-mode", "dontAsk" if ro else node.get("permission_mode") or "acceptEdits",
+            "--permission-prompts", "none",
+            "--strict-mcp-config", "--mcp-config", mcp if isinstance(mcp, str) else json.dumps(mcp),
+            "--disallowedTools", *NO_PUSH]
+    if tools := READ_TOOLS if ro else node.get("allowed_tools"):
+        argv += ["--allowedTools", *tools]
+    for flag, key in (("--model", "model"), ("--effort", "effort"), ("--max-turns", "max_turns")):
+        if node.get(key) is not None:
+            argv += [flag, str(node[key])]
+    if node.get("agent"):
+        argv += ["--agent", _name(node["agent"])]
+    if node.get("json_schema"):
+        argv += ["--json-schema", json.dumps(node["json_schema"])]
+    if resume:
+        argv += ["--resume", resume, "--fork-session"]
+    return argv, prompt
+
+
+def _event(line: bytes, r: dict, allow_extra_usage: bool) -> tuple[str, str] | None:
+    """Read one stream-json line into r; (status, error) when the node must stop now."""
+    try:
+        ev = json.loads(line)
+    except ValueError:
+        return None
+    if not isinstance(ev, dict):
+        return None
+    if ev.get("type") == "system" and ev.get("subtype") == "init":
+        r["session_id"] = ev.get("session_id")
+        if ev.get("apiKeySource") not in (None, "none"):
+            return "failed", "api_key_billing"
+    elif ev.get("type") == "rate_limit_event":  # {rate_limit_info: {status, resetsAt, isUsingOverage, ...}}, seen on 2.1.306
+        info = ev.get("rate_limit_info") or {}
+        if info.get("status") == "rejected" and isinstance(info.get("resetsAt"), (int, float)):  # unverified: never seen
+            r["resets_at"] = datetime.fromtimestamp(info["resetsAt"]).astimezone().isoformat()
+        if info.get("isUsingOverage"):
+            r["overage"] = True
+            if not allow_extra_usage:
+                return "quota", "extra_usage"
+    elif ev.get("type") == "result":
+        r.update(output={"result": (ev.get("result") or "")[:RESULT_MAX], "structured_output": ev.get("structured_output"),
+                         "is_error": bool(ev.get("is_error")), "subtype": ev.get("subtype")},
+                 usage=ev.get("usage"), num_turns=ev.get("num_turns"), cost_usd=ev.get("total_cost_usd"),
+                 permission_denials=ev.get("permission_denials"))
+    return None
+
+
+def _resets(text: str) -> str | None:
+    """Best effort: '3pm', '3pm (Europe/Paris)', 'Oct 25, 3pm' -> ISO time of the next such moment, else None."""
+    from zoneinfo import ZoneInfo
+
+    from dateutil import parser
+
+    zone = re.search(r"\(([\w/+-]+)\)", text)
+    try:
+        tz = ZoneInfo(zone.group(1)) if zone else datetime.now().astimezone().tzinfo
+        now = datetime.now(tz)
+        t = parser.parse(re.sub(r"\(.*?\)", "", text), default=now.replace(minute=0, second=0, microsecond=0), fuzzy=True)
+    except (ValueError, OverflowError, KeyError):  # ZoneInfoNotFoundError is a KeyError
+        return None
+    t = t if t.tzinfo else t.replace(tzinfo=tz)
+    return (t + timedelta(days=1) if t <= now else t).isoformat()
+
+
+async def _tail(stream: asyncio.StreamReader) -> str:
+    buf = b""
+    while chunk := await stream.read(65536):
+        buf = (buf + chunk)[-TAIL:]
+    return buf.decode(errors="replace")
+
+
+async def stop(pgid: int) -> None:
+    """SIGINT -> 10 s -> SIGTERM -> 5 s -> SIGKILL to the process group; returns once the group is empty."""
+    for sig, grace_s in ((signal.SIGINT, 10), (signal.SIGTERM, 5), (signal.SIGKILL, 5)):
+        try:
+            os.killpg(pgid, sig)
+            for _ in range(grace_s * 10):
+                await asyncio.sleep(0.1)
+                os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return
+
+
+async def run_agent(argv: list[str], prompt: str, cwd: str, log_path: str, timeout_s: float = 1800,
+                    env: dict | None = None, allow_extra_usage: bool = False) -> dict:
+    """Run one agent node, appending its stream-json lines to log_path as they come. Returns wf_steps fields:
+    {status: done|failed|timeout|quota, error, output {result, structured_output, is_error, subtype}, exit_code,
+    session_id, num_turns, usage, cost_usd, permission_denials, overage, resets_at}."""
+    r = dict.fromkeys(("status", "error", "output", "exit_code", "session_id", "num_turns", "usage", "cost_usd",
+                       "permission_denials", "resets_at"))
+    r["overage"] = False
+    p = await asyncio.create_subprocess_exec(*argv, cwd=cwd, env=env or child_env(), stdin=PIPE, stdout=PIPE,
+                                             stderr=PIPE, start_new_session=True, limit=2**26)
+    err = asyncio.create_task(_tail(p.stderr))
+    try:
+        async with asyncio.timeout(timeout_s):
+            try:
+                p.stdin.write(prompt.encode())
+                await p.stdin.drain()
+                p.stdin.close()
+            except (BrokenPipeError, ConnectionResetError):
+                pass  # it exited before reading; its exit code and stderr say why
+            with open(log_path, "ab", buffering=0) as log:  # noqa: ASYNC230 - a local append per line, unbuffered for the live log view
+                async for line in p.stdout:
+                    log.write(line)
+                    if why := _event(line, r, allow_extra_usage):
+                        r["status"], r["error"] = why
+                        break
+            if not r["status"]:
+                await p.wait()
+    except TimeoutError:
+        r["status"], r["error"] = "timeout", f"no result within {timeout_s} s"
+    finally:
+        await stop(p.pid)  # an early stop, a timeout, a cancel, or whatever a clean exit left running
+    r["exit_code"] = await p.wait()
+    stderr = await err
+    if r["status"] is None:
+        out = r["output"] or {}
+        if out and not out["is_error"] and r["exit_code"] == 0:
+            r["status"] = "done"
+        else:  # a normal answer can quote the quota text, so only a failed node is checked for it
+            text = f"{out.get('result') or ''}\n{stderr}".strip()
+            m = QUOTA.search(text)
+            r["status"] = "quota" if m or r["resets_at"] else "failed"
+            r["resets_at"] = r["resets_at"] or (_resets(m.group(2)) if m else None)
+            r["error"] = (f"{out['subtype']}: " if out else "") + (text[-TAIL:] or f"exit {r['exit_code']}")
+    return r
+
+
+async def run_shell(cmd: str, cwd: str, timeout: float, env: dict | None = None) -> dict:
+    """`bash -c cmd` in its own process group; a non-zero exit is data. Returns {status: done|timeout, error,
+    output {exit_code, stdout_tail, stderr_tail, duration_ms}}.
+    ponytail: a grandchild that leaves the group (setsid) keeps the pipes open and holds this until it exits;
+    the startup sweep (CTC_RUN) is the backstop."""
+    t0 = time.monotonic()
+    p = await asyncio.create_subprocess_exec("bash", "-c", cmd, cwd=cwd, env=env or child_env(), stdin=DEVNULL,
+                                             stdout=PIPE, stderr=PIPE, start_new_session=True)
+    tails = asyncio.gather(_tail(p.stdout), _tail(p.stderr))
+    timed_out = False
+    try:
+        await asyncio.wait_for(p.wait(), timeout)
+    except TimeoutError:
+        timed_out = True
+    finally:
+        await stop(p.pid)  # the timeout, a cancel, or anything it left running in the background
+    out, err = await tails
+    return {"status": "timeout" if timed_out else "done", "error": f"timed out after {timeout} s" if timed_out else None,
+            "output": {"exit_code": await p.wait(), "stdout_tail": out, "stderr_tail": err,
+                       "duration_ms": round((time.monotonic() - t0) * 1000)}}
+
+
+if __name__ == "__main__":
+    import argparse
+    import sys
+    import tempfile
+    import uuid
+
+    ap = argparse.ArgumentParser(prog="python -m ctc.runner.proc")
+    ap.add_argument("kind", choices=["agent", "shell"])
+    ap.add_argument("text", help="agent prompt or shell command")
+    ap.add_argument("--timeout", type=float, default=1800)
+    ap.add_argument("--model")
+    ap.add_argument("--readonly", action="store_true")
+    ap.add_argument("--resume", help="session id to fork")
+    a = ap.parse_args()
+
+    async def main() -> int:
+        if a.kind == "shell":
+            r = await run_shell(a.text, os.getcwd(), a.timeout)
+            o = r["output"]
+            print("timeout" if r["status"] == "timeout" else f"exit={o['exit_code']}", f"duration_ms={o['duration_ms']}")
+            print(o["stdout_tail"], end="")
+            return 0
+        pre = await preflight()
+        if not pre["ok"]:
+            print(f"authMethod={pre['authMethod']} preflight error: {pre['error']}")
+            return 1
+        node = {"prompt": a.text, "model": a.model, "readonly": a.readonly}
+        argv, prompt = agent_argv(node, {}, str(uuid.uuid4()), resume=a.resume)
+        fd, log = tempfile.mkstemp(prefix="ctc-agent-", suffix=".jsonl")
+        os.close(fd)
+        r = await run_agent(argv, prompt, os.getcwd(), log, a.timeout)
+        if r["status"] == "done":
+            print(f"authMethod={pre['authMethod']} result={r['output']['result']} session_id={r['session_id']} "
+                  f"turns={r['num_turns']} exit={r['exit_code']}")
+        else:
+            print(f"status={r['status']} resets_at={r['resets_at']} exit={r['exit_code']} error={(r['error'] or '')[:300]!r}")
+        print(f"log={log} denials={json.dumps(r['permission_denials'])} overage={r['overage']}")
+        return 0
+
+    sys.exit(asyncio.run(main()))

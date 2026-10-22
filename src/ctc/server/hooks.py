@@ -26,6 +26,7 @@ from ctc.ingestion.scanner import project_id
 from ctc.memory.longterm import recall
 from ctc.memory.session import blend, project_vector, session_vector
 from ctc.retrieval.hybrid import result_json, search
+from ctc.runner.engine import RUNS
 from ctc.server.jobs import submit
 from ctc.server.schemas import Health
 from ctc.server.state import State
@@ -121,6 +122,11 @@ async def route(st: State, prompt: str, session_id: str, cwd: str, user_id: str 
     return b
 
 
+def _in_run(body: dict) -> bool:
+    """A workflow run's own claude (cwd under ~/.claudethecaller/runs/): no suggestion, rows, or extract jobs (PLAN.md m5)."""
+    return Path(str(body.get("cwd") or "")).is_relative_to(RUNS)
+
+
 async def _body(request: Request) -> dict:
     try:
         body = orjson.loads(await request.body())
@@ -133,7 +139,7 @@ async def _prompt(st: State, body: dict, user_id: str) -> str:
     """Route one UserPromptSubmit and write its session + decision rows; never raises."""
     try:
         prompt, sid, cwd = (str(body.get(f) or "") for f in ("prompt", "session_id", "cwd"))
-        if not (prompt.strip() and sid and cwd):
+        if not (prompt.strip() and sid and cwd) or _in_run(body):
             return ""
         pid = project_id(cwd)
         if (user_id, pid) not in st.names:  # first sight in this worker: the row (FK of sessions), then its .claude/ caps
@@ -174,7 +180,7 @@ async def hook_tool(request: Request) -> Response:
         st, user_id, body = _st(request), _user(request), await _body(request)
         sid, tool, tin = str(body.get("session_id") or ""), str(body.get("tool_name") or ""), body.get("tool_input")
         tin = tin if isinstance(tin, dict) else {}
-        if sid and tool:
+        if sid and tool and not _in_run(body):
             name = tin.get("skill") or tin.get("subagent_type")
             await write(st, "event", {"session_id": sid, "type": "tool", "payload": {"tool": tool, **({"name": name} if name else {})}})
             last = await st.cache.get_json(f"sess:{_scoped(st, user_id, sid)}:last")
@@ -224,7 +230,7 @@ async def _stop(st: State, body: dict, user_id: str) -> None:
     """Stop and SessionEnd (same endpoint; Claude Code names the event in hook_event_name)."""
     try:
         sid, cwd, tp = (str(body.get(f) or "") for f in ("session_id", "cwd", "transcript_path"))
-        if not sid:
+        if not sid or _in_run(body):
             return
         end = body.get("hook_event_name") == "SessionEnd"
         await write(st, "event", {"session_id": sid, "type": "session_end" if end else "stop", "payload": {}})

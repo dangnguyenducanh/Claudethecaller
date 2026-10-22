@@ -193,6 +193,59 @@ create table if not exists {schema}.api_keys (
   revoked_at timestamptz
 );
 
+-- Workflow runner (PLAN.md m5 "Data model"). Logs live on disk (~/.claudethecaller/runs/<id>/), not here.
+create table if not exists {schema}.wf_runs (
+  id bigint generated always as identity primary key,
+  owner text not null,                                   -- claude auth status .email
+  workflow text not null,                                -- cap_id
+  project_id text,  -- no FK: projects is keyed (user_id, id)
+  file_sha text not null,
+  graph jsonb not null,                                  -- snapshot at submit
+  trigger text not null check (trigger in ('button', 'cli', 'api', 'schedule', 'mcp')),
+  status text not null default 'queued'
+    check (status in ('queued', 'running', 'waiting', 'done', 'failed', 'cancelled', 'quota')),
+  input text not null default '',
+  state jsonb not null default '{}',                     -- walker state, ctc.runner.graph
+  repo text, worktree text, branch text, base_sha text, pr_url text,
+  auth jsonb,                                            -- {authMethod, email, claude_version}
+  error text,
+  quota_resets_at timestamptz,
+  auto_resume boolean not null default true,
+  tokens bigint not null default 0,                      -- running total, for max_run_tokens
+  created_at timestamptz not null default now(),
+  started_at timestamptz,
+  ended_at timestamptz
+);
+create unique index if not exists wf_runs_one_running on {schema}.wf_runs (owner) where status = 'running';
+create index if not exists wf_runs_owner on {schema}.wf_runs (owner, id desc);
+
+create table if not exists {schema}.wf_steps (
+  id bigint generated always as identity primary key,
+  run_id bigint not null references {schema}.wf_runs (id) on delete cascade,
+  node_id text not null,
+  visit int not null,
+  kind text not null,                                    -- trigger|agent|shell|if|merge|approval
+  status text not null check (status in ('running', 'waiting', 'done', 'failed', 'timeout', 'cancelled', 'quota', 'skipped')),
+  input text, output jsonb, error text,
+  session_id text, num_turns int, usage jsonb, cost_usd real,   -- cost is notional
+  permission_denials jsonb, overage boolean,
+  pre_sha text, post_sha text, files jsonb, diff text,          -- diff <= 64 KB
+  log_path text,
+  started_at timestamptz not null default now(),
+  ended_at timestamptz,
+  unique (run_id, node_id, visit)
+);
+
+create table if not exists {schema}.wf_schedules (
+  owner text not null,
+  workflow text not null,
+  cron text not null,
+  input text not null default '',
+  enabled boolean not null default true,
+  last_fired_at timestamptz,
+  primary key (owner, workflow)
+);
+
 -- RLS on, no policies: only the postgres role (bypasses RLS) touches these tables.
 alter table {schema}.capabilities enable row level security;
 alter table {schema}.cap_vectors enable row level security;
@@ -206,3 +259,6 @@ alter table {schema}.dedup_review enable row level security;
 alter table {schema}.jobs enable row level security;
 alter table {schema}.api_keys enable row level security;
 alter table {schema}.history_files enable row level security;
+alter table {schema}.wf_runs enable row level security;
+alter table {schema}.wf_steps enable row level security;
+alter table {schema}.wf_schedules enable row level security;
