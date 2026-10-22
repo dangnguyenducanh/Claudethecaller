@@ -1,0 +1,65 @@
+name: claudethecaller
+
+services:
+  tei-embedder:
+    image: ghcr.io/huggingface/text-embeddings-inference:89-1.8.2
+    ports: ["18300:80"]
+    volumes: ["${HOME}/.cache/huggingface:/data"]
+    environment:
+      MODEL_ID: ${TEI_EMBED_MODEL:-ThakiCloud/SKILLRET-Embedding-0.6B}
+      POOLING: ${TEI_POOLING:-last-token}
+    command: ["--max-batch-tokens", "${TEI_MAX_BATCH_TOKENS:-16384}"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+
+  tei-reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference:89-1.8.2
+    ports: ["18301:80"]
+    volumes: ["${HOME}/.cache/huggingface:/data"]
+    environment:
+      MODEL_ID: BAAI/bge-reranker-v2-m3
+    command: ["--max-batch-tokens", "${TEI_MAX_BATCH_TOKENS:-16384}"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+
+  llama-server:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    ports: ["18302:8080"]
+    volumes: ["${HOME}/.cache/huggingface:/root/.cache/huggingface"]
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    command:
+      - "-hf"
+      - "Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M"
+      - "-c"
+      - "32768"
+      - "-np"
+      - "1"
+      - "--port"
+      - "8080"
+      - "--host"
+      - "0.0.0.0"
+      - "-ngl"
+      - "99"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+
+  redis:
+    image: redis:8.2
+    ports: ["127.0.0.1:18303:6379"]
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru", "--save", "", "--appendonly", "no"]

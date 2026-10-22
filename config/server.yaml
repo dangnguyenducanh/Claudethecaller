@@ -1,0 +1,19 @@
+# Daemon (PLAN.md B5, Cache design). Env overrides: CTC_MODE, CTC_PORT, CTC_SOCKET, CTC_REDIS_URL, CTC_CLAUDE_HOME.
+mode: local                       # local | shared
+port: 18310
+socket: ~/.claudethecaller/ctc.sock
+redis_url: redis://127.0.0.1:18303/0
+claude_home: ~/.claude            # read for scanning; written only by /api capability CRUD (temp dir until H3)
+trash_dir: ~/.claudethecaller/trash
+cache:
+  l1_size: 256
+  redis_timeout_s: 0.02
+  down_for_s: 10
+  semantic_min_cos: 0.95
+  stream_maxlen: 100000
+  ttl: {emb: 604800, bundle: 3600, sem: 86400, ovr: 300, sess: 21600, proj: 86400, key: 300}
+writer: {batch: 100, interval_s: 1.0, reclaim_idle_ms: 30000}
+jobs: {timeout_s: 60, retries: 1, dead_after: 3}
+rate_limit_per_min: 600
+history: {skip_projects: [], max_prompt_chars: 300, chunk: 30, on_start: true}   # B9: skip_projects = project names or folder basenames
+db_pool: {min: 3, max: 5}   # a route runs up to 3 queries at once; a cold Supabase connection costs ~450 ms (TLS + pooler)

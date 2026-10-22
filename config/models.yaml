@@ -1,0 +1,10 @@
+# Model servers (docker-compose.yml). Env overrides: CTC_TEI_EMBED_URL, CTC_TEI_RERANK_URL, CTC_LLM.
+embed_url: http://127.0.0.1:18300
+rerank_url: http://127.0.0.1:18301
+embed_model: ThakiCloud/SKILLRET-Embedding-0.6B
+embedding_dim: 1024
+# Daemon-side HTTP timeout; batch jobs (indexing, benchmarks) use batch_timeout_s.
+timeout_s: 2
+batch_timeout_s: 60
+# LLM for offline jobs only (never on the prompt path). anthropic:<model> when ANTHROPIC_API_KEY is set (see llm_from_env).
+llm: openai:http://127.0.0.1:18302/v1:qwen2.5-3b

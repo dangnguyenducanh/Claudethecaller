@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+data/
+*.usearch
+*.db
+models/
+*.gguf
+*.safetensors
+graphify-out/
+dashboard/node_modules/
+dashboard/dist/
+.env
+.claude/settings.local.json

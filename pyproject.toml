@@ -1,0 +1,38 @@
+[project]
+name = "ctc"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "aiface", email = "ducanhdn.ptit@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "numpy",
+    "pyyaml",
+    "httpx",
+    "pydantic",
+    "typer",
+    "anthropic",
+    "openai",
+    "scikit-learn",
+    "psycopg[binary,pool]>=3.3.6",
+    "pgvector>=0.5.1",
+    "python-dotenv>=1.2.4",
+    "redis[hiredis]>=8.1.0",
+    "fastapi>=0.156.4",
+    "uvicorn[standard]>=0.54.0",
+    "orjson>=3.13.0",
+    "mcp>=2.3.0",
+]
+
+[dependency-groups]
+dev = ["pytest", "ruff", "ranx", "datasets"]
+
+[project.scripts]
+ctc = "ctc.cli:app"
+
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
