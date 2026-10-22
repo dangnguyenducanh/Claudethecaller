@@ -4,7 +4,7 @@ Local skill/workflow router for coding agents. **`PLAN.md` is the single source 
 
 ## How work happens here
 
-- Development follows the **build order** in `PLAN.md`: four tracks (Backend, Benchmark, Frontend, AI later), one Done-when command per step, one branch per phase (`m1-retrieval-core`, …), PR into `main` at the end of the milestone.
+- Development follows the **build order** in `PLAN.md`: four tracks (Backend, Benchmark, Frontend, AI later), one Done-when command per step, one branch per phase or step (`m1-retrieval-core`, `b9-history-import`, …), PR into `staging`; `staging` → `main` is the release (PLAN.md "Git workflow and CI/CD").
 - Follow the rules under "Constraints" in `PLAN.md`: stay in the current step's scope.
 - No tests for now: the owner will guide testing later. Each step in `PLAN.md` says how to code it.
 - Code style: shortest working solution; stdlib and already-chosen deps first; no abstractions with one implementation; mark known corner-cuts with a `ponytail:` comment.
@@ -44,6 +44,7 @@ Durable facts and decisions. Append new decisions under **Decisions** with the d
 - Ports: TEI embedder `:18300`, TEI reranker `:18301`, llama-server `:18302`, Redis `:18303`, daemon `:18310` + `~/.claudethecaller/ctc.sock`. Local state: `~/.claudethecaller/ctc.sock` only; Redis holds cache only (TTL'd, rebuildable); everything durable is in Supabase.
 - `ANTHROPIC_API_KEY` is not set on this host.
 - Python 3.12 via `uv`; dashboard via `pnpm`; model servers via `docker compose`.
+- Before pushing: `scripts/check.sh` (the CI checks; DB self-checks only when `CTC_DATABASE_URL`/`CTC_REDIS_URL` point at scratch services). Deploy to this host: `scripts/deploy_local.sh` (pull, build, restart the daemon).
 - CLI: `uv run ctc status | caps | index | search "<prompt>" | explain "<prompt>"`. Daemon: `uv run ctc daemon start|stop|status` (socket + `:18310` serving `/v1`, `/api`, `/mcp` and the built dashboard; set `CTC_DASHBOARD_DIST=<main checkout>/dashboard/dist` before `start` when running from a worktree). Hooks + MCP: `uv run ctc install|uninstall` (`--dry-run` prints the diff; `CTC_CLAUDE_HOME=<tmp dir>` points it away from the real `~/.claude`). Dashboard dev server: `pnpm -C dashboard dev` → `:18320`.
 
 **Stack** (full table in `PLAN.md`): Python core (FastAPI daemon, typer CLI, ranx/scikit-learn eval), TypeScript only for the dashboard, native engines for speed (TEI Rust, llama.cpp); one database: Supabase Postgres + pgvector. Hook = `curl` one-liner, fail-open.
