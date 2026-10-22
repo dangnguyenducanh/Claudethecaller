@@ -156,7 +156,7 @@ export const api = {
   history: () => req<HistoryStatus>('GET', '/history'),
   importHistory: (o: { process?: boolean; projects?: string[] } = {}) => req<{ job_id: string }>('POST', '/history/import', o),
   historyFiles: (status?: string) => req<HistoryFile[]>('GET', '/history/files' + qs({ status })),
-  // Workflow runs (PLAN.md "Workflow runner (m5)" → API; M1 endpoints). The daemon only: the mock has no runs.
+  // Workflow runs (PLAN.md "Workflow runner (m5)" → API; M1 + M2 endpoints). The daemon only: the mock has no runs.
   startRun: (capId: string, body: { input?: string; project?: string; trigger?: RunTrigger }) => req<{ run_id: number }>('POST', `/workflows/${seg(capId)}/runs`, body),
   runs: (o: { workflow?: string; status?: RunStatus; trigger?: RunTrigger } & Page = {}) => req<Run[]>('GET', '/runs' + qs(o)),
   run: (id: number) => req<RunDetail>('GET', `/runs/${id}`),
@@ -164,4 +164,7 @@ export const api = {
   stepDiff: (id: number, sid: number) => req<Diff>('GET', `/runs/${id}/steps/${sid}/diff`),
   runDiff: (id: number) => req<Diff>('GET', `/runs/${id}/diff`),
   cancelRun: (id: number) => req<Run>('POST', `/runs/${id}/cancel`),
+  approveRun: (id: number, body: { approve: boolean; note?: string }) => req<Run>('POST', `/runs/${id}/approve`, body), // 409 not_waiting
+  continueRun: (id: number, when: 'now' | 'reset') => req<Run>('POST', `/runs/${id}/continue`, { when }), // 409 not_quota
+  compareRuns: (a: number, b: number, node?: string) => req<Diff>('GET', '/runs/compare' + qs({ a, b, node })), // 422 unless same owner + repo
 }

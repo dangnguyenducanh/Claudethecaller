@@ -204,7 +204,7 @@ async def capability(cap_id: str, request: Request, project: str | None = None):
             "cluster_members": sorted(i for i, x in st.store.catalog.items() if cl and x["cluster_id"] == cl and i != cap_id),
             "recent_decisions": [to_decision(r) for r in decs],
             "steps": [s for s in _workflow_steps(c["path"]) if isinstance(s.get("cap"), str)] if wf else None,
-            "graph": {"nodes": doc["nodes"], "edges": doc["edges"]} if wf and doc["nodes"] else None,
+            "graph": {k: doc[k] for k in ("nodes", "edges", "defaults") if k in doc} if wf and doc["nodes"] else None,
             "settings": SETTINGS | (doc.get("settings") or {}) if wf else None}
 
 

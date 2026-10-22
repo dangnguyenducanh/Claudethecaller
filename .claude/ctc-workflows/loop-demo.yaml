@@ -1,0 +1,19 @@
+name: loop-demo
+description: Workflow runner loop test - a shell counter in count.txt runs until it reaches 3, through an IF and a back-edge (no claude)
+settings: {permission: worktree, allow_extra_usage: false, auto_resume: true, max_run_tokens: null}
+defaults: {max_visits: 3}
+nodes:
+  - {id: start, type: trigger, input: "", pos: [0, 160]}
+  - {id: count, type: shell, command: "n=$(cat count.txt 2>/dev/null || echo 0); echo $((n+1)) > count.txt; cat count.txt", timeout_s: 30, pos: [200, 160]}
+  - {id: check, type: shell, command: "test $(cat count.txt) -ge 3", timeout_s: 30, pos: [400, 160]}
+  - {id: enough, type: if, path: check.exit_code, op: eq, value: 0, pos: [600, 160]}
+  - {id: again, type: shell, command: "echo again after {{count.stdout_tail}}", timeout_s: 30, pos: [600, 320]}
+  - {id: finish, type: shell, command: "echo counted to $(cat count.txt)", timeout_s: 30, pos: [800, 160]}
+edges:
+  - {from: start, to: count}
+  - {from: count, to: check}
+  - {from: check, to: enough}
+  - {from: enough, to: finish, handle: "true"}
+  - {from: enough, to: again, handle: "false"}
+  - {from: again, to: count}
+steps: []

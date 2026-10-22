@@ -751,27 +751,28 @@ Tracks: WB = backend, WF = frontend, WH = owner. Each milestone branch is cut fr
 - [ ] **WH2 — owner: first real chain, then PR `m5-runner-core`**
 
 #### M2: Loops, approval, continue, compare (`m5-runner-loops`)
-- [ ] **WB7 — loops** (rules 5–6, visit numbering, `loop-demo.yaml`)
+- **Result 2026-10-22:** loop-demo counts 1–3 then done; a 4th visit fails with `loop cap reached`; gate waits across a daemon restart, approve → done, reject → cancelled; bad-push → 422; continue after quota re-claims the same step row and resumes the same session (`--resume`, 1 Haiku run); compare returns whole-run and per-node diffs. Recorded UI test 33/33. Auto re-queue at the reset time checked only with a fake binary.
+- [x] **WB7 — loops** (rules 5–6, visit numbering, `loop-demo.yaml`)
   - Done when:
     - the fix-tests asserts pass: red, red, green runs the reviewers and join exactly once; a fourth red hits `loop cap`
     - `ctc run loop-demo --wait` shows visits 1–3
-- [ ] **WB8 — approval gate**
+- [x] **WB8 — approval gate**
   - An approval node sets `waiting` and frees the lane.
   - `approve` → `queued`; reject → `cancelled`.
   - The gate rule replaces the M1 blanket reject.
   - Done when: a `gate` run stays `waiting` across a daemon restart and is `done` after approve, and `bad-push.yaml` gets 422.
-- [ ] **WB9 — continue after quota**
+- [x] **WB9 — continue after quota**
   - `POST …/continue` and `ctc continue`. The quota'd step is re-claimed as the same visit and re-run with `--resume <session_id> -p "Continue where you left off."`.
   - The cron loop auto-continues `quota` runs with `auto_resume` once `quota_resets_at` has passed.
   - Done when: a fake-quota run continued with `CTC_CLAUDE_BIN` reset to the real binary ends `done`, and its log shows `--resume <same session_id>`.
-- [ ] **WB10 — compare runs** (`GET /api/runs/compare`)
+- [x] **WB10 — compare runs** (`GET /api/runs/compare`)
   - Done when: two `loop-demo` runs give `curl -s '…/runs/compare?a=<1>&b=<2>' | jq -e '.files|type=="array"'`.
-- [ ] **WF7 — loops on the canvas**: "loop ≤ N" edge labels, `×N` badges, a visit selector.
-- [ ] **WF8 — approval and quota banners**
+- [x] **WF7 — loops on the canvas**: "loop ≤ N" edge labels, `×N` badges, a visit selector.
+- [x] **WF8 — approval and quota banners**
   - "Waiting at `<node>`" with the run diff and Approve/Reject.
   - "Out of usage, resets at …" with **Continue when reset** and **Continue now**.
   - Done when: both banners work after a daemon restart.
-- [ ] **WF9 — compare page**: tick two runs in the list → `#compare/<a>/<b>[/<node>]` with `DiffView`.
+- [x] **WF9 — compare page**: tick two runs in the list → `#compare/<a>/<b>[/<node>]` with `DiffView`.
 
 #### M3: Parallel and merge (`m5-runner-parallel`)
 - [ ] **WB11 — parallel and merge** (rule 7, merge `{inputs}`, the commit lock, `three-reviewers.yaml`)

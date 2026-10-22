@@ -116,7 +116,7 @@ class WorkflowStep(BaseModel):
 class WfNode(BaseModel):  # node fields: PLAN.md m5 "Workflow file"; ctc.runner.graph.validate checks them
     model_config = ConfigDict(extra="allow")
     id: str
-    type: str  # trigger | agent | shell | if (M1)
+    type: str  # trigger | agent | shell | if | approval (M2)
     pos: list[int | float] = [0, 0]
 
 
@@ -352,6 +352,15 @@ class RunStart(BaseModel):
 
 class RunRef(BaseModel):
     run_id: int
+
+
+class RunApprove(BaseModel):
+    approve: bool
+    note: str | None = None
+
+
+class RunContinue(BaseModel):
+    when: Literal["now", "reset"]  # now: queued at once; reset: auto_resume, queued once quota_resets_at passes
 
 
 class Run(BaseModel):

@@ -571,6 +571,16 @@ def cancel_cmd(run_id: int = typer.Argument(..., help="Run id, from ctc runs."))
     out.print(f"{_status(r['status'])}  [{FAINT}]run #{r['id']} · {r['workflow']}[/]")
 
 
+@app.command("continue")
+def continue_cmd(run_id: int = typer.Argument(..., help="Run id, from ctc runs."),
+                 now: bool = typer.Option(False, "--now", help="Go now, not at the usage reset.")) -> None:
+    """Continue a run stopped at a usage limit: at its reset (default) or now. Its stopped node goes on in its own session."""
+    r = _api("POST", f"/runs/{run_id}/continue", json={"when": "now" if now else "reset"})
+    when = (f" · goes on at {datetime.fromisoformat(r['quota_resets_at']).astimezone():%Y-%m-%d %H:%M}"  # local, like "resets 3pm"
+            if r["status"] == "quota" and r["quota_resets_at"] else "")
+    out.print(f"{_status(r['status'])}  [{FAINT}]run #{r['id']} · {r['workflow']}{when}[/]")
+
+
 runner = typer.Typer(no_args_is_help=True, help="The workflow runner's pinned claude CLI.")
 app.add_typer(runner, name="runner")
 

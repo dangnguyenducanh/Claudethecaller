@@ -1,10 +1,12 @@
 """Workflow walker (PLAN.md m5 "Walker rules"): pure functions over a graph dict and a JSON-able state dict, no I/O.
 
-Graph = {nodes: [{id, type, pos, ...}], edges: [{from, to, handle?}]}. M1 subset: trigger|agent|shell|if, one node at a time.
+Graph = {nodes: [{id, type, pos, ...}], edges: [{from, to, handle?}]}. M2 subset: trigger|agent|shell|if|approval and
+loops (back-edges, rule 5), one node at a time.
 State (wf_runs.state, `{}` = not started): {inbox: {node: {"<edge#>": "data"|"skip"}}, deferred: [edge#], ready: [node],
-visits: {node: n}, execs: n, skipped: [node]}; edge# is the edge's index in graph["edges"].
+visits: {node: n}, execs: n, skipped: [node]}; edge# is the edge's index in graph["edges"]. visits counts runs and skips.
 Engine loop: `while (r := ready(g, st)): run r[0] (visit = visits.get(id, 0) + 1); complete(g, st, r[0], output)`;
-nodes that land in `skipped` get a skipped step row.
+complete() returns the run's error when a loop passes its cap; a node that lands in `skipped` gets a skipped step row
+(visit = visits[id]).
 """
 
 from __future__ import annotations
@@ -16,8 +18,8 @@ from pathlib import Path
 
 import yaml
 
-TYPES = {"trigger", "agent", "shell", "if"}
-LATER = {"merge": "M3", "approval": "M2"}
+TYPES = {"trigger", "agent", "shell", "if", "approval"}
+LATER = {"merge": "M3"}
 OPS = {"eq", "ne", "contains", "truthy"}
 PERMS = (None, "acceptEdits", "dontAsk", "plan")  # never bypassPermissions/auto on the host (Permissions decision)
 PUSH = re.compile(r"\b(git\s+push|gh\s+pr\s+(create|merge))\b")
@@ -60,6 +62,30 @@ def back_edges(g: dict) -> set[int]:
     return back
 
 
+def _reach(start: str, edges: list[tuple], stop=frozenset()) -> set:
+    """Nodes reachable from start over (from, to) pairs, not walking on past a node in stop."""
+    seen, todo = set(), [start]
+    while todo:
+        if (n := todo.pop()) not in seen:
+            seen.add(n)
+            if n not in stop:
+                todo += [b for a, b in edges if a == n]
+    return seen
+
+
+def loop_body(g: dict, i: int, back: set[int]) -> set[str]:
+    """Rule 5: the nodes of back-edge i's loop, reachable forward from its target and reaching its source forward."""
+    fwd = [(e.get("from"), e.get("to")) for j, e in enumerate(g["edges"]) if j not in back]
+    e = g["edges"][i]
+    return _reach(e.get("to"), fwd) & _reach(e.get("from"), [(b, a) for a, b in fwd])
+
+
+def max_visits(g: dict, node_id: str) -> int:
+    """A node's max_visits ?? the graph's defaults.max_visits ?? 3."""
+    n = next((n for n in g["nodes"] if n.get("id") == node_id), {})
+    return next(v for v in (n.get("max_visits"), (g.get("defaults") or {}).get("max_visits"), 3) if v is not None)
+
+
 def _open_quote(prefix: str) -> bool:
     """True when a shell command cut at `prefix` sits inside '...' or "..." (render's own quoting would nest there)."""
     try:
@@ -70,7 +96,7 @@ def _open_quote(prefix: str) -> bool:
 
 
 def validate(g: dict) -> list[dict]:
-    """Rules 1 and 6, M1 subset: [{message, node_id}], empty when the graph can run."""
+    """Rules 1 and 6 (merge still M3): [{message, node_id}], empty when the graph can run."""
     errs: list[dict] = []
 
     def err(message, node_id=None):
@@ -97,8 +123,8 @@ def validate(g: dict) -> list[dict]:
             err("permission_mode must be acceptEdits, dontAsk or plan: no bypass on the host", nid)
         if t == "shell" and not n.get("command"):
             err("a shell node needs a command", nid)
-        if t == "shell" and PUSH.search(str(n.get("command"))):
-            err("git push / gh pr create|merge must sit behind an approval node (M2)", nid)  # M1: no approval yet
+        if (v := n.get("max_visits")) is not None and not (type(v) is int and v >= 1):
+            err("max_visits must be a whole number >= 1", nid)
         cmd = str(n.get("command") or "")
         if t == "shell" and any(_open_quote(cmd[:m.start()]) for m in TPL.finditer(cmd)):
             err("leave {{...}} unquoted in a shell command: the runner shell-quotes it", nid)
@@ -107,7 +133,8 @@ def validate(g: dict) -> list[dict]:
                 err(f"an if node needs a path and an op in {sorted(OPS)}", nid)
             if {_handle(e) for e in g["edges"] if e.get("from") == nid} != {"true", "false"}:
                 err("an if node needs exactly its true and false edges", nid)
-        refs = TPL.findall(f"{n.get('prompt') or ''} {n.get('command') or ''}") + ([n["path"]] if t == "if" and n.get("path") else [])
+        refs = TPL.findall(f"{n.get('prompt') or ''} {n.get('command') or ''} {n.get('message') or ''}") + (
+            [n["path"]] if t == "if" and n.get("path") else [])
         for ref in refs:
             if ref.split(".")[0] not in known | ROOTS:
                 err(f"{ref} names no node", nid)
@@ -116,49 +143,84 @@ def validate(g: dict) -> list[dict]:
             err(f"edge {e.get('from')} -> {e.get('to')} points at a missing node",
                 next((x for x in (e.get("from"), e.get("to")) if x in known), None))
     if len(triggers) == 1:
-        for i in sorted(back_edges(g)):
-            err("loops arrive in M2", g["edges"][i]["from"])
+        byid = {n.get("id"): n for n in g["nodes"]}
+        gates = {nid for nid, n in byid.items() if n.get("type") == "approval"}
+        ungated = _reach(triggers[0], [(e.get("from"), e.get("to")) for e in g["edges"]], gates)
+        for nid in sorted(ungated - gates):
+            if byid.get(nid, {}).get("type") == "shell" and PUSH.search(str(byid[nid].get("command"))):
+                err("git push / gh pr create|merge must sit behind an approval node", nid)
+        back = back_edges(g)
+        for i in sorted(back):
+            loop = f"{g['edges'][i].get('from')} -> {g['edges'][i].get('to')}"
+            for nid in sorted(loop_body(g, i, back)):
+                t = byid.get(nid, {}).get("type")
+                if t in ("merge", "approval"):
+                    err(f"no {t} node inside a loop ({loop})", nid)
+                elif t != "if" and sum(e.get("from") == nid for e in g["edges"]) > 1:
+                    err(f"only an IF may branch inside a loop ({loop})", nid)
     return errs
 
 
 def ready(g: dict, st: dict) -> list[str]:
     """Rules 2 and 4. Nodes that may run now; call when nothing is running. Starts a fresh state (`{}`) and, when
-    nothing is ready, turns deferred IF edges into skip tokens (quiescence). [] means the run is done. Mutates st."""
+    nothing is ready, turns deferred IF edges into skip tokens (quiescence; never on a back-edge). [] means the run is
+    done. Mutates st."""
     if not st:
         trig = next(n["id"] for n in g["nodes"] if n["type"] == "trigger")
         st.update(inbox={}, deferred=[], ready=[trig], visits={}, execs=0, skipped=[])
+    back = back_edges(g)
     while not st["ready"] and st["deferred"]:
         deferred, st["deferred"] = st["deferred"], []
         for i in deferred:
-            _send(g, st, i, "skip")
+            if i not in back:
+                _send(g, st, i, "skip", back)
     return list(st["ready"])
 
 
-def complete(g: dict, st: dict, node_id: str, output: dict | None) -> None:
+def complete(g: dict, st: dict, node_id: str, output: dict | None) -> str | None:
     """Record a finished node: data on every out-edge; an IF ({value}) sends data on the taken handle and defers
-    the rest (rule 3). Mutates st."""
+    the rest (rule 3); a back-edge fires last (rule 5). Returns the run's error when a loop passes its cap. Mutates st."""
     st["ready"].remove(node_id)
     st["inbox"].pop(node_id, None)
     st["visits"][node_id] = st["visits"].get(node_id, 0) + 1
     st["execs"] += 1
+    back = back_edges(g)
     is_if = next(n for n in g["nodes"] if n["id"] == node_id)["type"] == "if"
     taken = str(bool((output or {}).get("value"))).lower()
-    for i, e in enumerate(g["edges"]):
-        if e["from"] == node_id:
-            if is_if and _handle(e) != taken:
-                st["deferred"].append(i)
-            else:
-                _send(g, st, i, "data")
+    outs = [i for i, e in enumerate(g["edges"]) if e["from"] == node_id]
+    for i in sorted(outs, key=lambda i: i in back):  # defer before a fire, so the fire clears this pass's deferrals
+        if is_if and _handle(g["edges"][i]) != taken:
+            st["deferred"].append(i)
+        elif i not in back:
+            _send(g, st, i, "data", back)
+        elif err := _fire(g, st, i, back):
+            return err
+    return None
 
 
-def _send(g: dict, st: dict, i: int, tok: str) -> None:
-    """Put a token on edge i. Once every in-edge of its target holds one: any data -> ready; all skip -> skipped,
-    and skip goes on downstream (rule 4).
-    ponytail: every edge counts as forward; validate rejects back-edges until loops land (M2, rule 5)."""
+def _fire(g: dict, st: dict, i: int, back: set[int]) -> str | None:
+    """Rule 5: back-edge i carries data. Its loop body's inbox and deferred edges are cleared and its target is ready
+    for its next visit; an error when that visit passes the target's max_visits, or runs pass the backstop."""
+    to = g["edges"][i]["to"]
+    if st["visits"].get(to, 0) >= max_visits(g, to):
+        return f"loop cap reached at {to}"
+    if st["execs"] >= sum(max_visits(g, n["id"]) for n in g["nodes"]) + len(g["nodes"]):
+        return f"loop backstop reached at {to}: {st['execs']} node runs"
+    body = loop_body(g, i, back)
+    st["inbox"] = {n: box for n, box in st["inbox"].items() if n not in body}
+    st["deferred"] = [j for j in st["deferred"] if g["edges"][j]["from"] not in body]
+    if to not in st["ready"]:
+        st["ready"].append(to)
+    return None
+
+
+def _send(g: dict, st: dict, i: int, tok: str, back: set[int]) -> None:
+    """Put a token on forward edge i. Once every forward in-edge of its target holds one: any data -> ready; all
+    skip -> skipped (a visit too), and skip goes on downstream, never over a back-edge (rule 4)."""
     to = g["edges"][i]["to"]
     box = st["inbox"].setdefault(to, {})
     box[str(i)] = tok
-    if any(str(j) not in box for j, e in enumerate(g["edges"]) if e["to"] == to):
+    if any(str(j) not in box for j, e in enumerate(g["edges"]) if e["to"] == to and j not in back):
         return
     if "data" in box.values():
         if to not in st["ready"]:
@@ -166,9 +228,10 @@ def _send(g: dict, st: dict, i: int, tok: str) -> None:
         return
     del st["inbox"][to]
     st["skipped"].append(to)
+    st["visits"][to] = st["visits"].get(to, 0) + 1  # a node skipped in one loop pass and run in the next: new visit
     for j, e in enumerate(g["edges"]):
-        if e["from"] == to:
-            _send(g, st, j, "skip")
+        if e["from"] == to and j not in back:
+            _send(g, st, j, "skip", back)
 
 
 def lookup(ctx: dict, path: str):
@@ -237,20 +300,80 @@ if __name__ == "__main__":
             {"from": "blame", "to": "note"},
         ],
     }
-    g = load(good)
-    assert validate(g) == [], validate(g)
-    for code, want_ran, want_skipped in ((0, ["ship"], ["blame", "note"]), (1, ["blame", "note"], ["ship"])):
+    def walk(g: dict, code) -> tuple[list, dict, str | None]:
+        """The engine loop without I/O: (nodes run in order, final state, run error); code(node_id) = a shell's exit."""
         st, ctx, ran = {}, {"input": "go", "run": {"branch": "ctc/demo-1"}}, []
         while r := ready(g, st):
             node = next(n for n in g["nodes"] if n["id"] == r[0])
-            out = {"trigger": {"input": "go"}, "agent": {"result": "ok"}, "shell": {"exit_code": code}}.get(node["type"])
+            out = {"trigger": {"input": "go"}, "agent": {"result": "ok"}, "approval": {"approved": True, "note": None},
+                   "shell": {"exit_code": code(node["id"])} if node["type"] == "shell" else None}.get(node["type"])
             out = {"value": eval_if(node, ctx)} if node["type"] == "if" else out
             ctx[node["id"]] = out
             ran.append(node["id"])
-            complete(g, st, node["id"], out)
+            if e := complete(g, st, node["id"], out):
+                return ran, st, e
             st = json.loads(json.dumps(st))  # the engine checkpoints state to Postgres after every node
-        assert ran == ["start", "fix", "test", "green", *want_ran], ran
+        return ran, st, None
+
+    g = load(good)
+    assert validate(g) == [], validate(g)
+    for code, want_ran, want_skipped in ((0, ["ship"], ["blame", "note"]), (1, ["blame", "note"], ["ship"])):
+        ran, st, e = walk(g, lambda _, c=code: c)
+        assert ran == ["start", "fix", "test", "green", *want_ran] and e is None, ran
         assert st["skipped"] == want_skipped and not st["deferred"] and st["execs"] == len(ran), st
+
+    # fix-tests (PLAN.md m5 "Workflow file"): test -> green? -> fix -> test is a loop; reviewers + join + gate after it
+    fix_tests = load({"nodes": [
+        {"id": "start", "type": "trigger"}, {"id": "test", "type": "shell", "command": "pytest -x -q"},
+        {"id": "green", "type": "if", "path": "test.exit_code", "op": "eq", "value": 0},
+        {"id": "fix", "type": "agent", "prompt": "Tests fail: {{test.stdout_tail}}"},
+        {"id": "review-a", "type": "agent", "readonly": True, "prompt": "Review"},
+        {"id": "review-b", "type": "agent", "readonly": True, "prompt": "Security review"},
+        {"id": "join", "type": "merge"}, {"id": "gate", "type": "approval", "message": "Push {{run.branch}}?"},
+        {"id": "pr", "type": "shell", "command": "git push -u origin HEAD && gh pr create --draft --fill"},
+    ], "edges": [
+        {"from": "start", "to": "test"}, {"from": "test", "to": "green"},
+        {"from": "green", "to": "review-a", "handle": "true"}, {"from": "green", "to": "review-b", "handle": "true"},
+        {"from": "green", "to": "fix", "handle": "false"}, {"from": "fix", "to": "test"},
+        {"from": "review-a", "to": "join"}, {"from": "review-b", "to": "join"}, {"from": "join", "to": "gate"},
+        {"from": "gate", "to": "pr"},
+    ]})
+    assert back_edges(fix_tests) == {5} and loop_body(fix_tests, 5, {5}) == {"test", "green", "fix"}
+    assert [e["message"] for e in validate(fix_tests)] == ["merge nodes arrive in M3"], validate(fix_tests)  # push gated
+    results = iter([1, 1, 0])  # red, red, green
+    ran, st, e = walk(fix_tests, lambda n: next(results) if n == "test" else 0)
+    assert e is None and ran == ["start", *["test", "green", "fix"] * 2, "test", "green", "review-a", "review-b", "join",
+                                 "gate", "pr"], ran
+    assert st["visits"] == {"start": 1, "test": 3, "green": 3, "fix": 3, "review-a": 1, "review-b": 1, "join": 1,
+                            "gate": 1, "pr": 1} and st["skipped"] == ["fix"] and not st["deferred"], st  # fix#3 skipped
+    ran, st, e = walk(fix_tests, lambda n: 1)  # red forever: the 4th test visit is over its cap
+    assert e == "loop cap reached at test" and ran.count("test") == 3 and "review-a" not in ran, (e, ran)
+    ran, _, e = walk(fix_tests | {"defaults": {"max_visits": 2}}, lambda n: 1)
+    assert e == "loop cap reached at test" and ran.count("test") == 2, (e, ran)  # graph defaults.max_visits honoured
+    ran, _, e = walk(fix_tests | {"nodes": [n | ({"max_visits": 5} if n["id"] == "test" else {}) for n in fix_tests["nodes"]],
+                                  "defaults": {"max_visits": 2}}, lambda n: 1)
+    assert e == "loop cap reached at test" and ran.count("test") == 5, (e, ran)  # the node's own max_visits wins
+
+    def bad_ft(change) -> str:
+        g2 = copy.deepcopy(fix_tests)
+        change(g2)
+        return " | ".join(e["message"] for e in validate(load(g2)))
+
+    no_gate = bad_ft(lambda x: (x["nodes"].pop(7), x["edges"].pop(), x["edges"][8].update(to="pr")))  # join -> pr
+    assert no_gate == "merge nodes arrive in M3 | git push / gh pr create|merge must sit behind an approval node", no_gate
+    assert "no merge node inside a loop (join -> test)" in bad_ft(lambda x: x["edges"].append({"from": "join", "to": "test"}))
+    assert "no approval node inside a loop" in bad_ft(lambda x: x["edges"][5].update(to="gate") or x["edges"].append(
+        {"from": "gate", "to": "test"}))  # fix -> gate -> test: an approval in the loop body
+    assert "only an IF may branch inside a loop" in bad_ft(lambda x: x["edges"].append({"from": "fix", "to": "review-a"}))
+    assert "max_visits" in bad_ft(lambda x: x["nodes"][1].update(max_visits="3"))
+    assert "nobody.x names no node" in bad_ft(lambda x: x["nodes"][7].update(message="Push {{nobody.x}}?"))  # approval message
+    root = Path(__file__).resolve().parents[3] / ".claude" / "ctc-workflows"
+    for name in ("loop-demo", "gate", "smoke"):
+        assert validate(load(root / f"{name}.yaml")) == [], (name, validate(load(root / f"{name}.yaml")))
+    assert "approval" in validate(load(root / "bad-push.yaml"))[0]["message"]
+    checks = iter([1, 1, 0])  # loop-demo: the counter reaches 3 on its third visit
+    ran, st, e = walk(load(root / "loop-demo.yaml"), lambda n: next(checks) if n == "check" else 0)
+    assert e is None and ran.count("count") == 3 and ran[-1] == "finish" and st["skipped"] == ["again"], (e, ran)
 
     def bad(change) -> str:
         g2 = copy.deepcopy(good)
@@ -262,7 +385,7 @@ if __name__ == "__main__":
     assert "true and false" in bad(lambda x: x["edges"].pop(4))
     assert "approval" in bad(lambda x: x["nodes"][4].update(command="git push -u origin HEAD"))
     assert "approval" in bad(lambda x: x["nodes"][4].update(command="gh  pr create --draft"))
-    assert "loops arrive in M2" in bad(lambda x: x["edges"].append({"from": "blame", "to": "test"}))
+    assert "only an IF may branch" in bad(lambda x: x["edges"].append({"from": "blame", "to": "test"}))
     assert "merge nodes arrive in M3" in bad(lambda x: x["nodes"].append({"id": "join", "type": "merge"}))
     assert "names no node" in bad(lambda x: x["nodes"][4].update(command="echo {{nobody.result}}"))
     assert "duplicate" in bad(lambda x: x["nodes"].append({"id": "fix", "type": "shell", "command": "true"}))

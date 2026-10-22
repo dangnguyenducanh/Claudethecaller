@@ -12,7 +12,7 @@ import { Header, Search } from './ui'
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
 const KIND_COLOR: Record<Kind, string> = { skill: '#7c8cff', agent: '#b38cff', command: '#f59e42', workflow: '#3ddc97' }
-const TYPE_COLOR: Record<NodeType, string> = { trigger: '#3ddc97', agent: '#b38cff', shell: '#f59e42', if: '#7c8cff' }
+const TYPE_COLOR: Record<NodeType, string> = { trigger: '#3ddc97', agent: '#b38cff', shell: '#f59e42', if: '#7c8cff', approval: '#f5b14a' }
 const DND = 'application/ctc-cap'
 const DEFAULT_SETTINGS: WorkflowSettings = { permission: 'worktree', allow_extra_usage: false, auto_resume: true, max_run_tokens: null }
 const arrow = { type: MarkerType.ArrowClosed }
@@ -21,22 +21,23 @@ export type WfData = Omit<WfNode, 'id' | 'type' | 'pos'>
 export type FlowNode = Node<WfData, NodeType>
 const TRIGGER: FlowNode = { id: 'start', type: 'trigger', position: { x: 0, y: 0 }, data: {}, deletable: false }
 
-/** `bad`: the node a 422 names (editor). `status`: each node's latest step status (run page). */
-export const NodeCtx = createContext<{ bad: string | null; status: Record<string, string> }>({ bad: null, status: {} })
+/** `bad`: the node a 422 names (editor). `status`: each node's latest step status; `runs`: how often it ran (run page). */
+export const NodeCtx = createContext<{ bad: string | null; status: Record<string, string>; runs?: Record<string, number> }>({ bad: null, status: {} })
 const NO_STATUS = { bad: null, status: {} }
 
 const firstLine = (s?: string) => (s ?? '').split('\n')[0]
 
 function NodeView({ id, type, data, selected }: NodeProps<FlowNode>) {
-  const { bad, status } = useContext(NodeCtx)
+  const { bad, status, runs } = useContext(NodeCtx)
   const sub = type === 'trigger' ? (data.input ? `input: ${data.input}` : 'run input → {{input}}')
     : type === 'agent' ? data.cap ?? data.agent ?? firstLine(data.prompt)
     : type === 'shell' ? firstLine(data.command)
+    : type === 'approval' ? firstLine(data.message)
     : `${data.path ?? '?'} ${data.op ?? 'eq'} ${data.op === 'truthy' ? '' : JSON.stringify(data.value ?? null)}`
   return (
     <div className={`wfnode${selected ? ' sel' : ''}${bad === id ? ' bad' : ''}${status[id] ? ' st-' + status[id] : ''}`}>
       {type !== 'trigger' && <Handle type="target" position={Position.Left} />}
-      <div className="mono wf-id"><span className="dot" style={{ background: TYPE_COLOR[type] }} />{id}<span className="wf-kind">{status[id] ?? type}</span></div>
+      <div className="mono wf-id"><span className="dot" style={{ background: TYPE_COLOR[type] }} />{id}<span className="wf-kind">{status[id] ?? type}</span>{(runs?.[id] ?? 0) > 1 && <span className="tag warn">×{runs![id]}</span>}</div>
       <div className="wf-sub mono">{sub || '—'}</div>
       {type === 'if'
         ? (['true', 'false'] as const).map(h => <div key={h} className="wf-out">{h}<Handle type="source" position={Position.Right} id={h} /></div>)
@@ -44,7 +45,7 @@ function NodeView({ id, type, data, selected }: NodeProps<FlowNode>) {
     </div>
   )
 }
-export const nodeTypes = { trigger: NodeView, agent: NodeView, shell: NodeView, if: NodeView }
+export const nodeTypes = { trigger: NodeView, agent: NodeView, shell: NodeView, if: NodeView, approval: NodeView }
 
 export const toFlow = (g: Graph): { nodes: FlowNode[]; edges: Edge[] } => ({
   nodes: g.nodes.map(({ id, type, pos, ...data }) => ({ id, type, position: { x: pos[0], y: pos[1] }, data, deletable: type !== 'trigger' })),
@@ -73,7 +74,12 @@ export function backEdges(nodes: { id: string; type?: string }[], edges: { id: s
 }
 if (import.meta.env.DEV) console.assert([...backEdges([{ id: 's', type: 'trigger' }, { id: 'a' }, { id: 'b' }],
   [{ id: '1', source: 's', target: 'a' }, { id: '2', source: 'a', target: 'b' }, { id: '3', source: 'b', target: 'a' }])].join() === '3', 'backEdges self-check failed')
-export const dashBack = (nodes: FlowNode[], edges: Edge[]) => { const b = backEdges(nodes, edges); return edges.map(e => (b.has(e.id) ? { ...e, className: 'back' } : e)) }
+/** Back-edges dashed and labelled with the target's cap: its max_visits, else the graph default, else 3 (the walker's default). */
+export const dashBack = (nodes: FlowNode[], edges: Edge[], max = 3) => {
+  const b = backEdges(nodes, edges)
+  const cap = (id: string) => nodes.find(n => n.id === id)?.data.max_visits ?? max
+  return edges.map(e => (b.has(e.id) ? { ...e, className: 'back', label: `${e.label ? e.label + ' · ' : ''}loop ≤ ${cap(e.target)}` } : e))
+}
 
 /** A workflow saved before graphs (`steps:` only) → the trigger chained to one Agent node per step. */
 const fromSteps = (steps: WorkflowStep[]): Graph => {
@@ -152,6 +158,7 @@ function NodeForm({ n, ids, agents, set, rename }: { n: FlowNode; ids: string[];
         {num('timeout_s', 'Timeout (s)')}
         {check('readonly', 'Read-only')}
       </>}
+      {n.type === 'approval' && area('message', 'Message (shown on the run page while it waits)')}
       {n.type === 'if' && <>
         {text('path', 'Path, e.g. test.exit_code (missing = false)')}
         <div className="row2">
@@ -329,6 +336,7 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
             <button className="btn" disabled={locked} onClick={() => add('agent', { prompt: '{{input}}' })}>+ Agent</button>
             <button className="btn" disabled={locked} onClick={() => add('shell', {})}>+ Shell</button>
             <button className="btn" disabled={locked} onClick={() => add('if', { op: 'eq' })}>+ IF</button>
+            <button className="btn" disabled={locked} onClick={() => add('approval', { message: 'Approve and continue?' })}>+ Approval</button>
             <Search value={q} onChange={setQ} placeholder="Find a capability" />
           </div>
           <div className="wf-list">
@@ -341,14 +349,14 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
         </aside>
         <div className="wf-canvas card" onDragOver={e => e.preventDefault()} onDrop={onDrop}>
           <NodeCtx.Provider value={bad ? { bad, status: {} } : NO_STATUS}>
-            <ReactFlow nodes={nodes} edges={dashBack(nodes, edges)} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
+            <ReactFlow nodes={nodes} edges={dashBack(nodes, edges, loaded?.graph?.defaults?.max_visits)} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
               isValidConnection={isValid} colorMode={theme === 'light' ? 'light' : 'dark'} fitView fitViewOptions={{ maxZoom: 1 }} minZoom={0.2} nodesDraggable={!locked} nodesConnectable={!locked}
               elementsSelectable deleteKeyCode={locked ? null : ['Backspace', 'Delete']} proOptions={{ hideAttribution: true }}>
               <Background gap={20} />
               <Controls showInteractive={false} />
             </ReactFlow>
           </NodeCtx.Provider>
-          {nodes.length <= 1 && <div className="wf-hint">Drag capabilities here (each becomes an Agent node) or add Shell and IF nodes,<br />then connect them from the trigger. Edges that loop back are drawn dashed.</div>}
+          {nodes.length <= 1 && <div className="wf-hint">Drag capabilities here (each becomes an Agent node) or add Shell, IF and Approval nodes,<br />then connect them from the trigger. Edges that loop back are drawn dashed.</div>}
         </div>
         <aside className="wf-panel card pad">
           <fieldset className="form" disabled={locked}>
@@ -364,5 +372,5 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
 }
 
 export default function Workflows(props: ViewProps & { theme: string }) {
-  return <><Header crumb="Workflows" title="Workflow editor" sub="Agent, Shell and IF nodes on a canvas; each run gets its own git branch and worktree" /><ReactFlowProvider><Editor {...props} /></ReactFlowProvider></>
+  return <><Header crumb="Workflows" title="Workflow editor" sub="Agent, Shell, IF and Approval nodes on a canvas; each run gets its own git branch and worktree" /><ReactFlowProvider><Editor {...props} /></ReactFlowProvider></>
 }

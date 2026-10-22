@@ -32,22 +32,29 @@ function usePoll<T>(load: () => Promise<T>, again: (t: T) => boolean, deps: unkn
   return [data, err]
 }
 
-export default function Runs({ runId, onRun, theme }: { runId: number | null; onRun: (id: number | null) => void; theme: string }) {
+/** `compare`: '<a>/<b>[/<node>]' from the '#compare/…' route. */
+export default function Runs({ runId, compare, onRun, theme }: { runId: number | null; compare: string | null; onRun: (id: number | null) => void; theme: string }) {
+  if (compare) { const [a, b, node] = compare.split('/'); return <Compare a={Number(a)} b={Number(b)} node={node ?? ''} /> }
   return runId ? <RunPage key={runId} id={runId} theme={theme} onBack={() => onRun(null)} /> : <RunList onOpen={onRun} />
 }
 
 function RunList({ onOpen }: { onOpen: (id: number) => void }) {
   const [runs, err] = usePoll(() => api.runs(), rs => rs.some(r => ACTIVE.includes(r.status)), [])
+  const [picked, setPicked] = useState<number[]>([])
+  const pick = (id: number, on: boolean) => setPicked(p => (on ? [...p, id] : p.filter(x => x !== id)))
   return (
     <>
-      <Header crumb="Runs" title="Workflow runs" sub={runs ? `${runs.length} runs${runs.some(r => ACTIVE.includes(r.status)) ? ' · refreshing every 1.5 s' : ''}` : 'Runs of your workflows on this machine'} />
+      <Header crumb="Runs" title="Workflow runs" sub={runs ? `${runs.length} runs${runs.some(r => ACTIVE.includes(r.status)) ? ' · refreshing every 1.5 s' : ''}` : 'Runs of your workflows on this machine'}>
+        <button className="btn" disabled={picked.length !== 2} title="Tick two runs of the same repo" onClick={() => { location.hash = `compare/${[...picked].sort((x, y) => x - y).join('/')}` }}>Compare</button>
+      </Header>
       {err && <div className={usingMock() ? 'muted' : 'err'}>{err}</div>}
       <div className="card tablewrap">
         <table>
-          <thead><tr><th>Run</th><th>Status</th><th>Progress</th><th>Trigger</th><th className="num">Tokens</th><th>Created</th></tr></thead>
+          <thead><tr><th /><th>Run</th><th>Status</th><th>Progress</th><th>Trigger</th><th className="num">Tokens</th><th>Created</th></tr></thead>
           <tbody>
             {(runs ?? []).map(r => (
               <tr key={r.id} className="click" onClick={() => onOpen(r.id)}>
+                <td onClick={e => e.stopPropagation()}><input type="checkbox" aria-label={`Compare run ${r.id}`} checked={picked.includes(r.id)} onChange={e => pick(r.id, e.target.checked)} /></td>
                 <td><div className="title mono">{r.workflow}</div><div className="subline">#{r.id}{r.branch && ` · ${r.branch}`}{r.input && ` · ${r.input}`}</div></td>
                 <td><span className={'tag ' + (PILL[r.status] ?? '')}>{r.status}</span>{r.error && <div className="err" style={{ marginTop: 4 }}>{r.error}</div>}</td>
                 <td style={{ width: 160 }}>
@@ -71,17 +78,22 @@ function RunPage({ id, theme, onBack }: { id: number; theme: string; onBack: () 
   const [rev, setRev] = useState(0)
   const [run, err] = usePoll(() => api.run(id), r => ACTIVE.includes(r.status), [id, rev])
   const [sel, setSel] = useState<string | null>(null)
+  const [visit, setVisit] = useState(0) // 0: the latest visit of the selected node
   const [whole, setWhole] = useState(false)
   const [msg, setMsg] = useState('')
+  const [note, setNote] = useState('')
   if (!run) return <><Header crumb="Runs" title={`Run #${id}`} sub="" /><div className={usingMock() ? 'muted' : 'err'}>{err}</div></>
 
-  // ponytail: one visit per node is shown (the last); loops get a visit selector in WF7.
-  const latest: Record<string, Step> = {}
-  for (const s of run.steps) if (!latest[s.node_id] || s.visit >= latest[s.node_id].visit) latest[s.node_id] = s
-  const status = Object.fromEntries(Object.values(latest).map(s => [s.node_id, s.status]))
+  const visits: Record<string, Step[]> = {} // every visit per node, in visit order
+  for (const s of [...run.steps].sort((a, b) => a.visit - b.visit)) (visits[s.node_id] ??= []).push(s)
+  const status = Object.fromEntries(Object.entries(visits).map(([n, vs]) => [n, vs[vs.length - 1].status]))
+  const runs = Object.fromEntries(Object.entries(visits).map(([n, vs]) => [n, vs.filter(s => s.status !== 'skipped').length]))
   const f = toFlow(run.graph) // read once by the uncontrolled canvas below
-  const step = sel ? latest[sel] : undefined
-  const cancel = async () => { try { await api.cancelRun(run.id); setRev(r => r + 1) } catch (e) { setMsg(errText(e)) } }
+  const vs = sel ? visits[sel] ?? [] : []
+  const step = vs.find(s => s.visit === visit) ?? vs[vs.length - 1]
+  const act = (call: () => Promise<unknown>) => async () => { try { setMsg(''); await call(); setRev(r => r + 1) } catch (e) { setMsg(errText(e)) } }
+  const cancel = act(() => api.cancelRun(run.id))
+  const wait = run.steps.find(s => s.status === 'waiting')
 
   return (
     <>
@@ -93,17 +105,37 @@ function RunPage({ id, theme, onBack }: { id: number; theme: string; onBack: () 
       </Header>
       <div className="toolbar">
         <span className={'tag ' + (PILL[run.status] ?? '')}>{run.status}</span>
-        {run.status === 'quota' && <span className="tag warn">quota, resets at {run.quota_resets_at ? fmtTime(run.quota_resets_at) : 'unknown'}</span>}
         {run.branch && <span className="mono">{run.branch}</span>}
         {run.pr_url && <a href={run.pr_url} target="_blank" rel="noreferrer">{run.pr_url}</a>}
         {run.error && <span className="err">{run.error}</span>}
         {(msg || err) && <span className="err">{msg || err}</span>}
       </div>
+      {run.status === 'waiting' && (
+        <div className="card pad form st-waiting">
+          <div className="card-title">Waiting at {wait?.node_id ?? 'an approval'}: {wait?.input || 'approve to go on'}</div>{/* input: the message, templates filled */}
+          <DiffOf load={() => api.runDiff(run.id)} dep={run.status} />
+          <label>Note (optional)<input value={note} onChange={e => setNote(e.target.value)} /></label>
+          <div className="actions">
+            <button className="btn" style={{ borderColor: 'var(--accent)' }} onClick={act(() => api.approveRun(run.id, { approve: true, note: note || undefined }))}>Approve</button>
+            <button className="btn danger" onClick={act(() => api.approveRun(run.id, { approve: false, note: note || undefined }))}>Reject</button>
+          </div>
+        </div>
+      )}
+      {run.status === 'quota' && (
+        <div className="card pad form st-quota">
+          <div className="card-title">Out of usage, resets at {run.quota_resets_at ? fmtTime(run.quota_resets_at) : 'an unknown time'}{run.auto_resume ? ', then continues by itself' : ''}</div>
+          <div className="actions">
+            <button className="btn" onClick={act(() => api.continueRun(run.id, 'reset'))}>Continue when reset</button>
+            <button className="btn" onClick={act(() => api.continueRun(run.id, 'now'))}>Continue now</button>
+          </div>
+        </div>
+      )}
       {whole && <div className="card pad"><DiffOf load={() => api.runDiff(run.id)} dep={run.status} /></div>}
       <div className="run-body">
         <div className="wf-canvas card">
-          <NodeCtx.Provider value={{ bad: null, status }}>
-            <ReactFlow defaultNodes={f.nodes} defaultEdges={dashBack(f.nodes, f.edges)} nodeTypes={nodeTypes} onNodeClick={(_, n) => setSel(n.id)} onPaneClick={() => setSel(null)}
+          <NodeCtx.Provider value={{ bad: null, status, runs }}>
+            <ReactFlow defaultNodes={f.nodes} defaultEdges={dashBack(f.nodes, f.edges, run.graph.defaults?.max_visits)} nodeTypes={nodeTypes}
+              onNodeClick={(_, n) => { setSel(n.id); setVisit(0) }} onPaneClick={() => setSel(null)}
               nodesDraggable={false} nodesConnectable={false} deleteKeyCode={null} colorMode={theme === 'light' ? 'light' : 'dark'} fitView fitViewOptions={{ maxZoom: 1 }} minZoom={0.2}
               proOptions={{ hideAttribution: true }}>
               <Background gap={20} />
@@ -112,7 +144,7 @@ function RunPage({ id, theme, onBack }: { id: number; theme: string; onBack: () 
           </NodeCtx.Provider>
         </div>
         <aside className="wf-panel card pad">
-          {step ? <StepPanel run={run} step={step} />
+          {step ? <StepPanel run={run} step={step} visits={vs.length > 1 ? vs : []} onVisit={setVisit} />
             : <div className="muted">{sel ? `${sel} has not run yet.` : 'Click a node to see its output, log, diff and session.'}</div>}
         </aside>
       </div>
@@ -120,11 +152,34 @@ function RunPage({ id, theme, onBack }: { id: number; theme: string; onBack: () 
   )
 }
 
-function StepPanel({ run, step }: { run: RunDetail; step: Step }) {
+/** Two runs' diff: whole runs (`git diff <a.branch>..<b.branch>`) or one node's latest visit in each. */
+function Compare({ a, b, node }: { a: number; b: number; node: string }) {
+  const [ra, setRa] = useState<RunDetail | null>(null)
+  useEffect(() => { api.run(a).then(setRa, () => {}) }, [a]) // the node list only; the diff below shows any error
+  const go = (n: string) => { location.hash = `compare/${a}/${b}${n ? '/' + n : ''}` }
+  return (
+    <>
+      <Header crumb="Runs" title={`Compare #${a} and #${b}`} sub={ra ? `${ra.workflow}${ra.branch ? ' · ' + ra.branch : ''}` : ''}>
+        <button className="btn" onClick={() => { location.hash = 'runs' }}>All runs</button>
+      </Header>
+      <div className="card pad form">
+        <label>Node<select value={node} onChange={e => go(e.target.value)}>
+          <option value="">whole run</option>
+          {ra?.graph.nodes.filter(n => n.type === 'agent' || n.type === 'shell').map(n => <option key={n.id}>{n.id}</option>)}{/* only these commit */}
+        </select></label>
+        <DiffOf key={node} load={() => api.compareRuns(a, b, node || undefined)} dep={node} />
+      </div>
+    </>
+  )
+}
+
+function StepPanel({ run, step, visits, onVisit }: { run: RunDetail; step: Step; visits: Step[]; onVisit: (v: number) => void }) {
   const [tab, setTab] = useState<(typeof TABS)[number]>('output') // kept while switching nodes
   return (
     <div className="form">
-      <div className="card-title mono">{step.node_id}<span className={'tag ' + (PILL[step.status] ?? '')}>{step.status}</span>{step.visit > 1 && <span className="tag">visit {step.visit}</span>}</div>
+      <div className="card-title mono">{step.node_id}<span className={'tag ' + (PILL[step.status] ?? '')}>{step.status}</span>
+        {visits.length > 0 && <select aria-label="Visit" value={step.visit} onChange={e => onVisit(Number(e.target.value))}>
+          {visits.map(s => <option key={s.visit} value={s.visit}>visit {s.visit}</option>)}</select>}</div>
       <Segmented options={TABS} value={tab} onChange={setTab} />
       {tab === 'output' && <>
         {step.error && <div className="err">{step.error}</div>}

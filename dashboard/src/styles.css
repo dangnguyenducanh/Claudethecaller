@@ -208,7 +208,7 @@ a { color: var(--accent); }
 .wfnode.bad { box-shadow: 0 0 0 3px #ff6b6b33; }
 .wfnode.st-done { border-color: var(--good); }
 .wfnode.st-running { border-color: var(--accent); box-shadow: 0 0 0 3px #7c8cff33; }
-.wfnode.st-waiting, .wfnode.st-quota { border-color: #f5b14a; }
+.wfnode.st-waiting, .wfnode.st-quota, .card.st-waiting, .card.st-quota { border-color: #f5b14a; } /* nodes and the run page banners */
 .wfnode.st-skipped, .wfnode.st-cancelled { opacity: .5; border-style: dashed; }
 .run-body { display: grid; grid-template-columns: 1fr 420px; gap: 12px; height: calc(100vh - 230px); min-height: 420px; }
 .log { display: grid; gap: 2px; font: 11px/1.5 var(--mono); max-height: 60vh; overflow: auto; }

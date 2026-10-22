@@ -16,12 +16,14 @@ type View = (typeof VIEWS)[number]
 const SHARED_ONLY: View[] = ['keys']
 export type ViewProps = { project: string | null; range: Range; setRange: (r: Range) => void; projects: string[] }
 
-/** '#library' → view; '#decision/12' → the Overview with decision 12 open; '#run/7' → run 7's page. */
-function parseHash(): { view: View; decision: number | null; run: number | null } {
+/** '#library' → view; '#decision/12' → the Overview with decision 12 open; '#run/7' → run 7's page; '#compare/7/9[/node]' → runs 7 and 9 compared. */
+function parseHash(): { view: View; decision: number | null; run: number | null; compare: string | null } {
   const h = location.hash.slice(1)
   const m = /^(decision|run)\/(\d+)$/.exec(h)
-  if (m) return m[1] === 'run' ? { view: 'runs', decision: null, run: Number(m[2]) } : { view: 'overview', decision: Number(m[2]), run: null }
-  return { view: VIEWS.includes(h as View) ? (h as View) : 'overview', decision: null, run: null }
+  if (m) return m[1] === 'run' ? { view: 'runs', decision: null, run: Number(m[2]), compare: null } : { view: 'overview', decision: Number(m[2]), run: null, compare: null }
+  const c = /^compare\/(\d+\/\d+(?:\/[a-z0-9-]+)?)$/.exec(h)
+  if (c) return { view: 'runs', decision: null, run: null, compare: c[1] }
+  return { view: VIEWS.includes(h as View) ? (h as View) : 'overview', decision: null, run: null, compare: null }
 }
 
 const ICONS: Record<View, string> = {
@@ -55,6 +57,7 @@ export default function App() {
   const [view, setView] = useState<View>(() => parseHash().view)
   const [decisionId, setDecisionId] = useState<number | null>(() => parseHash().decision)
   const [runId, setRunId] = useState<number | null>(() => parseHash().run)
+  const [compare, setCompare] = useState<string | null>(() => parseHash().compare)
   const [project, setProject] = useState<string | null>(null)
   const [range, setRange] = useState<Range>('30d')
   const [projects, setProjects] = useState<Project[]>([])
@@ -80,9 +83,9 @@ export default function App() {
     loadProjects()
     setRev(r => r + 1)
   }
-  useEffect(() => { location.hash = decisionId ? `decision/${decisionId}` : runId ? `run/${runId}` : view }, [view, decisionId, runId])
+  useEffect(() => { location.hash = decisionId ? `decision/${decisionId}` : runId ? `run/${runId}` : compare ? `compare/${compare}` : view }, [view, decisionId, runId, compare])
   useEffect(() => { // back/forward and pasted #links switch views or open a decision
-    const onHash = () => { const h = parseHash(); setView(h.view); setDecisionId(h.decision); setRunId(h.run) }
+    const onHash = () => { const h = parseHash(); setView(h.view); setDecisionId(h.decision); setRunId(h.run); setCompare(h.compare) }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
@@ -106,7 +109,7 @@ export default function App() {
           claudethecaller
         </div>
         {VIEWS.filter(v => !SHARED_ONLY.includes(v) || health?.mode === 'shared').map(v => (
-          <button key={v} className={'navitem' + (v === view ? ' on' : '')} onClick={() => { setDecisionId(null); setRunId(null); setView(v) }}>
+          <button key={v} className={'navitem' + (v === view ? ' on' : '')} onClick={() => { setDecisionId(null); setRunId(null); setCompare(null); setView(v) }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d={ICONS[v]} /></svg>
             {v[0].toUpperCase() + v.slice(1)}
           </button>
@@ -148,7 +151,7 @@ export default function App() {
         {view === 'overview' && <Overview {...props} decisionId={decisionId} onDecision={setDecisionId} />}
         {view === 'library' && <Library {...props} />}
         {view === 'workflows' && <Workflows {...props} theme={theme} />}
-        {view === 'runs' && <Runs runId={runId} onRun={setRunId} theme={theme} />}
+        {view === 'runs' && <Runs runId={runId} compare={compare} onRun={setRunId} theme={theme} />}
         {view === 'sessions' && <Sessions {...props} />}
         {view === 'memories' && <Memories {...props} />}
         {view === 'jobs' && <Jobs {...props} />}

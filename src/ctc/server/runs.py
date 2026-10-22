@@ -1,4 +1,5 @@
-"""/api workflow runs, M1 endpoints (PLAN.md m5 "API"): start, list, detail, step log + diff, run diff, cancel.
+"""/api workflow runs (PLAN.md m5 "API"): start, list, detail, step log + diff, run diff, compare, cancel, approve,
+continue.
 
 Local mode only, and scoped to this machine's claude login (`claude auth status` email = wf_runs.owner).
 """
@@ -19,6 +20,8 @@ from ctc.server.library import _cap_root, _known, _local_only, check_graph
 from ctc.server.schemas import (
     Diff,
     Run,
+    RunApprove,
+    RunContinue,
     RunDetail,
     RunRef,
     RunStart,
@@ -88,6 +91,26 @@ async def runs(request: Request, workflow: str | None = None, status: RunStatus 
         {"u": u, "o": o, "w": workflow, "s": status, "t": trigger, "b": before, "n": max(1, min(limit, 500))})
 
 
+@router.get("/runs/compare", response_model=Diff)  # before /runs/{rid}, which would take "compare" as an id
+async def compare_runs(request: Request, a: int, b: int, node: str | None = None):
+    """Two runs of this owner in one repo: whole runs = git diff a.branch..b.branch; with node, that node's latest
+    committed visit in each run (post_sha)."""
+    st, _, o = await _scope(request)
+    rows = {r["id"]: r for r in await st.store.fetch(
+        """select r.id, r.repo, r.branch, (select s.post_sha from wf_steps s where s.run_id = r.id and s.node_id = %(n)s
+        and s.post_sha is not null order by s.visit desc limit 1) as post_sha from wf_runs r
+        where r.id = any(%(ids)s) and r.owner = %(o)s""", {"n": node, "ids": [a, b], "o": o})}
+    if a not in rows or b not in rows or rows[a]["repo"] != rows[b]["repo"]:
+        fail(422, "not_comparable", f"runs {a} and {b} are not two of your runs in one repo")
+    ref = "post_sha" if node else "branch"
+    if not (rows[a][ref] and rows[b][ref]):
+        fail(422, "not_comparable", f"node {node} has no commit in both runs" if node else "a run has not started yet")
+    try:
+        return await engine.git_diff(rows[a]["repo"], rows[a][ref], rows[b][ref])
+    except RuntimeError as e:  # a branch was deleted
+        fail(404, "not_found", str(e))
+
+
 @router.get("/runs/{rid}", response_model=RunDetail)
 async def run(rid: int, request: Request):
     st, u, o = await _scope(request)
@@ -150,4 +173,24 @@ async def cancel_run(rid: int, request: Request):
     st, u, o = await _scope(request)
     await _run(st, u, o, rid)
     await engine.cancel(st, rid, o)
+    return await _run(st, u, o, rid)
+
+
+@router.post("/runs/{rid}/approve", response_model=Run)
+async def approve_run(rid: int, b: RunApprove, request: Request):
+    """A run waiting at an approval node: approve -> it walks on (queued); reject -> cancelled."""
+    st, u, o = await _scope(request)
+    await _run(st, u, o, rid)
+    if not await engine.approve(st, rid, o, b.approve, b.note):
+        fail(409, "not_waiting", f"run {rid} is not waiting for an approval")
+    return await _run(st, u, o, rid)
+
+
+@router.post("/runs/{rid}/continue", response_model=Run)
+async def continue_run(rid: int, b: RunContinue, request: Request):
+    """A run out of usage (quota): now -> queued at once; reset -> it goes on by itself once its usage window resets."""
+    st, u, o = await _scope(request)
+    await _run(st, u, o, rid)
+    if not await engine.resume(st, rid, o, b.when == "now"):
+        fail(409, "not_quota", f"run {rid} is not stopped at a usage limit")
     return await _run(st, u, o, rid)

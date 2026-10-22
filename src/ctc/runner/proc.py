@@ -77,15 +77,16 @@ def _name(cap_id: str) -> str:
     return name if ns == "user" or ns.startswith("project@") else str(cap_id)
 
 
-def agent_argv(node: dict, ctx: dict, session_id: str, resume: str | None = None) -> tuple[list[str], str]:
+def agent_argv(node: dict, ctx: dict, session_id: str | None, resume: str | None = None) -> tuple[list[str], str]:
     """(argv, prompt) for an agent node; never --bare. The prompt goes on stdin: --allowedTools takes any number of
-    values, and one argv string is capped at 128 KB. `resume` (a session id) forks that session."""
+    values, and one argv string is capped at 128 KB. `resume` (a session id) forks that session into session_id; with
+    session_id None it goes on in that same session (a node continued after a usage limit)."""
     prompt = render(node.get("prompt") or "", ctx)
     if cap := node.get("cap"):
         prompt = f"/{_name(cap)} {prompt}"
     ro = node.get("readonly")
     mcp = node.get("mcp_config") or {"mcpServers": {}}
-    argv = [_bin(), "-p", "--output-format", "stream-json", "--verbose", "--session-id", session_id,
+    argv = [_bin(), "-p", "--output-format", "stream-json", "--verbose", *(["--session-id", session_id] if session_id else []),
             "--permission-mode", "dontAsk" if ro else node.get("permission_mode") or "acceptEdits",
             "--permission-prompts", "none",
             "--strict-mcp-config", "--mcp-config", mcp if isinstance(mcp, str) else json.dumps(mcp),
@@ -100,7 +101,7 @@ def agent_argv(node: dict, ctx: dict, session_id: str, resume: str | None = None
     if node.get("json_schema"):
         argv += ["--json-schema", json.dumps(node["json_schema"])]
     if resume:
-        argv += ["--resume", resume, "--fork-session"]
+        argv += ["--resume", resume, *(["--fork-session"] if session_id else [])]
     return argv, prompt
 
 

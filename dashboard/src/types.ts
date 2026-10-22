@@ -89,8 +89,8 @@ export interface Health { db: Svc; redis: Svc; embedder: Svc; reranker: Svc; llm
 export interface ApiKey { id: number; name: string; created_at: string; revoked_at: string | null; key?: string } // key only on create, shown once
 export interface NewApiKey { name: string }
 
-// Workflow runner, PLAN.md "Workflow runner (m5)" → Workflow file and API. M1 node types only (merge/approval are M2+).
-export type NodeType = 'trigger' | 'agent' | 'shell' | 'if'
+// Workflow runner, PLAN.md "Workflow runner (m5)" → Workflow file and API. Merge arrives in M3.
+export type NodeType = 'trigger' | 'agent' | 'shell' | 'if' | 'approval'
 export interface WfNode {
   id: string; type: NodeType; pos: [number, number]; max_visits?: number
   input?: string // trigger
@@ -99,8 +99,9 @@ export interface WfNode {
   command?: string // shell
   timeout_s?: number; readonly?: boolean // agent and shell
   path?: string; op?: 'eq' | 'ne' | 'contains' | 'truthy'; value?: unknown // if
+  message?: string // approval
 }
-export interface Graph { nodes: WfNode[]; edges: { from: string; to: string; handle?: 'true' | 'false' }[] }
+export interface Graph { nodes: WfNode[]; edges: { from: string; to: string; handle?: 'true' | 'false' }[]; defaults?: { max_visits?: number } } // a run's snapshot carries `defaults`
 export interface WorkflowSettings { permission: 'worktree'; allow_extra_usage: boolean; auto_resume: boolean; max_run_tokens: number | null }
 
 export type RunStatus = 'queued' | 'running' | 'waiting' | 'done' | 'failed' | 'cancelled' | 'quota'
