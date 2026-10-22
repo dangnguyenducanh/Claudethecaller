@@ -224,6 +224,7 @@ Four tracks. H = owner step. Commit after each step.
   - Phase 2 `distill` (local LLM, one background job per pending session): title + summary + one intent per typed prompt → replay each prompt through the router locally → `decisions` (`source = history`, `prompt` = the intent, `followed` from the transcript) → A3 memory extraction → `status = processed`.
   - Triggers: daemon start (incremental), `POST /api/history/import`, `ctc history import`, and `SessionEnd` (that session; also replaces live hook prompts with intents).
   - Done when: `ctc history import` on this host imports every main transcript, all sessions end `processed`, the dashboard Overview / Sessions / Memories show the user's real history with no raw prompt text stored in Supabase, and a second run changes nothing.
+  - **Partial 2026-10-22** (this host, Supabase): 84/84 transcripts imported and distilled in ~6 min; 571 history decisions (intents only, no raw prompt text; one summary leak found and fixed, then 0 matches over 265 typed prompts); 14 followed = **2.5% pre-install adoption baseline**; 94 session memories + 316 outcome memories; a second run changes nothing. Open: phase 3 is not fully idempotent for 2 (project, capability) pairs (needs `write_memory(dedup=False)` for outcome rows); outcome memories are mostly "used 0 of n" (write only when used ≥ 1 and suggested ≥ 3); the 8 smoke-test sessions are still in Supabase; the `ctc history import` CLI path was not run on Supabase (the daemon job and `POST /api/history/import` were).
 
 ### Benchmark — measure the search
 
