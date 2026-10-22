@@ -44,6 +44,7 @@ DEPTHS, RERANK_TOPS, MAX_FT, SR_DEV_N = (25, 50, 100), (10, 20, 40), 0.10, 500
 TEI_MAX_BATCH = 32  # TEI max_client_batch_size: the shipped Reranker sends one request, so rerank_top > 32 gets HTTP 413
 KW_WEIGHTS, RERANK_WEIGHTS = (0, 0.25, 0.5, 1), (0, 0.25, 0.5, 1, 2)
 OLD_RANKING = {"keyword_rrf_weight": 1, "rerank_weight": 1}
+MIN_AUC = 0.7  # tune saves the gate only at or above this out-of-fold AUC (2026-10-21: 0.55 = no signal, rejected)
 
 
 def is_test(qid: str) -> bool:  # same rule as the labeler's session split, for MetaTool rows
@@ -174,7 +175,8 @@ async def index_skillret() -> None:
 
 
 async def tune() -> None:
-    """K2 on dev rows only: sweep depth x rerank_top (own dev + SkillRet train sample), then fit the abstain gate."""
+    """K2 on dev rows only: sweep depth x rerank_top (SkillRet train sample first, own dev second), then fit the abstain gate
+    (positives SkillRet dev + own dev with gold, negatives MetaTool dev + own gold-none; PLAN.md "Benchmark priority")."""
     embedder, reranker, (lib, sr) = await opened("ctc", SKILLRET["train"])
     memo = MemoReranker(reranker)
     own_ctx, sr_ctx = Ctx(lib, embedder, memo, NEUTRAL), Ctx(sr, embedder, memo, NEUTRAL)
@@ -189,16 +191,20 @@ async def tune() -> None:
                 rows = await run_set(own_ctx, pos, qv_pos, depth, rt, modes=False)
                 sr_rows = await run_set(sr_ctx, sr_items, qv_sr, depth, rt, modes=False)
                 own_s, sr_s = scores(rows, "full"), scores(sr_rows, "full")
-                sweep.append({"depth": depth, "rerank_top": rt, "own_dev": own_s, "skillret_dev": sr_s, "eligible": rt <= TEI_MAX_BATCH, "rows": rows})
+                sweep.append({"depth": depth, "rerank_top": rt, "own_dev": own_s, "skillret_dev": sr_s, "eligible": rt <= TEI_MAX_BATCH, "rows": rows, "sr_rows": sr_rows})
                 print(f"depth {depth:3} rerank_top {rt:2}: own dev R@5 {own_s['recall@5']:.3f}, SkillRet dev R@5 {sr_s['recall@5']:.3f}")
-        # best mean dev Recall@5; ties go to the cheaper config (sweep order is ascending cost)
-        win = max((s for s in sweep if s["eligible"]), key=lambda s: round((s["own_dev"]["recall@5"] + s["skillret_dev"]["recall@5"]) / 2, 3))
-        pos_rows = win.pop("rows")
+        # best SkillRet dev Recall@5, then own dev (3 decimals); ties go to the cheaper config (sweep order is ascending cost)
+        win = max((s for s in sweep if s["eligible"]), key=lambda s: (round(s["skillret_dev"]["recall@5"], 3), round(s["own_dev"]["recall@5"], 3)))
+        sr_pos, own_pos = win.pop("sr_rows"), win.pop("rows")
+        pos_rows = sr_pos + own_pos
         neg_rows = await run_set(own_ctx, neg, qv_neg, win["depth"], win["rerank_top"], modes=False)
         for s in sweep:
-            s.pop("rows", None)
+            for k in ("rows", "sr_rows"):
+                s.pop(k, None)
 
-        # abstain gate: positives = own dev rows with gold, negatives = own dev gold-none + MetaTool dev half
+        # abstain gate: positives = SkillRet dev + own dev rows with gold, negatives = own dev gold-none + MetaTool dev half
+        # ponytail: SkillRet positives are scored against the SkillRet catalog, negatives against ours, so catalog-level
+        # feature shifts can leak into the gate; score MetaTool negatives against SkillRet too if the AUC looks too good
         X = np.stack([r["x"] for r in pos_rows + neg_rows])
         y = np.array([1] * len(pos_rows) + [0] * len(neg_rows))
         model = LogisticRegression(class_weight="balanced", max_iter=5000)
@@ -213,14 +219,18 @@ async def tune() -> None:
             return {"false_trigger": round(float(np.mean(p[y == 0] >= threshold)), 4),
                     "recall@5": round(float(np.mean(r5 * (p[y == 1] >= threshold))), 4), "fire_rate_pos": round(float(np.mean(p[y == 1] >= threshold)), 4)}
 
-        (ROOT / "models").mkdir(exist_ok=True)
-        joblib.dump({"model": model, "threshold": threshold, "features": gate.FEATURES}, ROOT / cfg()["gate_path"])
-        write_config(win["depth"], win["rerank_top"], threshold)
+        auc = round(float(roc_auc_score(y, p_cv)), 4)
+        if saved := auc >= MIN_AUC:  # the daemon uses the file as soon as it exists, so no-signal gates are never written
+            (ROOT / "models").mkdir(exist_ok=True)
+            joblib.dump({"model": model, "threshold": threshold, "features": gate.FEATURES}, ROOT / cfg()["gate_path"])
+        else:
+            print(f"WARNING: gate CV AUC {auc} < {MIN_AUC}: not saved, gate_min_p unchanged, abstain stays as it was")
+        write_config(win["depth"], win["rerank_top"], threshold if saved else cfg()["gate_min_p"])
         result = {"sweep": sweep, "winner": {"depth": win["depth"], "rerank_top": win["rerank_top"]},
-                  "gate": {"threshold": threshold, "features": gate.FEATURES, "coef": model.coef_[0].round(4).tolist(),
-                           "intercept": round(float(model.intercept_[0]), 4), "n_pos": int(y.sum()), "n_neg": int(len(y) - y.sum()),
+                  "gate": {"saved": saved, "threshold": threshold, "features": gate.FEATURES, "coef": model.coef_[0].round(4).tolist(),
+                           "intercept": round(float(model.intercept_[0]), 4), "n_pos": int(y.sum()), "n_pos_skillret": len(sr_pos), "n_neg": int(len(y) - y.sum()),
                            "n_neg_own": sum(not i.startswith("metatool:") for i, _, _ in neg), "cv": at(p_cv), "in_sample": at(model.predict_proba(X)[:, 1]),
-                           "auc_cv": round(float(roc_auc_score(y, p_cv)), 4), "mean_pos": X[y == 1].mean(0).round(4).tolist(),
+                           "auc_cv": auc, "mean_pos": X[y == 1].mean(0).round(4).tolist(),
                            "mean_neg": X[y == 0].mean(0).round(4).tolist(), "recall@5_ungated": round(float(r5.mean()), 4)},
                   "sizes": {"own_dev_gold": len(pos), "own_dev_none": sum(not i.startswith("metatool:") for i, _, _ in neg),
                             "metatool_dev": sum(i.startswith("metatool:") for i, _, _ in neg), "skillret_dev": len(sr_items)}}
@@ -340,6 +350,7 @@ def report(out: dict, tune: dict | None, limit: int | None) -> str:
     sr, own, cf = out["skillret"]["scores"], out["own"]["scores"], out["config"]
     ft = out["none"]["fired"]["full+gate"]
     lat = out["own"]["latency"]["search"][1] + out["own"]["embed_ms"]
+    db = "Supabase (session pooler)" if "supabase" in (cfg()["database_url"] or "") else "local dev Postgres"
     L = [f"# Retrieval benchmark — {TODAY}", ""]
     if limit:
         L += [f"> **Smoke run: first {limit} queries per set only. Not a result.**", ""]
@@ -349,7 +360,7 @@ def report(out: dict, tune: dict | None, limit: int | None) -> str:
           (f"Config used: k={cf['k']}, depth={cf['depth']}, rerank_top={cf['rerank_top']}, rrf_k={cf['rrf_k']}, "
           f"ranking={cf['ranking']} (keyword weight in the rerank pool, rerank weight in the final order), abstain_below={cf['abstain_below']}, gate {'on' if out['gate'] else 'off'} (gate_min_p={cf['gate_min_p']}). "
           f"Library `ctc`: {out['library']['ctc']['capabilities']} capabilities (library_version `{out['library']['ctc']['library_version']}`); "
-          f"`ctc_skillret`: {out['library']['skillret']} skills. Dev DB `ctc-dev-pg` on localhost (no Supabase hop yet)."), "",
+          f"`ctc_skillret`: {out['library']['skillret']} skills. DB: {db}."), "",
           *(["> **The `ctc` library changed during this run (another process re-indexed it): own-eval numbers are suspect.**", ""]
             if out["library"]["changed_during_run"] else []),
           "## Targets (PLAN.md)", "", "| target | measured | |", "|---|---|---|",
@@ -358,12 +369,11 @@ def report(out: dict, tune: dict | None, limit: int | None) -> str:
           f"| hybrid + rerank NDCG@10 ≥ dense-only (SkillRet test) | {sr['full']['ndcg@10']:.3f} vs {sr['dense']['ndcg@10']:.3f} | {ok(sr['full']['ndcg@10'] >= sr['dense']['ndcg@10'])} |",
           f"| false-trigger ≤ 10% (gold-none test rows) | {ft:.1%} (own {out['none_own']['fired']['full+gate']:.1%}, MetaTool {out['none_metatool']['fired']['full+gate']:.1%}) | {ok(ft <= MAX_FT)} |",
           "| GPU ≤ 7 GB | not re-measured (nvidia-smi does not list container PIDs to this user); R3: 6.4 GB | — |",
-          f"| route p95 ≤ 150 ms cold | search p95 {out['own']['latency']['search'][1]} ms + embed {out['own']['embed_ms']} ms/query (batched) ≈ {lat:.0f} ms on the local dev DB | indicative only; K3 measures `/v1/route` |",
+          f"| route p95 ≤ 150 ms cold | search p95 {out['own']['latency']['search'][1]} ms + embed {out['own']['embed_ms']} ms/query (batched) ≈ {lat:.0f} ms on {db} | indicative only; K3 measures `/v1/route` |",
           "| ≤ 15 ms Redis hit, ≤ 10 ms L1 hit, semantic cache hit rate | not measured here | K3 |",
           "| memory lift ≥ 0 · extraction precision ≥ 0.80 | not measured here | K4 / A3 |", "",
           f"## SkillRet test ({out['skillret']['n']} queries, 6,006 skills, neutral project)", "", *table("skillret"), "",
-          (f"The gate abstains on {out['skillret']['abstained']:.0%} of SkillRet queries (every one has a correct skill): it was trained "
-          "on own-library features, so the gated row measures transfer, not retrieval."), "",
+          f"The gate abstains on {out['skillret']['abstained']:.0%} of SkillRet queries (every one has a correct skill, so each abstain is a miss).", "",
           f"## Own transcripts, test split ({out['own']['n']} rows with gold, real library `ctc`)", "", *table("own"), "",
           ("4 of the 652 gold ids (all splits) point at `project@d63e3c8f:graphify`, a project-only skill of this repo; the queries come "
           "from other projects, so the neutral project filters it and those ids are unreachable."), "",
@@ -375,7 +385,7 @@ def report(out: dict, tune: dict | None, limit: int | None) -> str:
           "| set | embed (batched, per query) | candidates | filter | rerank | search total |", "|---|---|---|---|---|---|",
           *[f"| {n} | {out[n]['embed_ms']} | " + " | ".join(f"{a} / {b}" for a, b in (out[n]['latency'][s] for s in ('candidates', 'filter', 'rerank', 'search'))) + " |"
             for n in ("skillret", "own", "none")], "",
-          ("`candidates` is one SQL round trip (dense + keyword) to the local dev DB; Supabase adds ~65 ms. Queries are embedded 32 per "
+          (f"`candidates`: dense search runs in RAM; only keywords + overrides go to the DB ({db}, one parallel hop). Queries are embedded 32 per "
           "request and reused across modes, so per-query embed latency is amortized, not a single-prompt number."), ""]
     if tune:
         g, sz = tune["gate"], tune["sizes"]
@@ -389,11 +399,11 @@ def report(out: dict, tune: dict | None, limit: int | None) -> str:
                 f"{s['skillret_dev']['ndcg@10']:.3f} | "
                 + ("**winner**" if (s["depth"], s["rerank_top"]) == (tune["winner"]["depth"], tune["winner"]["rerank_top"]) else "" if s["eligible"] else "not eligible (> 32 docs: TEI 413)") + " |"
                 for s in tune["sweep"]], "",
-              ("Winner = best mean of the two dev Recall@5 (gate off), ties to the cheaper config. rerank_top 40 was measured with an "
+              ("Winner = best SkillRet dev Recall@5, then own dev Recall@5 (3 decimals, gate off), ties to the cheaper config. rerank_top 40 was measured with an "
               "eval-side reranker that splits requests at 32; the shipped `Reranker.score` sends one request and TEI rejects > 32 texts "
               "(HTTP 413), so 40 cannot be shipped until it chunks."), "",
-              (f"**Abstain gate** (`models/abstain.joblib`, LogisticRegression, class_weight=balanced, raw feature units): trained on "
-              f"{g['n_pos']} positives (own dev with gold) vs {g['n_neg']} negatives ({g['n_neg_own']} own dev gold-none + MetaTool dev), "
+              (f"**Abstain gate** (`models/abstain.joblib`{'' if g.get('saved', True) else f', **not saved**: CV AUC < {MIN_AUC}'}, LogisticRegression, class_weight=balanced, raw feature units): trained on "
+              f"{g['n_pos']} positives ({g.get('n_pos_skillret', 0)} SkillRet dev + own dev with gold) vs {g['n_neg']} negatives ({g['n_neg_own']} own dev gold-none + MetaTool dev), "
               f"features from search() at the winning config. Threshold {g['threshold']} = lowest out-of-fold (5-fold) probability with dev "
               f"false-trigger ≤ 10%: out-of-fold dev false-trigger {g['cv']['false_trigger']:.1%}, dev Recall@5 {g['cv']['recall@5']:.3f} "
               f"(fires on {g['cv']['fire_rate_pos']:.0%} of positives); in-sample {g['in_sample']['false_trigger']:.1%} / {g['in_sample']['recall@5']:.3f}."), "",
