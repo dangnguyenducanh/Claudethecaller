@@ -118,7 +118,7 @@ A subfolder is created by the step that first puts code in it; no empty folders 
 
 Four tracks. H = owner step. Commit after each step.
 
-**Order:** F3 → F4 (done first, on mock data) → H0 → B3 → B4 → K1 → F1 → H1 → K2 → H2 → B4b → B5 → B6 → F2 → H3 → K3 → A1, A2 → B7 → B8 → A3 → H4 → K4 → F3 → F4 → H6 → F5.
+**Order:** F3 → F4 (done first, on mock data) → H0 → B3 → B4 → K1 → F1 → H1 → K2 → H2 → B4b → B5 → B6 → F2 → H3 → K3 → A1, A2 → B7 → B8 → A3 → B9 → H4 → K4 → F3 → F4 → H6 → F5.
 
 **Branches:** `m1-retrieval-core` (B1–B4, K1–K2, F1), `m2-agent-integration` (B4b, B5–B6, F2, K3), `m3-memory` (B7–B8, A3, K4), `m4-dashboard` (F3–F5), `ai-<name>` per AI step; PR into `main` at the end of each.
 
@@ -204,6 +204,13 @@ Four tracks. H = owner step. Commit after each step.
   - `recall(qv, ctx, k=5)`: one SQL computing `sim * (case when pinned then 1 else power(0.5, age_days / 30) end) * (1 + ln(1 + use_count))` over global + current-project rows, `deleted_at is null`.
   - `import_claude_memory(dirs)`: each `~/.claude/projects/*/memory/*.md` → one memory (`kind` from its frontmatter `type`, `source = {kind: "claude-memory", file}`), read-only.
   - **Done 2026-10-21**: `uv run python -m ctc.memory.longterm` self-check passes; live: 16 imported Claude memories + 36 extracted session memories.
+
+- [ ] **B9 — Claude history import, distilled** (`src/ctc/ingestion/history.py`; design in "History import design")
+  - The dashboard's sessions, decisions, KPIs, activity and memories come from the user's own Claude Code history in `~/.claude/projects`, not only from live hooks. Raw transcripts never leave the machine: Supabase keeps distilled knowledge (long-term memory), not logs.
+  - Phase 1 `scan` (no LLM, seconds): changed transcript files → `history_files`, `projects`, `sessions` (structure only, `status = pending`), `events` (Skill / Agent / Task calls by name).
+  - Phase 2 `distill` (local LLM, one background job per pending session): title + summary + one intent per typed prompt → replay each prompt through the router locally → `decisions` (`source = history`, `prompt` = the intent, `followed` from the transcript) → A3 memory extraction → `status = processed`.
+  - Triggers: daemon start (incremental), `POST /api/history/import`, `ctc history import`, and `SessionEnd` (that session; also replaces live hook prompts with intents).
+  - Done when: `ctc history import` on this host imports every main transcript, all sessions end `processed`, the dashboard Overview / Sessions / Memories show the user's real history with no raw prompt text stored in Supabase, and a second run changes nothing.
 
 ### Benchmark — measure the search
 
@@ -406,6 +413,39 @@ All JSON uses `orjson`. Errors: `{"error": {"code": "not_found", "message": "…
 
 - LLM provider: `cfg()["llm"]` (local llama-server; `anthropic:<model>` when `ANTHROPIC_API_KEY` is set). Every prompt goes through `Llm.json`, which redacts secrets; transcripts never leave the machine with the local default.
 - `extract` reads `transcript_path` from the Stop hook (local mode only; shared mode skips it: the daemon can't read client files).
+
+## History import design (used by B9)
+
+**Principle:** Supabase is the long-term memory. It stores what was learned from the history (summaries, intents, memories, outcomes, counts), never raw transcripts or raw prompts. The raw source stays where Claude Code keeps it, on the user's disk, and is re-read when needed.
+
+**Read (read-only):** `<claude_home>/projects/<project>/<session>.jsonl` (main transcripts; rows: `sessionId`, `cwd`, `gitBranch`, `timestamp`, `type`, `message.model`, `message.usage`, `message.content` text / `tool_use`, `custom-title`), `<project>/<session>/subagents/*.jsonl` (folded into the parent's tokens and tool calls), `<project>/memory/*.md` (already imported by B8). Not read: `file-history/`, `shell-snapshots/`, `session-env/`, `sessions/`, `telemetry/`, `cache/`.
+
+**Pipeline**
+
+| Phase | Work | LLM | Writes |
+|---|---|---|---|
+| 1 scan | list transcripts; skip files whose `(size, mtime)` match `history_files`; stream-parse changed ones | no | `history_files`, `projects` (`ensure_project(cwd)`), `sessions` (model = most used, turns = typed prompts, tokens = usage summed once per `message.id`, `started_at`/`ended_at`, `git_branch`, `transcript_path`, `source = history` unless a hook made it, `status = pending`, title = `custom-title` or `"<project> · <date>"`), `events` (`type = tool`, payload `{tool, name}` for Skill / Agent / Task only, no inputs) |
+| 2 distill | per pending session: typed prompts (label.py's filter, each ≤ 300 chars, secrets redacted) → `llm.json → {title ≤ 8 words, summary 3–5 sentences: goal, what was done, outcome, intents: one ≤ 12-word intent per prompt, no names/paths/secrets}` (chunks of ≤ 30 prompts; intents count must match, 1 retry, else that chunk's intents = "") | yes, local | `sessions.title`, `sessions.summary`; per prompt: `route` replay locally (search + decide, no caches) → `decisions` (`at` = prompt time, `ref` = sha256(session_id + raw prompt)[:8] so live hook rows match, `prompt` = intent, `source = history`, `followed` = Claude called a suggested step's skill/agent before the next typed prompt); existing hook decisions of the session get their raw `prompt` replaced by the intent; A3 `extract_session` → `memories`; `sessions.status = processed`, `processed_at` |
+| 3 outcomes | after a history job: per (project, capability) with ≥ 3 suggestions → follow rate | no | `memories` kind `skill_outcome` via `write_memory` ("In <project>, <cap> was used k of n times it was suggested") |
+
+**Schema additions** (`schema.sql`, idempotent `alter table … add column if not exists`): `history_files(user_id, path, session_id, size, mtime, rows, status, error, imported_at, primary key (user_id, path))`; `sessions` + `source text default 'hook'`, `status text default 'processed'` (`pending` / `processed` / `failed`), `summary text`, `git_branch text`, `transcript_path text`, `processed_at timestamptz`; `decisions` + `source text default 'hook'`.
+
+**Jobs:** `history` (phase 1 + 3, then one `distill` job per pending session) and `distill` (`{session_id}`); one LLM job at a time as usual. Config `history: {skip_projects: [], max_prompt_chars: 300, chunk: 30, on_start: true}`.
+
+**API** (shapes go into `dashboard/src/types.ts`)
+
+| Method + path | Body / query | Returns |
+|---|---|---|
+| `GET /api/history` | | `HistoryStatus {root, files, imported, pending, processed, failed, last_job: Job \| null}` |
+| `POST /api/history/import` | `{process?: true, projects?: string[]}` | `{job_id}` |
+| `GET /api/history/files` | `status?` | `HistoryFile[] {path, session_id, size, status, error, imported_at}` |
+| existing `GET /api/decisions`, `GET /api/sessions` | `source?=hook\|history` (default all) | rows gain `source`; `Session` gains `summary`, `status`, `git_branch` |
+
+**CLI:** `ctc history status`, `ctc history import [--no-process] [--project NAME]`.
+
+**Dashboard:** Jobs view gets an "Import Claude history" button and a history status card (files, pending, processed); Overview gets a Live / History / All source toggle; Sessions show the summary and a pending badge; the decision drawer shows the source.
+
+**Privacy:** `~/.claude` is only read. Raw prompts are used in memory for routing and distilling, never stored (history decisions store intents; live hook decisions keep the raw prompt only until that session is distilled). All LLM work uses `cfg()["llm"]` (the local model by default) through `Llm.json`, which redacts secrets.
 
 ## Memory design (used by B7, B8, A3)
 
