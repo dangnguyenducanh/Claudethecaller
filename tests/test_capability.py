@@ -26,22 +26,26 @@ def test_same_skill_name_in_two_namespaces_gets_distinct_ids(tmp_path):
     assert warnings == []
 
 
-def test_broken_frontmatter_is_skipped_with_one_warning(tmp_path):
+def test_invalid_yaml_falls_back_to_lenient_parse_and_no_description_is_skipped(tmp_path):
+    # Claude Code loads frontmatter that strict YAML rejects (e.g. an unquoted "Triggers on: ..."), so the scanner does too.
     root = tmp_path / "plugin"
     good_path = _write_skill(root, "good")
-    broken_dir = root / "skills" / "broken"
-    broken_dir.mkdir(parents=True)
-    broken_path = broken_dir / "SKILL.md"
-    broken_path.write_text(
-        "---\nname: broken\ndescription: [unterminated\n---\nBody\n",
-        encoding="utf-8",
+    lenient_dir = root / "skills" / "lenient"
+    lenient_dir.mkdir(parents=True)
+    (lenient_dir / "SKILL.md").write_text(
+        "---\nname: lenient\ndescription: Use it. Triggers on: x, y\n---\nBody\n", encoding="utf-8"
     )
+    empty_dir = root / "skills" / "empty"
+    empty_dir.mkdir(parents=True)
+    empty_path = empty_dir / "SKILL.md"
+    empty_path.write_text("---\nname: empty\n---\nBody\n", encoding="utf-8")
 
     caps, warnings = scan_library([(root, "plugin")])
 
-    assert {c.path for c in caps} == {str(good_path)}
-    assert len(warnings) == 1
-    assert str(broken_path) in warnings[0]
+    by_name = {c.name: c for c in caps}
+    assert set(by_name) == {"good", "lenient"} and by_name["good"].path == str(good_path)
+    assert by_name["lenient"].description == "Use it. Triggers on: x, y"
+    assert len(warnings) == 1 and str(empty_path) in warnings[0]
 
 
 def test_plugin_json_declared_paths_are_scanned_and_undeclared_dirs_are_not(tmp_path):

@@ -8,7 +8,6 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "usearch",
     "numpy",
     "pyyaml",
     "httpx",
@@ -17,6 +16,14 @@ dependencies = [
     "anthropic",
     "openai",
     "scikit-learn",
+    "psycopg[binary,pool]>=3.3.6",
+    "pgvector>=0.5.1",
+    "python-dotenv>=1.2.4",
+    "redis[hiredis]>=8.1.0",
+    "fastapi>=0.156.4",
+    "uvicorn[standard]>=0.54.0",
+    "orjson>=3.13.0",
+    "mcp>=2.3.0",
 ]
 
 [dependency-groups]

@@ -10,6 +10,8 @@ from typing import Literal
 
 import yaml
 
+from ctc.config import cfg
+
 Kind = Literal["skill", "agent", "command", "workflow"]
 
 # (kind, glob relative to a root, name comes from the matched dir instead of the file stem)
@@ -40,7 +42,8 @@ class Capability:
         return self.id
 
 
-def _split_frontmatter(text: str) -> tuple[dict, str] | None:
+def _split_frontmatter(text: str, lenient: bool = False) -> tuple[dict, str] | None:
+    """YAML header + body. `lenient` falls back to flat strings (only for name/description, never typed keys like steps)."""
     if not text.startswith("---"):
         return None
     end = text.find("\n---", 3)
@@ -50,16 +53,36 @@ def _split_frontmatter(text: str) -> tuple[dict, str] | None:
     body = text[end + 4 :].lstrip("\n")
     try:
         data = yaml.safe_load(header)
-    except yaml.YAMLError:
-        return None
-    if not isinstance(data, dict):
-        return None
-    return data, body
+    except (yaml.YAMLError, ValueError, RecursionError):  # ValueError: bad dates (2024-13-45); deep nesting
+        data = None
+    if isinstance(data, dict):
+        return data, body
+    return (_lenient_frontmatter(header), body) if lenient else None
+
+
+def _lenient_frontmatter(header: str) -> dict[str, str]:
+    """Headers YAML rejects but Claude Code loads, e.g. an unquoted `Triggers on: ...` inside a description."""
+    # ponytail: flat `key: value` + indented continuation only; no lists/block scalars (yaml handles those when valid)
+    data: dict[str, str] = {}
+    key = None
+    for line in header.splitlines():
+        if line[:1].isspace():
+            if key is not None:
+                data[key] = f"{data[key]} {line.strip()}".strip()
+            continue
+        k, sep, v = (line.rstrip() + " ").partition(": ")
+        if sep:
+            key = k.strip()
+            data[key] = v.strip()
+    return {k: v[1:-1] if len(v) > 1 and v[0] == v[-1] and v[0] in "'\"" else v for k, v in data.items()}
 
 
 def _make_capability(path: Path, kind: Kind, namespace: str, default_name: str) -> Capability | None:
-    text = path.read_text(encoding="utf-8", errors="replace")
-    parsed = _split_frontmatter(text)
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:  # dangling symlink, no permission, deleted mid-scan
+        return None
+    parsed = _split_frontmatter(text, lenient=True)
     if parsed is None:
         return None
     meta, body = parsed
@@ -194,24 +217,29 @@ def scan_library(roots: list[tuple[Path, str]]) -> tuple[list[Capability], list[
     return caps, warnings
 
 
-def project_namespace(project_dir: Path) -> str:
-    return f"project@{hashlib.sha256(str(project_dir.resolve()).encode()).hexdigest()[:8]}"
+def project_id(project_dir: Path | str) -> str:
+    return hashlib.sha256(str(Path(project_dir).resolve()).encode()).hexdigest()[:8]
 
 
-def default_roots(project_dir: Path) -> list[tuple[Path, str]]:
-    home = Path.home()
-    roots: list[tuple[Path, str]] = [(home / ".claude", "user")]
+def project_namespace(project_dir: Path | str) -> str:
+    return f"project@{project_id(project_dir)}"
 
-    installed = home / ".claude" / "plugins" / "installed_plugins.json"
+
+def default_roots(project_dir: Path, claude_home: Path | None = None) -> list[tuple[Path, str]]:
+    claude_home = claude_home or Path(cfg()["claude_home"])
+    roots: list[tuple[Path, str]] = [(claude_home, "user")]
+
+    installed = claude_home / "plugins" / "installed_plugins.json"
     try:
         data = json.loads(installed.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         data = {}
-    for key, entries in data.get("plugins", {}).items():
+    plugins = data.get("plugins") if isinstance(data, dict) else None
+    for key, entries in (plugins if isinstance(plugins, dict) else {}).items():
         namespace = key.split("@", 1)[0]
-        for entry in entries:
-            install_path = entry.get("installPath")
-            if install_path:
+        for entry in entries if isinstance(entries, list) else [entries]:  # v2: list per plugin, v1: one object
+            install_path = entry.get("installPath") if isinstance(entry, dict) else None
+            if isinstance(install_path, str) and install_path:
                 roots.append((Path(install_path), namespace))
 
     roots.append((project_dir / ".claude", project_namespace(project_dir)))
