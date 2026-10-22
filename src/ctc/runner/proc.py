@@ -17,6 +17,7 @@ import signal
 import time
 from asyncio.subprocess import DEVNULL, PIPE
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from ctc.config import cfg
 from ctc.runner.graph import render
@@ -26,6 +27,7 @@ READ_TOOLS = ["Read", "Grep", "Glob"]
 NO_PUSH = ["Bash(git push:*)", "Bash(gh pr:*)"]  # graph.PUSH, for agents
 TAIL = 4096
 RESULT_MAX = 65536
+RUNS = Path("~/.claudethecaller/runs").expanduser()  # worktrees + logs; in_runs() sessions never feed the router
 
 
 def _bin() -> str:
@@ -43,14 +45,23 @@ def child_env() -> dict:
 
 def docker(name: str | None = None, wt: str | None = None, run: str | None = None) -> list[str]:
     """Container mode (WB15): `docker run` of the pinned ctc-runner image (docker/ctc-runner.Dockerfile) as this user,
-    up to its `claude`, with the worktree mounted at its own host path (so the session's cwd, transcript dir and in_runs()
-    match a host run: never fed to the router, never counted as you being active) and the host's login mounted, so it
-    runs on the user's own claude.ai login. ponytail: git inside sees no repo (the worktree's .git points at the main
-    checkout, not mounted); the runner commits on the host."""
-    home = pwd.getpwuid(os.getuid()).pw_dir
+    up to its `claude`, with the worktree mounted at its own host path (its .git pointer read-only; so the session's cwd
+    and in_runs() match a host run) and a home of its own, RUNS/<run>/claude: a copy of ~/.claude.json without its
+    projects and MCP servers, and of the host's ~/.claude only the login file, so it runs on the user's own claude.ai
+    login (a token refresh writes it in place) but can't plant a hook or MCP server that the host's claude would run.
+    Its transcripts stay in that home, shared by the run's nodes (resume). ponytail: a host refresh mid-node swaps the
+    login file's inode, so that node keeps the old token; git inside sees no repo (the worktree's .git points at the
+    main checkout, not mounted); the runner commits on the host."""
+    home, conf = Path(pwd.getpwuid(os.getuid()).pw_dir), RUNS / str(run or "preflight") / "claude"
+    if run is None or not (conf / ".claude.json").exists():  # a run's copy once, at its first node; preflight's each time
+        (conf / ".claude").mkdir(parents=True, exist_ok=True)
+        (conf / ".claude" / ".credentials.json").touch()  # the mount point of the login file below
+        j = json.loads((home / ".claude.json").read_text())
+        (conf / ".claude.json").write_text(json.dumps({k: v for k, v in j.items() if k not in ("projects", "mcpServers")}))
     return ["docker", "run", "--rm", "-i", *(["--name", name] if name else []), "--user", f"{os.getuid()}:{os.getgid()}",
-            *(["-e", f"CTC_RUN={run}"] if run else []), *(["-v", f"{wt}:{wt}", "-w", wt] if wt else []),
-            "-v", f"{home}/.claude:/home/claude/.claude", "-v", f"{home}/.claude.json:/home/claude/.claude.json",
+            *(["-e", f"CTC_RUN={run}"] if run else []),
+            *(["-v", f"{wt}:{wt}", "-v", f"{wt}/.git:{wt}/.git:ro", "-w", wt] if wt else []), "-v", f"{conf}:/home/claude",
+            "--mount", f"type=bind,src={home}/.claude/.credentials.json,dst=/home/claude/.claude/.credentials.json",
             f"ctc-runner:{cfg()['runner']['claude_version']}", "claude"]
 
 
@@ -294,9 +305,13 @@ if __name__ == "__main__":
     ap.add_argument("--resume", help="session id to fork")
     ap.add_argument("--container", action="store_true", help="run the agent in the ctc-runner image (container mode)")
     a = ap.parse_args()
+    RUNS = Path((tmp := tempfile.TemporaryDirectory()).name)  # container homes of the self-check and of a --container run
     c = in_container(agent_argv({"prompt": "hi"}, {}, "s")[0], "ctc-run-1-a-1", "/wt", "1")  # self-check: container argv
     assert "--dangerously-skip-permissions" in c and "--permission-mode" not in c and "/wt:/wt" in c, c
     assert c[c.index("claude") + 1] == "-p" and c[c.index("--name") + 1] == "ctc-run-1-a-1" and "CTC_RUN=1" in c, c
+    assert "/wt/.git:/wt/.git:ro" in c and f"{RUNS}/1/claude:/home/claude" in c and not any(  # never the host's ~/.claude
+        x.endswith((".claude", ".claude.json")) for x in c[c.index("-v"):]), c
+    assert "projects" not in json.loads((RUNS / "1" / "claude" / ".claude.json").read_text()), "host projects copied"
     c = in_container(agent_argv({"prompt": "hi", "readonly": True}, {}, "s")[0], "x", "/wt", None)
     assert c[c.index("--permission-mode") + 1] == "dontAsk" and "--dangerously-skip-permissions" not in c, c
 

@@ -31,6 +31,7 @@ from psycopg.types.json import Jsonb
 
 from ctc.runner.graph import batch, complete, eval_if, merge_output, ready, render
 from ctc.runner.proc import (
+    RUNS,
     agent_argv,
     child_env,
     kill_containers,
@@ -42,7 +43,6 @@ from ctc.runner.proc import (
 from ctc.runner.schedule import tick
 
 log = logging.getLogger(__name__)
-RUNS = Path("~/.claudethecaller/runs").expanduser()  # worktrees + logs; in_runs() sessions never feed the router
 SETTINGS = {"permission": "worktree", "allow_extra_usage": False, "auto_resume": True, "max_run_tokens": None}
 DIFF_MAX = 65536
 PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
@@ -111,9 +111,11 @@ async def owner() -> str | None:
     return _owner
 
 
-async def git(cwd: str, *args: str) -> str:
-    """`git -C cwd args`, without the repo's hooks: a run's bookkeeping commits must not run (or fail on) them."""
-    p = await asyncio.create_subprocess_exec("git", "-C", cwd, "-c", "core.hooksPath=/dev/null", *args,
+async def git(cwd: str, *args: str, gd: str | None = None) -> str:
+    """`git -C cwd args`, without the repo's hooks: a run's bookkeeping commits must not run (or fail on) them. With gd
+    (wt_git_dir()), cwd is a run's worktree and git uses gd, never the worktree's own .git file."""
+    p = await asyncio.create_subprocess_exec("git", "-C", cwd, "-c", "core.hooksPath=/dev/null",
+                                             *([f"--git-dir={gd}", f"--work-tree={cwd}"] if gd else []), *args,
                                              stdin=DEVNULL, stdout=PIPE, stderr=PIPE)
     out, err = await p.communicate()
     if p.returncode:
@@ -121,12 +123,22 @@ async def git(cwd: str, *args: str) -> str:
     return out.decode(errors="replace")
 
 
-async def git_diff(cwd: str, a: str, b: str) -> dict:
+async def wt_git_dir(repo: str, wt: str) -> str:
+    """A run worktree's admin dir (<repo's common git dir>/worktrees/<name>), found from the repo side: the run's agents
+    can rewrite wt/.git to point git at a planted config whose core.fsmonitor would run on the runner's `git add`."""
+    common = Path(repo, (await git(repo, "rev-parse", "--git-common-dir")).strip())
+    for d in (common / "worktrees").iterdir():
+        if (d / "gitdir").is_file() and Path((d / "gitdir").read_text().strip()) == Path(wt).resolve() / ".git":
+            return str(d)
+    raise RuntimeError(f"no git worktree entry for {wt} in {common}")
+
+
+async def git_diff(cwd: str, a: str, b: str, gd: str | None = None) -> dict:
     """{diff (first 64 KB), files [{path, added, deleted}] (numstat; None for binary), truncated}."""
-    num = await git(cwd, "diff", "--numstat", a, b)
+    num = await git(cwd, "diff", "--numstat", a, b, gd=gd)
     files = [{"path": p, "added": None if x == "-" else int(x), "deleted": None if y == "-" else int(y)}
              for x, y, p in (ln.split("\t", 2) for ln in num.splitlines())]
-    d = await git(cwd, "diff", a, b)  # ponytail: reads the whole diff to keep 64 KB; stream it if runs make huge diffs
+    d = await git(cwd, "diff", a, b, gd=gd)  # ponytail: reads the whole diff to keep 64 KB; stream it if runs make huge diffs
     return {"diff": d[:DIFF_MAX], "files": files, "truncated": len(d) > DIFF_MAX}
 
 
@@ -246,8 +258,8 @@ def _input(node: dict, ctx: dict, resume: str | None) -> tuple[str, list[str] | 
     return ctx["input"], None
 
 
-async def _spawn(node: dict, text: str, argv: list[str] | None, ctx: dict, wt: str, log_path: Path | None, env: dict,
-                 s: dict) -> dict:
+async def _spawn(node: dict, text: str, argv: list[str] | None, ctx: dict, wt: str, gd: str, log_path: Path | None,
+                 env: dict, s: dict) -> dict:
     """Run one node -> a proc-style result. Agent and shell nodes are committed (empty or not) after they run."""
     if node["type"] == "trigger":
         return {"status": "done", "output": {"input": text}}
@@ -262,11 +274,11 @@ async def _spawn(node: dict, text: str, argv: list[str] | None, ctx: dict, wt: s
     else:
         res = await run_shell(text, wt, timeout, env)
     async with LOCK:  # pre read here too: a batch sibling may have committed while this node ran
-        pre = (await git(wt, "rev-parse", "HEAD")).strip()
-        await git(wt, "add", "-A")
-        await git(wt, "commit", "-q", "--allow-empty", "-m", f"ctc: {node['id']}#{node['visit']}")
-        post = (await git(wt, "rev-parse", "HEAD")).strip()
-        d = await git_diff(wt, pre, post)
+        pre = (await git(wt, "rev-parse", "HEAD", gd=gd)).strip()
+        await git(wt, "add", "-A", gd=gd)
+        await git(wt, "commit", "-q", "--allow-empty", "-m", f"ctc: {node['id']}#{node['visit']}", gd=gd)
+        post = (await git(wt, "rev-parse", "HEAD", gd=gd)).strip()
+        d = await git_diff(wt, pre, post, gd)
     return res | {"pre_sha": pre, "post_sha": post, "files": d["files"], "diff": d["diff"]}
 
 
@@ -291,9 +303,10 @@ async def execute(st, run: dict) -> None:
     async def spawn(node: dict, text: str, argv: list[str] | None, log_path: Path | None) -> dict:
         if node["type"] == "merge":  # its inputs are the data tokens in its inbox, which complete() clears
             return {"status": "done", "output": merge_output(g, wst, node["id"], ctx)}
-        return await _spawn(node, text, argv, ctx, wt, log_path, env, s)
+        return await _spawn(node, text, argv, ctx, wt, gd, log_path, env, s)
 
     try:
+        gd = await wt_git_dir(run["repo"], wt)
         for row in await st.store.fetch("select node_id, output, session_id from wf_steps where run_id = %s"
                                         " and status in ('done', 'failed') and output is not null order by id", (rid,)):
             ctx[row["node_id"]], sessions[row["node_id"]] = row["output"], row["session_id"]

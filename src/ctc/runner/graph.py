@@ -102,14 +102,15 @@ def validate(g: dict) -> list[dict]:
     def err(message, node_id=None):
         errs.append({"message": message, "node_id": node_id})
 
-    ids = [n.get("id") for n in g["nodes"]]
+    nodes = [(g.get("defaults") or {}) | n for n in g["nodes"]]  # as the engine and the exporter see them
+    ids = [n.get("id") for n in nodes]
     known = set(ids)
-    triggers = [n.get("id") for n in g["nodes"] if n.get("type") == "trigger"]
+    triggers = [n.get("id") for n in nodes if n.get("type") == "trigger"]
     if len(triggers) != 1:
         err(f"a workflow needs exactly one trigger, found {len(triggers)}", triggers[1] if len(triggers) > 1 else None)
     if (g.get("settings") or {}).get("permission", "worktree") not in ("worktree", "container"):
         err("settings.permission must be worktree or container")
-    for n in g["nodes"]:
+    for n in nodes:
         nid, t = n.get("id"), n.get("type")
         if not isinstance(nid, str) or not SLUG.fullmatch(nid) or nid in ROOTS:
             err(f"bad node id {nid!r}: use letters, digits, - or _ (not input/run)", nid)
@@ -143,7 +144,7 @@ def validate(g: dict) -> list[dict]:
             err(f"edge {e.get('from')} -> {e.get('to')} points at a missing node",
                 next((x for x in (e.get("from"), e.get("to")) if x in known), None))
     if len(triggers) == 1:
-        byid = {n.get("id"): n for n in g["nodes"]}
+        byid = {n.get("id"): n for n in nodes}
         gates = {nid for nid, n in byid.items() if n.get("type") == "approval"}
         ungated = _reach(triggers[0], [(e.get("from"), e.get("to")) for e in g["edges"]], gates)
         for nid in sorted(ungated - gates):
@@ -435,6 +436,9 @@ if __name__ == "__main__":
     assert "unquoted" in bad(lambda x: x["nodes"][4].update(command="gh issue comment 1 --body '{{fix.result}}'"))
     assert bad(lambda x: x["nodes"][4].update(command='echo "it\'s" {{fix.result}}')) == ""
     assert "no bypass" in bad(lambda x: x["nodes"][1].update(permission_mode="bypassPermissions"))
+    assert "no bypass" in bad(lambda x: x.update(defaults={"permission_mode": "bypassPermissions"}))  # defaults reach nodes
+    assert "max_visits" in bad(lambda x: x.update(defaults={"max_visits": "3"}))
+    assert "approval" in bad(lambda x: (x["nodes"][4].pop("command"), x.update(defaults={"command": "git push"})))
     assert "worktree or container" in bad(lambda x: x.update(settings={"permission": "host"}))
     assert bad(lambda x: x.update(settings={"permission": "container"})) == ""
 
