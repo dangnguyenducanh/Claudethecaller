@@ -99,10 +99,13 @@ claudethecaller/
 │   └── latency_eval.py        # route p95 replay
 ├── scripts/
 │   ├── check_models.py        # smoke-run embed / rerank / LLM          (done)
+│   ├── check.sh               # the CI checks, run before every push
+│   ├── deploy_local.sh        # CD to this host: pull, build, restart the daemon
 │   ├── train_difficulty.py    # A2
 │   └── finetune_embedder.py   # A4
 ├── dashboard/                 # React + Vite (TS)
 ├── tests/                     # later, owner-guided
+├── .github/                   # ci.yml (required checks), release.yml (CD), dependabot.yml, PR template
 ├── docker-compose.yml
 ├── pyproject.toml             # uv, src layout
 ├── .env                       # CTC_DATABASE_URL, CTC_REDIS_URL (gitignored)
@@ -112,6 +115,16 @@ claudethecaller/
 
 A subfolder is created by the step that first puts code in it; no empty folders ahead of time.
 
+## Git workflow and CI/CD
+
+- **Branches:** `main` = releases (tags `vX.Y.Z`), `staging` = integration. Work branches are named after the PLAN step or milestone (`b9-history-import`, `m2-agent-integration`, `ci-cd`), cut from `staging`, PR into `staging`.
+- **PRs:** title is a conventional commit, `type: subject` with type in `feat fix docs perf test chore ci refactor` (checked by `pr-title`; after fixing a title, re-run the job). Fill the template (Summary / PLAN step / Checks run / Risks). Run `scripts/check.sh` before pushing. Squash-merge into `staging` (the title becomes the commit); `staging` → `main` uses a merge commit, never squash, so the two never diverge.
+- **Required checks** on `staging` and `main` (`.github/workflows/ci.yml`): `lint-test` (ruff, pytest, import smoke), `db-selfchecks` (store/cache/bundle self-checks on pgvector pg17 + Redis 8.2 service containers), `dashboard` (pnpm build), `secret-scan` (gitleaks), `pr-title`. Model servers need a GPU, so search quality stays with the Done-when commands and K steps on this host.
+- **CD** (`.github/workflows/release.yml`): every push to `staging` uploads the wheel, sdist and dashboard tarball as a workflow artifact; a `vX.Y.Z` tag publishes them as a GitHub Release with generated notes (fails if the tag ≠ the pyproject version or the commit is not on `main`).
+- **Release:** 1) `uv version X.Y.Z` in a `chore: release vX.Y.Z` PR into `staging`; 2) PR `staging` → `main`; 3) `git tag vX.Y.Z origin/main && git push origin vX.Y.Z`.
+- **Deploy to this host:** `scripts/deploy_local.sh` in the main checkout (on `main`, or `staging` to preview): `git pull --ff-only`, `uv sync --frozen`, dashboard build, daemon restart.
+- **Dependabot:** weekly PRs into `staging` for GitHub Actions, dashboard npm and uv, 2–3 open at most per ecosystem, titled `ci(deps): …` / `chore(deps): …`.
+
 ---
 
 ## Build order
@@ -120,7 +133,7 @@ Four tracks. H = owner step. Commit after each step.
 
 **Order:** F3 → F4 (done first, on mock data) → H0 → B3 → B4 → K1 → F1 → H1 → K2 → H2 → B4b → B5 → B6 → F2 → H3 → K3 → A1, A2 → B7 → B8 → A3 → B9 → H4 → K4 → F3 → F4 → H6 → F5.
 
-**Branches:** `m1-retrieval-core` (B1–B4, K1–K2, F1), `m2-agent-integration` (B4b, B5–B6, F2, K3), `m3-memory` (B7–B8, A3, K4), `m4-dashboard` (F3–F5), `ai-<name>` per AI step; PR into `main` at the end of each.
+**Branches:** `m1-retrieval-core` (B1–B4, K1–K2, F1), `m2-agent-integration` (B4b, B5–B6, F2, K3), `m3-memory` (B7–B8, A3, K4), `m4-dashboard` (F3–F5), `ai-<name>` per AI step; PR into `staging` at the end of each (see Git workflow and CI/CD).
 
 ### Done
 
@@ -222,7 +235,7 @@ Four tracks. H = owner step. Commit after each step.
 - [ ] **H1** — owner hand-checks the 200 rows (`gold` column; `data/` stays local).
 - [ ] **K2 — tune**: sweep `abstain_below` (0.05–0.9), candidate depth (25/50/100) and `rerank_top` (10/20/40) on dev rows; keep the best Recall@5 with false-trigger ≤ 10%; write the winners into `config/retrieval.yaml`. If Recall@5 stays < 0.90, do A1 (then A4). Measured on day one: `bge-reranker-v2-m3` absolute scores carry no signal for tool matching (right and junk matches both 0.001–0.04) and dense cosine is higher for chit-chat ("thanks", 0.58) than for real matches, so neither works as an abstain threshold; search currently orders by RRF(dense rank, rerank rank) with abstain off. K2 picks the abstain rule (e.g. a small classifier on dense/rerank/keyword features, calibrated on MetaTool + own no-capability rows) and tries `Qwen3-Reranker-0.6B` (instruction-aware) against bge.
   - **Partial 2026-10-21, blocked on H1**: false-trigger 100% (target ≤ 10%), so not done. **Gate rejected**. depth 50 / rerank_top 20 won on dev; the abstain classifier scored CV AUC 0.55 and is off (`models/abstain-2026-10-21-auc055.rejected.joblib`), so every prompt gets a suggestion; `ranking` knob tuned on dev to keyword 0.25 / rerank 1 (CLAUDE.md decisions); Qwen3-Reranker not tried (no GPU budget). Redo on H1 labels.
-- [ ] **H2** — owner reads the report; PR `m1-retrieval-core` → `main`.
+- [ ] **H2** — owner reads the report; PR `m1-retrieval-core` → `staging`.
 - [x] **K3 — routing speed** (`evaluation/latency_eval.py`): replay dev prompts through `POST /v1/route` three times (cold: Redis flushed + L1 off; L2: L1 off; L1), `numpy.percentile` of wall time per tier + semantic cache hit rate → report.
   - **Done 2026-10-21**: 77 dev prompts through `/v1/route`: cold p95 105 ms, Redis (semantic) p95 6.9 ms, L1 p95 1.2 ms, all within target (dev DB, no Supabase hop yet); `data/reports/latency-2026-10-21.md`.
 - [ ] **K4 — memory + adoption**: Recall@5 with vs without `recall()` memories in the query vector; extraction precision from H4's file; follow rate = `avg(followed::int)` over `ctc.decisions` since H3.
@@ -241,11 +254,11 @@ Four tracks. H = owner step. Commit after each step.
   ```
   and runs `claude mcp add --scope user --transport http claudethecaller http://127.0.0.1:18310/mcp` if `claude mcp get claudethecaller` fails.
   - **Done 2026-10-21**: `ctc daemon start|stop|status` run the live daemon; `ctc install|uninstall` checked against a temp `CTC_CLAUDE_HOME` (adds UserPromptSubmit, PostToolUse, Stop and SessionEnd; a second install changes nothing; uninstall removes only ours). The real `~/.claude` is H3.
-- [ ] **H3** — owner runs the real `ctc install`, uses Claude Code for a day; PR `m2-agent-integration` → `main`.
+- [ ] **H3** — owner runs the real `ctc install`, uses Claude Code for a day; PR `m2-agent-integration` → `staging`.
 - [x] **F3 — dashboard shell** (`dashboard/`, Vite React TS): pages fetch `/api/*`. KPI cards (routing calls, adoption, lazy misses = suggested but not followed, p95, cost by tier; 7d/30d/90d/all), Recharts `AreaChart` timeline stacked by project, decision log table → drawer with the stage scores, activity heatmap as a CSS grid. `pnpm build` → `dist/`, served by the daemon. Built first, on mock data (`dashboard/src/mock.ts`) until B5 serves `/api`; `pnpm -C dashboard dev` → `:18320`.
 - [x] **F4 — control views**: library (search, enable/disable/pin/block per project via `PUT /api/capabilities/{id}/override`, dedup review), sessions (project rail + per-session decisions and memories), memories (edit, pin, delete, supersede history). (mock data until B5.)
 - [ ] **H6** — owner visual review.
-- [ ] **F5 — workflow editor**: React Flow canvas with capability nodes from `/api/capabilities`; save → `POST /api/capabilities` with `kind: workflow` (writes `<project>/.claude/workflows/<name>.yaml`, then indexes it; see API design). PR `m4-dashboard` → `main`.
+- [ ] **F5 — workflow editor**: React Flow canvas with capability nodes from `/api/capabilities`; save → `POST /api/capabilities` with `kind: workflow` (writes `<project>/.claude/workflows/<name>.yaml`, then indexes it; see API design). PR `m4-dashboard` → `staging`.
 
 ### AI — later
 

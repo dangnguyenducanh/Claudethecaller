@@ -4,10 +4,39 @@ Local skill/workflow router for coding agents. **`PLAN.md` is the single source 
 
 ## How work happens here
 
-- Development follows the **build order** in `PLAN.md`: four tracks (Backend, Benchmark, Frontend, AI later), one Done-when command per step, one branch per phase (`m1-retrieval-core`, …), PR into `main` at the end of the milestone.
+- Development follows the **build order** in `PLAN.md`: four tracks (Backend, Benchmark, Frontend, AI later), one Done-when command per step, one branch per phase or step (`m1-retrieval-core`, `b9-history-import`, …), PR into `staging`; `staging` → `main` is the release (PLAN.md "Git workflow and CI/CD").
 - Follow the rules under "Constraints" in `PLAN.md`: stay in the current step's scope.
 - No tests for now: the owner will guide testing later. Each step in `PLAN.md` says how to code it.
 - Code style: shortest working solution; stdlib and already-chosen deps first; no abstractions with one implementation; mark known corner-cuts with a `ponytail:` comment.
+
+## Working agreement: propose first, work only after approval
+
+The owner decides what happens. The agent proposes, waits, then executes exactly what was approved.
+
+1. **Propose before acting.** For anything beyond reading, post a short proposal and stop. Format (≤ 15 lines): **Goal** · **Plan** (numbered steps) · **Touches** (files, branch/worktree, DB, GitHub, `~/.claude`, daemon) · **Cost** (agents, tokens, minutes) · **Risks / rollback** · **Decisions needed** (recommend one default for each). No open-ended questions where a sensible default exists.
+2. **Approval = an explicit message from the owner** about that proposal ("approved", "yes", "go", "do it", or edits to the plan). Not approval: silence, background-task or CI notifications, an earlier approval for a different scope, "continue" after a status report, or the agent's own earlier statements. Approval covers only the scope stated; when scope grows (new files, a bigger blast radius, a different approach after a failure) stop and re-propose.
+3. **Needs approval every time** (include it in the proposal; approving the proposal approves it): editing files, commits, pushes, PRs and merges, branch or repo settings, deleting anything (branches, worktrees, files, rows), writes to Supabase, starting or stopping the daemon or containers, `ctc install` or any write to the real `~/.claude`, starting a Workflow or subagents, long LLM or GPU jobs.
+4. **Allowed without approval:** reading and searching files, `git status/log/diff`, read-only API or SQL queries, health checks, lint and self-checks that only write to scratch space or throwaway schemas, drafting in the scratchpad, and answering questions.
+5. **Standing approvals** (the owner edits this list; empty means none): _none_.
+6. **Execute the plan as approved, no extras.** Report what ran with its real output; list anything skipped. Anything the agent notices along the way becomes a new proposal, not a side effect. Subagents and workflows inherit this: they never commit or push, and the lead acts only within the approved scope.
+7. **Blocked on the owner** (H steps, credentials, a choice only they can make): say so in one line and stop.
+8. **Git flow:** one feature branch per PLAN step, PR into `staging`, never push to `staging` or `main` directly; commit messages and PR titles follow Conventional Commits. See PLAN.md "Git workflow and CI/CD".
+
+## Modes: `/1` and `/2`
+
+The owner picks how much machinery a task gets by starting the message with `/1` or `/2` (then the task). Without either, propose per the working agreement and recommend one: `/1` for one concern or ≤ 3 files, `/2` for multi-module work, schema or Supabase changes, or ≥ 4 files.
+
+| | `/1 <task>` simplest flow | `/2 <task>` structured workflow |
+|---|---|---|
+| Agents | **One agent does everything** (the main session itself): no subagents, no Workflow | A Workflow of parallel builders on **disjoint files** (each owns its files, none commits) |
+| Proposal | None: the command is the approval for the task's local work (edits, scratch runs, a commit on the feature branch) | Required, then wait for approval (it states phases, agent count, tokens, minutes); typing `/2` is the owner's explicit opt-in to the Workflow tool |
+| Review | **None** | **One** simple reviewer for the whole wave (critical/high defects only), then one fixer only if it found something |
+| Verify | Run the one relevant check once (ruff, a self-check, a build) and show its output | A test step at the end: ruff, pytest, the touched self-checks, a live smoke where a daemon is involved |
+| Report | ≤ 5 lines: what changed, check result, anything left | Per phase: result, check output, findings and fixes, what is still open |
+
+- **Still needs an explicit yes, in both modes:** push, PR, merge, repo or branch settings, deleting anything, writes to Supabase, writes to the real `~/.claude`, starting or stopping the daemon or containers. In `/1` ask in one line at the end instead of proposing up front.
+- **`/1` stays simple:** if the task turns out to need subagents, a review or more than the stated scope, stop and offer `/2`; do not grow it silently.
+- **Cost:** every `/2` proposal states it; prefer the smaller option.
 
 ## graphify
 
@@ -44,6 +73,7 @@ Durable facts and decisions. Append new decisions under **Decisions** with the d
 - Ports: TEI embedder `:18300`, TEI reranker `:18301`, llama-server `:18302`, Redis `:18303`, daemon `:18310` + `~/.claudethecaller/ctc.sock`. Local state: `~/.claudethecaller/ctc.sock` only; Redis holds cache only (TTL'd, rebuildable); everything durable is in Supabase.
 - `ANTHROPIC_API_KEY` is not set on this host.
 - Python 3.12 via `uv`; dashboard via `pnpm`; model servers via `docker compose`.
+- Before pushing: `scripts/check.sh` (the CI checks; DB self-checks only when `CTC_DATABASE_URL`/`CTC_REDIS_URL` point at scratch services). Deploy to this host: `scripts/deploy_local.sh` (pull, build, restart the daemon).
 - CLI: `uv run ctc status | caps | index | search "<prompt>" | explain "<prompt>"`. Daemon: `uv run ctc daemon start|stop|status` (socket + `:18310` serving `/v1`, `/api`, `/mcp` and the built dashboard; set `CTC_DASHBOARD_DIST=<main checkout>/dashboard/dist` before `start` when running from a worktree). Hooks + MCP: `uv run ctc install|uninstall` (`--dry-run` prints the diff; `CTC_CLAUDE_HOME=<tmp dir>` points it away from the real `~/.claude`). Dashboard dev server: `pnpm -C dashboard dev` → `:18320`.
 
 **Stack** (full table in `PLAN.md`): Python core (FastAPI daemon, typer CLI, ranx/scikit-learn eval), TypeScript only for the dashboard, native engines for speed (TEI Rust, llama.cpp); one database: Supabase Postgres + pgvector. Hook = `curl` one-liner, fail-open.
