@@ -18,6 +18,7 @@ Kind = Literal["skill", "agent", "command", "workflow"]
 Override = Literal["pin", "block", "disable"]
 MemoryKind = Literal["preference", "convention", "fact", "skill_outcome"]
 Scope = Literal["global", "project"]
+Source = Literal["hook", "history"]  # live hooks vs imported Claude history (B9)
 KPI_KEYS = ("routing_calls", "adoption_rate", "lazy_misses", "p95_ms")
 
 
@@ -90,6 +91,7 @@ class Decision(BaseModel):
     confidence: float
     steps: list[Step]
     stages: list[StageRow]
+    source: Source  # history rows store the distilled intent as `prompt`, never the raw text
 
 
 class DayCount(BaseModel):
@@ -180,6 +182,10 @@ class Session(BaseModel):
     decisions: int
     followed: int
     memories: int
+    source: Source
+    summary: str | None
+    status: Literal["pending", "processed", "failed"]
+    git_branch: str | None
 
 
 class Memory(BaseModel):
@@ -192,7 +198,7 @@ class Memory(BaseModel):
     pinned: bool
     use_count: int
     updated_at: datetime
-    source: str  # "claude-memory · <file>" | "session <id>" | "manual"
+    source: str  # "claude-memory · <file>" | "session <id>" | "history · <cap_id>" | "manual"
     supersedes: str | None  # "<id> (<first 40 chars of its text>)"
     deleted_at: datetime | None = None
 
@@ -206,6 +212,10 @@ class SessionDetail(BaseModel):  # types.ts: Session minus its counts, plus the 
     turns: int
     tokens: int
     followed: int
+    source: Source
+    summary: str | None
+    status: Literal["pending", "processed", "failed"]
+    git_branch: str | None
     decisions: list[Decision]
     memories: list[Memory]
 
@@ -246,6 +256,30 @@ class Job(BaseModel):
 
 class JobRef(BaseModel):
     job_id: str
+
+
+class HistoryStatus(BaseModel):
+    root: str
+    files: int  # main transcripts on disk
+    imported: int
+    pending: int
+    processed: int
+    failed: int
+    last_job: Job | None
+
+
+class HistoryFile(BaseModel):
+    path: str
+    session_id: str | None
+    size: int
+    status: str
+    error: str | None
+    imported_at: datetime | None
+
+
+class HistoryImport(BaseModel):
+    process: bool = True
+    projects: list[str] | None = None
 
 
 class IndexRequest(BaseModel):
@@ -290,7 +324,7 @@ class NewApiKey(BaseModel):
 
 def to_decision(r: dict) -> Decision:
     return Decision(**{k: r[k] for k in ("id", "at", "session_id", "project", "prompt", "abstained", "followed", "latency_ms",
-                                         "difficulty", "model_tier", "confidence")},
+                                         "difficulty", "model_tier", "confidence", "source")},
                     steps=r["bundle"].get("steps", []), stages=r["stages"] or [])
 
 
@@ -300,6 +334,8 @@ def memory_source(src: dict | None) -> str:
         return f"claude-memory · {src.get('file', '')}"
     if src.get("kind") == "session":
         return f"session {src.get('session_id', '')}"
+    if src.get("kind") == "history-outcome":
+        return f"history · {src.get('cap_id', '')}"
     return "manual"
 
 
