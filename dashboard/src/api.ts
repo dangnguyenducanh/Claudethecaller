@@ -2,7 +2,7 @@ import { handle } from './mock'
 import type {
   Activity, ApiKey, Capability, CapabilityDetail, CapabilityPatch, Decision, DedupPair, Diff, Health, HistoryFile, HistoryStatus,
   Job, Kind, Kpis, Memory, MemoryDetail, MemoryKind, MemoryPatch, MemoryWrite, Metric, NewCapability, NewMemory, Ok, Override,
-  Project, ProjectDetail, Range, Run, RunDetail, RunStatus, RunTrigger, Session, SessionDetail, Source, StepLog, Timeline,
+  Project, ProjectDetail, Range, Run, RunDetail, RunStatus, RunTrigger, Schedule, Session, SessionDetail, Source, StepLog, Timeline,
 } from './types'
 
 export class ApiError extends Error {
@@ -158,6 +158,7 @@ export const api = {
   historyFiles: (status?: string) => req<HistoryFile[]>('GET', '/history/files' + qs({ status })),
   // Workflow runs (PLAN.md "Workflow runner (m5)" → API; M1 + M2 endpoints). The daemon only: the mock has no runs.
   startRun: (capId: string, body: { input?: string; project?: string; trigger?: RunTrigger }) => req<{ run_id: number }>('POST', `/workflows/${seg(capId)}/runs`, body),
+  exportWorkflow: (capId: string) => req<{ path: string }>('POST', `/workflows/${seg(capId)}/export`), // M6: 422 has_approval, 409 a different file exists
   runs: (o: { workflow?: string; status?: RunStatus; trigger?: RunTrigger } & Page = {}) => req<Run[]>('GET', '/runs' + qs(o)),
   run: (id: number) => req<RunDetail>('GET', `/runs/${id}`),
   stepLog: (id: number, sid: number, offset: number) => req<StepLog>('GET', `/runs/${id}/steps/${sid}/log` + qs({ offset })),
@@ -167,4 +168,6 @@ export const api = {
   approveRun: (id: number, body: { approve: boolean; note?: string }) => req<Run>('POST', `/runs/${id}/approve`, body), // 409 not_waiting
   continueRun: (id: number, when: 'now' | 'reset') => req<Run>('POST', `/runs/${id}/continue`, { when }), // 409 not_quota
   compareRuns: (a: number, b: number, node?: string) => req<Diff>('GET', '/runs/compare' + qs({ a, b, node })), // 422 unless same owner + repo
+  setSchedule: (capId: string, body: { cron: string; input?: string; enabled: boolean }) => req<Schedule>('PUT', `/workflows/${seg(capId)}/schedule`, body), // 422 bad_cron
+  deleteSchedule: (capId: string) => req<Ok>('DELETE', `/workflows/${seg(capId)}/schedule`),
 }

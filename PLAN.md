@@ -775,39 +775,43 @@ Tracks: WB = backend, WF = frontend, WH = owner. Each milestone branch is cut fr
 - [x] **WF9 — compare page**: tick two runs in the list → `#compare/<a>/<b>[/<node>]` with `DiffView`.
 
 #### M3: Parallel and merge (`m5-runner-parallel`)
-- [ ] **WB11 — parallel and merge** (rule 7, merge `{inputs}`, the commit lock, `three-reviewers.yaml`)
+- **Result 2026-10-22:** `three-reviewers` ends `done` in 8.8 s (three `sleep 5` shells in one batch, three `ctc: rN#1` commits) and the merge output has 3 inputs; a mixed batch runs the readonly nodes together, then the writer alone; cancel mid-sleep leaves the run and all three steps `cancelled` and no `sleep` process; a merge inside a loop is refused (422). `smoke` (fake binary), `loop-demo` and `gate` end as at M2.
+- [x] **WB11 — parallel and merge** (rule 7, merge `{inputs}`, the commit lock, `three-reviewers.yaml`)
   - Done when: the run ends `done` in under 9 s and the merge output has 3 inputs.
-- [ ] **WF10 — merge view**: several nodes shown running at once.
+- [x] **WF10 — merge view**: several nodes shown running at once.
 
 #### M4: Hands-free triggers (`m5-runner-triggers`)
-- [ ] **WB12 — schedules and idle wait**
+- **Result 2026-10-22:** `* * * * *` on `edit-demo` fired a `schedule` run 24 s after the save, then every minute; with `CTC_IDLE_WAIT_MIN=60` and a session active nothing fired over two slots (`next_at` stays in the past); a `waiting` `gate` run held its own schedule; a bad cron → 422 `bad_cron`. MCP: `claude -p --model haiku` called `run_workflow` + `workflow_status` (1 Haiku run), and the run ended `done` with trigger `mcp`. Schedule editor checked by build only (no browser on this host).
+- [x] **WB12 — schedules and idle wait**
   - A 30 s loop over the owner's enabled schedules; fire when `croniter(cron, last_fired_at or now).get_next() <= now`.
   - Skip missed fires older than 2 min.
   - Don't fire if this workflow is already active, or during a quota window.
   - **Idle wait:** hold the fire while the newest transcript under `~/.claude/projects/` not belonging to a runner (directory names containing `claudethecaller-runs` are excluded) was modified within `idle_wait_min`.
   - Done when: a `* * * * *` schedule produces a `schedule` run within 70 s, and with `idle_wait_min: 60` while a session is active, no run.
-- [ ] **WB13 — MCP tools** (`run_workflow`, `workflow_status` in `mcp.py`)
+- [x] **WB13 — MCP tools** (`run_workflow`, `workflow_status` in `mcp.py`)
   - Done when: `claude -p --strict-mcp-config --mcp-config '{"mcpServers":{"ctc":{"type":"http","url":"http://127.0.0.1:18310/mcp"}}}' --allowedTools 'mcp__ctc__*' "call run_workflow for smoke, then workflow_status"` prints a run id and a status.
-- [ ] **WF11 — schedule editor**
+- [x] **WF11 — schedule editor**
   - Cron input on the trigger node, "Next run …", and `schedule`/`mcp` shown in the runs list.
 - [ ] **WH3 — owner: success check**
   - Done when: `select count(distinct workflow), count(*), avg((status='done')::int) from ctc.wf_runs` gives ≥ 3, ≥ 20 and ≥ 0.8, and no run has `authMethod <> 'claude.ai'`. Then open the PRs for M2–M4.
 
 #### M5: Team runs (`m5-runner-team`), history storage pending
-- [ ] **WB14 — team check**
+- **Result 2026-10-22:** a run owned by `someone@else.test` is missing from `/api/runs`, 404 on detail, diff, log, cancel, approve and continue, 422 on compare, and `no run` in `workflow_status`; its schedule stays hidden; a prompt hook from a teammate's runs dir writes nothing. History import and backfill now skip runner transcripts; 11 projects and 14 sessions imported from them before this fix are still in Supabase (owner to delete). Fresh-clone check and WH4 pending.
+- [x] **WB14 — team check**
   - Every runner query filters on `owner`; teammates' runs never reach router stats; README note.
   - Done when: a fresh clone runs `smoke` to `done` and lists only that login's runs.
 - [ ] **WH4 — owner: a teammate runs `smoke` on their own daemon and login**
 
 #### M6: Modes and export (`m5-runner-modes`)
-- [ ] **WB15 — container mode**
+- **Result 2026-10-22:** a container-mode `smoke` ends `done` with `authMethod` `claude.ai` (1 Haiku run), `ctc-run-<run>-agent-1` visible while it runs; cancel and a `kill -9` of the daemon both leave no `ctc-run-*` container (tested with the agent's API pointed at a dead port, no quota). Export: `edit-demo` → `.claude/workflows/edit-demo.js` (Claude Code lists it as `/edit-demo`), again → 200, edited by hand → 409, `gate` → 422 `has_approval`. The native run is unverified: the one Haiku `claude -p "run the edit-demo workflow"` proposed a plan instead of calling Workflow.
+- [x] **WB15 — container mode**
   - `docker/ctc-runner.Dockerfile` (Node base plus `@anthropic-ai/claude-code@<claude_version>`).
-  - With `settings.permission: container`, Agent nodes run `docker run --rm -v <wt>:/work -v ~/.claude:/root/.claude -w /work ctc-runner:<v> claude -p --dangerously-skip-permissions …`.
+  - With `settings.permission: container`, Agent nodes run `docker run --rm -i --name ctc-run-<run>-<node>-<visit> --user <uid>:<gid> -v <wt>:<wt> -w <wt> -v ~/.claude:/home/claude/.claude -v ~/.claude.json:/home/claude/.claude.json ctc-runner:<v> claude -p --dangerously-skip-permissions …` (the worktree at its host path, so its sessions count as runner sessions); shell nodes stay on the host.
   - The auth check runs inside the container too.
   - Done when: a container-mode `smoke` ends `done` and `wf_runs.auth->>'authMethod'` is `claude.ai` **(unverified: credential file mount)**.
-- [ ] **WB16 — native export** (`POST …/export`, mapping as in Decisions)
+- [x] **WB16 — native export** (`POST …/export`, mapping as in Decisions)
   - Done when: exporting `loop-demo` writes `.claude/workflows/loop-demo.js`, and `claude -p "run the loop-demo workflow"` with a `Workflow` allow rule completes; exporting `gate` returns 422.
-- [ ] **WF12 — settings and Export button**: a permission mode selector (worktree/container) and an Export button with its result path.
+- [x] **WF12 — settings and Export button**: a permission mode selector (worktree/container) and an Export button with its result path.
 
 ### Still unverified
 - What `-p` returns at a usage limit (exit code, `subtype`). The plan matches the error text; paste a real one into `fake_claude_quota.sh` when it happens.

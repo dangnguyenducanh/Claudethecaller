@@ -31,7 +31,8 @@ from ctc.ingestion.scanner import (
 )
 from ctc.memory.longterm import Memory as MemoryRow
 from ctc.memory.longterm import _unit, write_memory
-from ctc.runner.engine import SETTINGS
+from ctc.runner import schedule
+from ctc.runner.engine import SETTINGS, owner
 from ctc.runner.graph import derived_steps, load, validate
 from ctc.server import jobs
 from ctc.server.api import (
@@ -200,7 +201,10 @@ async def capability(cap_id: str, request: Request, project: str | None = None):
                                 " order by d.at desc limit 20", (u, Jsonb([{"cap_id": cap_id}])))
     cl, wf = c["cluster_id"], c["kind"] == "workflow"
     doc = _wf_doc(c["path"]) if wf else {}
-    return {**c, "editable": c["namespace"] == "user" or c["namespace"].startswith("project@"),
+    sched = None
+    if wf and st.cfg["mode"] == "local" and (o := await owner()):  # this login's (PUT /api/workflows/{id}/schedule)
+        sched = schedule.view(await st.store.fetchrow("select * from wf_schedules where owner = %s and workflow = %s", (o, cap_id)), o)
+    return {**c, "editable": c["namespace"] == "user" or c["namespace"].startswith("project@"), "schedule": sched,
             "cluster_members": sorted(i for i, x in st.store.catalog.items() if cl and x["cluster_id"] == cl and i != cap_id),
             "recent_decisions": [to_decision(r) for r in decs],
             "steps": [s for s in _workflow_steps(c["path"]) if isinstance(s.get("cap"), str)] if wf else None,

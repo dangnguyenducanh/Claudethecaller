@@ -1,18 +1,18 @@
 import '@xyflow/react/dist/style.css'
 import {
-  Background, Controls, Handle, MarkerType, Position, ReactFlow, ReactFlowProvider, addEdge, useEdgesState, useNodesState, useReactFlow,
+  Background, Controls, Handle, MarkerType, Position, ReactFlow, ReactFlowProvider, addEdge, useEdgesState, useNodeConnections, useNodesState, useReactFlow,
   type Connection, type Edge, type Node, type NodeProps,
 } from '@xyflow/react'
 import { createContext, useContext, useEffect, useState, type DragEvent } from 'react'
 import { ApiError, NEED_DAEMON, api, errText, usingMock } from './api'
 import type { ViewProps } from './App'
 import { parseSteps } from './parts'
-import type { Capability, CapabilityDetail, Graph, Kind, NodeType, WfNode, WorkflowSettings, WorkflowStep } from './types'
-import { Header, Search } from './ui'
+import type { Capability, CapabilityDetail, Graph, Kind, NodeType, Schedule, WfNode, WorkflowSettings, WorkflowStep } from './types'
+import { Header, Search, fmtTime } from './ui'
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
 const KIND_COLOR: Record<Kind, string> = { skill: '#7c8cff', agent: '#b38cff', command: '#f59e42', workflow: '#3ddc97' }
-const TYPE_COLOR: Record<NodeType, string> = { trigger: '#3ddc97', agent: '#b38cff', shell: '#f59e42', if: '#7c8cff', approval: '#f5b14a' }
+const TYPE_COLOR: Record<NodeType, string> = { trigger: '#3ddc97', agent: '#b38cff', shell: '#f59e42', if: '#7c8cff', approval: '#f5b14a', merge: '#4ac9f5' }
 const DND = 'application/ctc-cap'
 const DEFAULT_SETTINGS: WorkflowSettings = { permission: 'worktree', allow_extra_usage: false, auto_resume: true, max_run_tokens: null }
 const arrow = { type: MarkerType.ArrowClosed }
@@ -29,10 +29,12 @@ const firstLine = (s?: string) => (s ?? '').split('\n')[0]
 
 function NodeView({ id, type, data, selected }: NodeProps<FlowNode>) {
   const { bad, status, runs } = useContext(NodeCtx)
+  const inbound = useNodeConnections({ handleType: 'target' }).length
   const sub = type === 'trigger' ? (data.input ? `input: ${data.input}` : 'run input → {{input}}')
     : type === 'agent' ? data.cap ?? data.agent ?? firstLine(data.prompt)
     : type === 'shell' ? firstLine(data.command)
     : type === 'approval' ? firstLine(data.message)
+    : type === 'merge' ? `waits for ${inbound} input${inbound === 1 ? '' : 's'}`
     : `${data.path ?? '?'} ${data.op ?? 'eq'} ${data.op === 'truthy' ? '' : JSON.stringify(data.value ?? null)}`
   return (
     <div className={`wfnode${selected ? ' sel' : ''}${bad === id ? ' bad' : ''}${status[id] ? ' st-' + status[id] : ''}`}>
@@ -45,7 +47,7 @@ function NodeView({ id, type, data, selected }: NodeProps<FlowNode>) {
     </div>
   )
 }
-export const nodeTypes = { trigger: NodeView, agent: NodeView, shell: NodeView, if: NodeView, approval: NodeView }
+export const nodeTypes = { trigger: NodeView, agent: NodeView, shell: NodeView, if: NodeView, approval: NodeView, merge: NodeView }
 
 export const toFlow = (g: Graph): { nodes: FlowNode[]; edges: Edge[] } => ({
   nodes: g.nodes.map(({ id, type, pos, ...data }) => ({ id, type, position: { x: pos[0], y: pos[1] }, data, deletable: type !== 'trigger' })),
@@ -159,6 +161,7 @@ function NodeForm({ n, ids, agents, set, rename }: { n: FlowNode; ids: string[];
         {check('readonly', 'Read-only')}
       </>}
       {n.type === 'approval' && area('message', 'Message (shown on the run page while it waits)')}
+      {n.type === 'merge' && <div className="muted">Runs once every inbound edge has arrived and at least one input ran (skipped branches count as arrived); output {'{inputs: {node: output}}'} over the inputs that ran. Not allowed inside a loop.</div>}
       {n.type === 'if' && <>
         {text('path', 'Path, e.g. test.exit_code (missing = false)')}
         <div className="row2">
@@ -172,12 +175,43 @@ function NodeForm({ n, ids, agents, set, rename }: { n: FlowNode; ids: string[];
   )
 }
 
+/** The trigger's cron schedule. It is the owner's `wf_schedules` row, not part of the workflow file, so it saves on its own. */
+function ScheduleForm({ cap, set }: { cap: CapabilityDetail; set: (s: Schedule | null) => void }) {
+  const s = cap.schedule
+  const [cron, setCron] = useState(s?.cron ?? '')
+  const [enabled, setEnabled] = useState(s?.enabled ?? true)
+  const [ok, setOk] = useState('')
+  const [err, setErr] = useState('') // the 422 bad_cron message, among others
+  const call = async (f: () => Promise<string>) => {
+    setOk(''); setErr('')
+    try { setOk(await f()) } catch (e) { setErr(usingMock() ? NEED_DAEMON : errText(e)) }
+  }
+  const save = () => call(async () => { set(await api.setSchedule(cap.id, { cron: cron.trim(), input: s?.input, enabled })); return '' })
+  const remove = () => call(async () => { await api.deleteSchedule(cap.id); set(null); setCron(''); setEnabled(true); return 'Removed.' })
+  return (
+    <>
+      <div className="card-title">Schedule</div>
+      <label>Cron: min hour dom mon dow, daemon local time
+        <input className="mono" value={cron} placeholder="0 9 * * 1-5" onChange={e => setCron(e.target.value)} onKeyDown={e => e.key === 'Enter' && cron.trim() && save()} /></label>
+      <label className="toggle"><input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />Enabled</label>
+      <div className="actions">
+        <button className="btn" disabled={!cron.trim()} onClick={save}>Save schedule</button>
+        <button className="btn" disabled={!s} onClick={remove}>Remove</button>
+      </div>
+      {err ? <span className="err">{err}</span>
+        : ok ? <span className="okmsg">{ok}</span>
+        : s && <span className="muted">{s.enabled && s.next_at ? `Next run ${fmtTime(s.next_at)}` : 'Disabled'}{s.last_fired_at && ` · last fired ${fmtTime(s.last_fired_at)}`}</span>}
+    </>
+  )
+}
+
 function SettingsForm({ s, set }: { s: WorkflowSettings; set: (s: WorkflowSettings) => void }) {
   return (
     <>
       <div className="card-title">Workflow settings</div>
       <label>Permission<select value={s.permission} onChange={e => set({ ...s, permission: e.target.value as WorkflowSettings['permission'] })}>
-        <option value="worktree">worktree: acceptEdits in a git worktree</option></select></label>
+        <option value="worktree">worktree: acceptEdits in a git worktree</option>
+        <option value="container">container: full bypass inside Docker, your login mounted</option></select></label>
       <label className="toggle"><input type="checkbox" checked={s.allow_extra_usage} onChange={e => set({ ...s, allow_extra_usage: e.target.checked })} />Allow extra usage (paid overage)</label>
       <label className="toggle"><input type="checkbox" checked={s.auto_resume} onChange={e => set({ ...s, auto_resume: e.target.checked })} />Auto-resume when the quota resets</label>
       <label>Max run tokens (empty: no cap)<input type="number" min={1} value={s.max_run_tokens ?? ''}
@@ -297,6 +331,18 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
       location.hash = `run/${r.run_id}`
     } catch (e) { if (usingMock()) setErr(NEED_DAEMON); else fail(e) }
   }
+  const exportWf = async () => {
+    if (!loaded) return
+    try {
+      setErr(''); setOk(''); setBad(null)
+      setOk(`Exported to ${(await api.exportWorkflow(loaded.id)).path}`)
+    } catch (e) {
+      if (usingMock()) setErr(NEED_DAEMON)
+      else if (e instanceof ApiError && e.code === 'has_approval') setErr('Approval nodes have no native equivalent: remove them to export.')
+      else if (e instanceof ApiError && e.status === 409) setErr(`A different file is already at the export path; move it away first. ${e.message}`)
+      else fail(e)
+    }
+  }
   const locked = !!readOnly
   const sel = nodes.find(n => n.selected)
 
@@ -318,6 +364,7 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
         <input className="inline-input" placeholder="Run input, fills {{input}}" aria-label="Run input" value={input} onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && canRun && run()} />
         <button className="btn" onClick={run} disabled={!canRun} title={canRun ? 'Run on its own git branch and worktree' : 'Save the workflow first'}>Run</button>
+        <button className="btn" onClick={exportWf} disabled={!canRun} title={canRun ? 'Write .claude/workflows/<name>.js in Claude Code\'s native format' : 'Save the workflow first'}>Export</button>
         <div className="wf-msg">
           {nameErr && <span className="err">{nameErr}</span>}
           {err && <span className="err">{err}{bad && ` (node ${bad})`}</span>}
@@ -337,6 +384,7 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
             <button className="btn" disabled={locked} onClick={() => add('shell', {})}>+ Shell</button>
             <button className="btn" disabled={locked} onClick={() => add('if', { op: 'eq' })}>+ IF</button>
             <button className="btn" disabled={locked} onClick={() => add('approval', { message: 'Approve and continue?' })}>+ Approval</button>
+            <button className="btn" disabled={locked} onClick={() => add('merge', {})}>+ Merge</button>
             <Search value={q} onChange={setQ} placeholder="Find a capability" />
           </div>
           <div className="wf-list">
@@ -356,7 +404,7 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
               <Controls showInteractive={false} />
             </ReactFlow>
           </NodeCtx.Provider>
-          {nodes.length <= 1 && <div className="wf-hint">Drag capabilities here (each becomes an Agent node) or add Shell, IF and Approval nodes,<br />then connect them from the trigger. Edges that loop back are drawn dashed.</div>}
+          {nodes.length <= 1 && <div className="wf-hint">Drag capabilities here (each becomes an Agent node) or add Shell, IF, Approval and Merge nodes,<br />then connect them from the trigger. Edges that loop back are drawn dashed.</div>}
         </div>
         <aside className="wf-panel card pad">
           <fieldset className="form" disabled={locked}>
@@ -364,6 +412,10 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
               ? <NodeForm key={sel.id} n={sel} ids={nodes.map(n => n.id)} agents={agents} set={(k, v) => setField(sel.id, k, v)} rename={to => rename(sel.id, to)} />
               : <div className="muted">Select a node to edit it.</div>}
           </fieldset>
+          {sel?.type === 'trigger' && <fieldset className="form">{/* not locked: the schedule is the owner's DB row, not the file */}
+            {loaded ? <ScheduleForm key={loaded.id} cap={loaded} set={s => setLoaded(l => l && { ...l, schedule: s })} />
+              : <div className="muted">Save the workflow to schedule it.</div>}
+          </fieldset>}
           <fieldset className="form" disabled={locked}><SettingsForm s={settings} set={setSettings} /></fieldset>
         </aside>
       </div>
@@ -372,5 +424,5 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
 }
 
 export default function Workflows(props: ViewProps & { theme: string }) {
-  return <><Header crumb="Workflows" title="Workflow editor" sub="Agent, Shell, IF and Approval nodes on a canvas; each run gets its own git branch and worktree" /><ReactFlowProvider><Editor {...props} /></ReactFlowProvider></>
+  return <><Header crumb="Workflows" title="Workflow editor" sub="Agent, Shell, IF, Approval and Merge nodes on a canvas; each run gets its own git branch and worktree" /><ReactFlowProvider><Editor {...props} /></ReactFlowProvider></>
 }

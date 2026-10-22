@@ -26,7 +26,7 @@ from ctc.ingestion.scanner import project_id
 from ctc.memory.longterm import recall
 from ctc.memory.session import blend, project_vector, session_vector
 from ctc.retrieval.hybrid import result_json, search
-from ctc.runner.engine import RUNS
+from ctc.runner.engine import in_runs
 from ctc.server.jobs import submit
 from ctc.server.schemas import Health
 from ctc.server.state import State
@@ -123,8 +123,8 @@ async def route(st: State, prompt: str, session_id: str, cwd: str, user_id: str 
 
 
 def _in_run(body: dict) -> bool:
-    """A workflow run's own claude (cwd under ~/.claudethecaller/runs/): no suggestion, rows, or extract jobs (PLAN.md m5)."""
-    return Path(str(body.get("cwd") or "")).is_relative_to(RUNS)
+    """A workflow run's own claude (engine.in_runs: any home's runs dir): no suggestion, rows, or extract jobs (PLAN.md m5)."""
+    return in_runs(str(body.get("cwd") or ""))
 
 
 async def _body(request: Request) -> dict:

@@ -139,10 +139,24 @@ class Graph(BaseModel):
 
 
 class WorkflowSettings(BaseModel):
-    permission: Literal["worktree"] = "worktree"  # "container" arrives in M6
+    permission: Literal["worktree", "container"] = "worktree"  # container: agent nodes run in the ctc-runner image (M6)
     allow_extra_usage: bool = False
     auto_resume: bool = True
     max_run_tokens: int | None = Field(default=None, ge=1)
+
+
+class ScheduleSet(BaseModel):  # PUT /api/workflows/{cap_id}/schedule
+    cron: str  # min hour dom mon dow, daemon local time; 422 bad_cron
+    input: str = ""
+    enabled: bool = True
+
+
+class Schedule(BaseModel):  # GET /api/capabilities/{id} .schedule; PUT …/schedule returns it
+    cron: str
+    input: str
+    enabled: bool
+    next_at: datetime | None  # the next slot (in the past while a fire is held); null when disabled
+    last_fired_at: datetime | None  # the latest slot handled (fired, or skipped while no daemon ran)
 
 
 class Capability(BaseModel):
@@ -170,6 +184,7 @@ class CapabilityDetail(Capability):
     steps: list[WorkflowStep] | None = None  # workflows only
     graph: Graph | None = None  # workflows saved with a graph
     settings: WorkflowSettings | None = None  # workflows only
+    schedule: Schedule | None = None  # workflows with a schedule (local mode, this login's)
 
 
 class NewCapability(BaseModel):
@@ -352,6 +367,10 @@ class RunStart(BaseModel):
 
 class RunRef(BaseModel):
     run_id: int
+
+
+class WorkflowExport(BaseModel):  # POST /api/workflows/{cap_id}/export
+    path: str  # the written <root>/.claude/workflows/<name>.js
 
 
 class RunApprove(BaseModel):

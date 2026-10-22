@@ -1,7 +1,8 @@
 """Workflow engine (PLAN.md m5 WB4-WB6): submit, claim and walk runs; cancel; the crash sweep.
 
 One runner task per daemon (`run_runner`) claims this login's oldest queued run and walks it with ctc.runner.graph,
-one node at a time. Each node gets a wf_steps row inserted `running` before it spawns (ctc.runner.proc) in the run's
+one batch at a time (rule 7: ready readonly nodes together, else one writer). Each node gets a wf_steps row inserted
+`running` before it spawns (ctc.runner.proc) in the run's
 git worktree (~/.claudethecaller/runs/<id>/wt on branch ctc/<wf>-<id>, kept after the run), is committed, and its
 outcome lands in the same transaction as the walker state. A crash fails the run and re-runs nothing; a usage limit
 parks it as `quota` and an approval node as `waiting`, both off the lane: approve() and resume() (or the runner at the
@@ -28,11 +29,20 @@ from pathlib import Path
 import psycopg
 from psycopg.types.json import Jsonb
 
-from ctc.runner.graph import complete, eval_if, ready, render
-from ctc.runner.proc import agent_argv, child_env, preflight, run_agent, run_shell, stop
+from ctc.runner.graph import batch, complete, eval_if, merge_output, ready, render
+from ctc.runner.proc import (
+    agent_argv,
+    child_env,
+    kill_containers,
+    preflight,
+    run_agent,
+    run_shell,
+    stop,
+)
+from ctc.runner.schedule import tick
 
 log = logging.getLogger(__name__)
-RUNS = Path("~/.claudethecaller/runs").expanduser()  # worktrees + logs; hooks.py ignores sessions under it
+RUNS = Path("~/.claudethecaller/runs").expanduser()  # worktrees + logs; in_runs() sessions never feed the router
 SETTINGS = {"permission": "worktree", "allow_extra_usage": False, "auto_resume": True, "max_run_tokens": None}
 DIFF_MAX = 65536
 PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
@@ -73,6 +83,13 @@ where owner = %s and status = 'quota' and auto_resume and quota_resets_at <= now
 
 def _j(v):
     return None if v is None else Jsonb(v)
+
+
+def in_runs(cwd: str | None) -> bool:
+    """A run's own claude session: cwd inside any home's ~/.claudethecaller/runs/ (a teammate's too, when their hooks
+    reach a shared daemon; matched by name, so a symlinked home also counts). It never feeds the router: no
+    suggestion, decision, session, event or extract (PLAN.md m5 decision 9)."""
+    return f"/{RUNS.parent.name}/{RUNS.name}/" in f"{cwd or ''}/"
 
 
 def usage_tokens(usage: dict | None) -> dict[str, int]:
@@ -159,7 +176,7 @@ async def claim(st, run_id: int | None = None) -> dict | None:
             " and not exists (select 1 from wf_runs where id = %(id)s and quota_resets_at <= now())", {"o": o, "id": rid}):
         await _set(st, rid, status="quota", quota_resets_at=resets, error=f"usage limit: waiting for the reset at {resets.isoformat()}")
         return None
-    pre = await preflight()
+    pre = await preflight((run["graph"].get("settings") or {}).get("permission") == "container")  # in the image too
     _owner = pre["email"] or _owner
     cols = {"auth": Jsonb({k: pre[k] for k in ("authMethod", "email", "claude_version")})}
     err = pre["error"] or (None if pre["email"] == o else f"claude is logged in as {pre['email']}; this run belongs to {o}")
@@ -178,13 +195,13 @@ async def claim(st, run_id: int | None = None) -> dict | None:
     return run | cols
 
 
-async def _save(st, step: dict | None, skipped: list[tuple], run: dict) -> bool:
-    """One transaction: the step's outcome, newly skipped nodes, and the run's walker state, tokens and end.
-    False when the run is no longer `running` (cancel() got there first): the step is recorded `cancelled`."""
+async def _save(st, steps: list[dict], skipped: list[tuple], run: dict) -> bool:
+    """One transaction: a batch's step outcomes, newly skipped nodes, and the run's walker state, tokens and end.
+    False when the run is no longer `running` (cancel() got there first): the steps are recorded `cancelled`."""
     async def go(conn):
         async with conn.transaction():
             ok = await (await conn.execute(RUN_SQL, run)).fetchone() is not None
-            if step:
+            for step in steps:
                 await conn.execute(DONE_SQL, step if ok else step | {"status": "cancelled"})
             if ok and skipped:
                 async with conn.cursor() as cur:
@@ -238,13 +255,14 @@ async def _spawn(node: dict, text: str, argv: list[str] | None, ctx: dict, wt: s
         return {"status": "done", "output": {"value": eval_if(node, ctx)}}
     if node["type"] == "approval":  # nothing runs: the run waits off the lane for approve()
         return {"status": "waiting"}
-    pre = (await git(wt, "rev-parse", "HEAD")).strip()
     timeout = node.get("timeout_s") or 1800
     if argv:
-        res = await run_agent(argv, text, wt, str(log_path), timeout, env, bool(s["allow_extra_usage"]))
+        res = await run_agent(argv, text, wt, str(log_path), timeout, env, bool(s["allow_extra_usage"]),
+                              f"ctc-run-{env['CTC_RUN']}-{node['id']}-{node['visit']}" if s["permission"] == "container" else None)
     else:
         res = await run_shell(text, wt, timeout, env)
-    async with LOCK:
+    async with LOCK:  # pre read here too: a batch sibling may have committed while this node ran
+        pre = (await git(wt, "rev-parse", "HEAD")).strip()
         await git(wt, "add", "-A")
         await git(wt, "commit", "-q", "--allow-empty", "-m", f"ctc: {node['id']}#{node['visit']}")
         post = (await git(wt, "rev-parse", "HEAD")).strip()
@@ -255,7 +273,9 @@ async def _spawn(node: dict, text: str, argv: list[str] | None, ctx: dict, wt: s
 async def execute(st, run: dict) -> None:
     """Walk a claimed run to its end (done, failed, cancelled from outside by cancel()) or to a pause off the lane
     (quota, waiting). A resumed run walks on from its saved state, its done nodes' outputs read back for templates.
-    ponytail: one node at a time (M1); ready readonly nodes run together under asyncio.gather in M3 (rule 7)."""
+    Rule 7: a batch is every ready readonly node, run together under asyncio.gather, else the first ready writer alone.
+    ponytail: a batch is saved when its slowest node ends, and a failing node's siblings run on to their own end;
+    save each node as it lands (and stop the siblings) if long readonly agents make that costly."""
     rid, g, wst, wt = run["id"], run["graph"], run["state"], run["worktree"]
     s = SETTINGS | (g.get("settings") or {})
     nodes = {n["id"]: (g.get("defaults") or {}) | n for n in g["nodes"]}
@@ -268,61 +288,78 @@ async def execute(st, run: dict) -> None:
         new, seen = wst["skipped"][seen:], len(wst["skipped"])
         return [(rid, n, wst["visits"][n], nodes[n]["type"]) for n in new]
 
+    async def spawn(node: dict, text: str, argv: list[str] | None, log_path: Path | None) -> dict:
+        if node["type"] == "merge":  # its inputs are the data tokens in its inbox, which complete() clears
+            return {"status": "done", "output": merge_output(g, wst, node["id"], ctx)}
+        return await _spawn(node, text, argv, ctx, wt, log_path, env, s)
+
     try:
         for row in await st.store.fetch("select node_id, output, session_id from wf_steps where run_id = %s"
                                         " and status in ('done', 'failed') and output is not null order by id", (rid,)):
             ctx[row["node_id"]], sessions[row["node_id"]] = row["output"], row["session_id"]
         if not (r := ready(g, wst)):  # approved with nothing left to run: what quiescence skipped, then done
-            await _save(st, None, skips(), {"rid": rid, "state": Jsonb(wst), "tokens": 0, "end": "done", "err": None,
-                                            "resets": None, "pr": None})
+            await _save(st, [], skips(), {"rid": rid, "state": Jsonb(wst), "tokens": 0, "end": "done", "err": None,
+                                          "resets": None, "pr": None})
             return
         while r:
-            nid = r[0]
-            if s["max_run_tokens"] and total >= s["max_run_tokens"]:  # checked before a node, so finished work is never failed
-                await _fail(st, [rid], f"max_run_tokens reached before {nid}: {total} >= {s['max_run_tokens']}")
+            b = batch(g, r)
+            if s["max_run_tokens"] and total >= s["max_run_tokens"]:  # checked before a batch, so finished work is never failed
+                await _fail(st, [rid], f"max_run_tokens reached before {', '.join(b)}: {total} >= {s['max_run_tokens']}")
                 return
-            node = nodes[nid] | {"visit": wst["visits"].get(nid, 0) + 1}
-            log_path = RUNS / str(rid) / f"{nid}-{node['visit']}.jsonl" if node["type"] == "agent" else None
-            text, argv = _input(node, ctx, sessions.get(node.get("resume_from")))
-            row = await st.store.fetchrow(STEP_SQL, {"rid": rid, "nid": nid, "visit": node["visit"], "kind": node["type"],
-                                                     "input": text, "log": str(log_path) if log_path else None})
-            if not row:
-                if await st.store.fetchval("select status from wf_runs where id = %s", (rid,)) == "running":
-                    raise RuntimeError(f"step {nid}#{node['visit']} already exists")
-                return  # cancelled between two nodes
-            sid = row["id"]
-            if argv and row["session_id"]:  # WB9: this visit stopped at a usage limit; go on in its own session
-                argv, text = agent_argv(node, ctx, None, resume=row["session_id"])[0], CONTINUE
-                await asyncio.to_thread(_reopen, log_path, argv)
-            # ponytail: a cancel landing between the row insert and the spawn misses this node's process; it runs to its end
-            res = await _spawn(node, text, argv, ctx, wt, log_path, env, s)
-            tok = fresh_tokens(res.get("usage"))
+            jobs = []  # (step id, node, input text, argv, log path): every row is inserted `running` before any spawn
+            for nid in b:
+                node = nodes[nid] | {"visit": wst["visits"].get(nid, 0) + 1}
+                log_path = RUNS / str(rid) / f"{nid}-{node['visit']}.jsonl" if node["type"] == "agent" else None
+                text, argv = _input(node, ctx, sessions.get(node.get("resume_from")))
+                row = await st.store.fetchrow(STEP_SQL, {"rid": rid, "nid": nid, "visit": node["visit"], "kind": node["type"],
+                                                         "input": text, "log": str(log_path) if log_path else None})
+                if not row:
+                    if await st.store.fetchval("select status from wf_runs where id = %s", (rid,)) == "running":
+                        raise RuntimeError(f"step {nid}#{node['visit']} already exists")
+                    return  # cancelled between two batches; cancel() also marked this batch's earlier rows
+                if argv and row["session_id"]:  # WB9: this visit stopped at a usage limit; go on in its own session
+                    argv, text = agent_argv(node, ctx, None, resume=row["session_id"])[0], CONTINUE
+                    await asyncio.to_thread(_reopen, log_path, argv)
+                jobs.append((row["id"], node, text, argv, log_path))
+            # ponytail: a cancel landing between the row inserts and the spawns misses these processes; they run to their end
+            ress = await asyncio.gather(*(spawn(*j[1:]) for j in jobs), return_exceptions=True)
+            if exc := next((x for x in ress if isinstance(x, BaseException)), None):
+                raise exc  # after every sibling ended, so none is left running past the run's failure
+            steps, tok, end, err, resets, pr, stops = [], 0, None, None, None, None, []
+            for (sid, node, _, _, _), res in zip(jobs, ress):
+                nid, out = node["id"], res.get("output")
+                tok += fresh_tokens(res.get("usage"))
+                if res["status"] == "done" or (res["status"] == "failed" and out and node.get("on_error") == "continue"):
+                    ctx[nid], sessions[nid] = out, res.get("session_id")
+                    err = err or complete(g, wst, nid, out)  # a loop over its max_visits fails the run
+                elif res["status"] == "waiting":  # an approval (always alone): the run leaves the lane until approve()
+                    end = "waiting"
+                else:  # failed, timeout, quota (usage limit or extra usage): the run stops after this batch
+                    stops.append((nid, res))
+                if node["type"] == "shell" and (m := PR_URL.search(out["stdout_tail"])):
+                    pr = m.group(0)
+                steps.append({"sid": sid, "status": res["status"], "output": _j(out), "error": res.get("error"),
+                              "session_id": res.get("session_id"), "num_turns": res.get("num_turns"),
+                              "usage": _j(res.get("usage")), "cost_usd": res.get("cost_usd"),
+                              "permission_denials": _j(res.get("permission_denials")), "overage": res.get("overage"),
+                              "pre": res.get("pre_sha"), "post": res.get("post_sha"), "files": _j(res.get("files")),
+                              "diff": res.get("diff")})
             total += tok
-            end = err = None
-            out = res.get("output")
-            if res["status"] == "done" or (res["status"] == "failed" and out and node.get("on_error") == "continue"):
-                ctx[nid], sessions[nid] = out, res.get("session_id")
-                err = complete(g, wst, nid, out)  # a loop over its max_visits fails the run
-                r = [] if err else ready(g, wst)
-                end = "failed" if err else None if r else "done"
-            elif res["status"] == "waiting":  # an approval: the run leaves the lane until approve()
-                r, end = [], "waiting"
-            else:  # failed, timeout, quota (usage limit or extra usage): the run stops here
-                r = []
-                end = "quota" if res["status"] == "quota" else "failed"
-                err = res.get("error") if end == "quota" else f"{nid}: {res.get('error') or res['status']}"
-            pr = m.group(0) if node["type"] == "shell" and (m := PR_URL.search(out["stdout_tail"])) else None
-            saved = await _save(
-                st,
-                {"sid": sid, "status": res["status"], "output": _j(out), "error": res.get("error"),
-                 "session_id": res.get("session_id"), "num_turns": res.get("num_turns"), "usage": _j(res.get("usage")),
-                 "cost_usd": res.get("cost_usd"), "permission_denials": _j(res.get("permission_denials")),
-                 "overage": res.get("overage"), "pre": res.get("pre_sha"), "post": res.get("post_sha"),
-                 "files": _j(res.get("files")), "diff": res.get("diff")},
-                skips(),
-                {"rid": rid, "state": Jsonb(wst), "tokens": tok, "end": end, "err": err, "resets": res.get("resets_at"), "pr": pr})
-            if log_path and log_path.exists():
-                await asyncio.to_thread(_gzip, log_path)
+            fails = [f"{nid}: {res.get('error') or res['status']}" for nid, res in stops if res["status"] != "quota"]
+            quota = next((res for _, res in stops if res["status"] == "quota"), None)
+            r = []
+            if err or fails:  # a failure wins over a sibling's usage limit; the batch's done siblings stay done
+                end, err = "failed", err or fails[0]
+            elif quota:  # continue re-claims just the quota node: its done siblings were completed above
+                end, err, resets = "quota", quota.get("error"), quota.get("resets_at")
+            elif not end:
+                r = ready(g, wst)
+                end = None if r else "done"
+            saved = await _save(st, steps, skips(), {"rid": rid, "state": Jsonb(wst), "tokens": tok, "end": end,
+                                                     "err": err, "resets": resets, "pr": pr})
+            for _, _, _, _, log_path in jobs:
+                if log_path and log_path.exists():
+                    await asyncio.to_thread(_gzip, log_path)
             if not saved:
                 return
     except Exception as e:  # git, DB, a broken snapshot: fail it, never retry. CancelledError (shutdown) goes to sweep()
@@ -341,7 +378,7 @@ async def kill_run(rid: int) -> None:
         except OSError:  # exited meanwhile, or another user's process
             pass
     groups.discard(os.getpgrp())
-    await asyncio.gather(*(stop(pg) for pg in groups))
+    await asyncio.gather(*(stop(pg) for pg in groups), kill_containers(f"ctc-run-{rid}-"))  # + container-mode nodes
 
 
 async def cancel(st, rid: int, owner: str) -> None:
@@ -404,7 +441,7 @@ async def sweep(st, error: str = "daemon stopped mid-run") -> None:
 async def run_runner(st) -> None:
     """Daemon task (local mode): sweep() what a dead daemon left, then walk queued runs one at a time. submit(),
     approve() and resume() wake it; a 30 s poll catches runs queued by another process and quota runs whose usage
-    window reset (REQUEUE_SQL)."""
+    window reset (REQUEUE_SQL), and fires due schedules (ctc.runner.schedule.tick)."""
     while True:
         try:
             await sweep(st)
@@ -413,14 +450,16 @@ async def run_runner(st) -> None:
             log.exception("runner: startup sweep failed; retrying in 30 s")
             await asyncio.sleep(30)
     while True:
+        wait = 30.0
         try:
             await st.store.execute(REQUEUE_SQL, (await owner(),))
+            wait = await tick(st, await owner())  # WB12: fire due schedules; wake just after the next cron slot
             while run := await claim(st):
                 await execute(st, run)
         except Exception:
             log.exception("runner: claim failed")
         with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(WAKE.wait(), 30)
+            await asyncio.wait_for(WAKE.wait(), wait)
         WAKE.clear()
 
 

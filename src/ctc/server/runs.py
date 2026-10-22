@@ -1,5 +1,5 @@
 """/api workflow runs (PLAN.md m5 "API"): start, list, detail, step log + diff, run diff, compare, cancel, approve,
-continue.
+continue; schedules.
 
 Local mode only, and scoped to this machine's claude login (`claude auth status` email = wf_runs.owner).
 """
@@ -9,16 +9,19 @@ from __future__ import annotations
 import asyncio
 import gzip
 import hashlib
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Query, Request
 
-from ctc.runner import engine
+from ctc.runner import engine, schedule
+from ctc.runner.export import to_js
 from ctc.runner.graph import load
 from ctc.server.api import ctx, fail
-from ctc.server.library import _cap_root, _known, _local_only, check_graph
+from ctc.server.library import _cap_root, _inside, _known, _local_only, check_graph
 from ctc.server.schemas import (
     Diff,
+    Ok,
     Run,
     RunApprove,
     RunContinue,
@@ -27,7 +30,10 @@ from ctc.server.schemas import (
     RunStart,
     RunStatus,
     RunTrigger,
+    Schedule,
+    ScheduleSet,
     StepLog,
+    WorkflowExport,
 )
 
 router = APIRouter(prefix="/api")
@@ -43,7 +49,11 @@ STEP_COLS = """s.id, s.node_id, s.visit, s.kind, s.status, s.input, s.output, s.
 
 
 async def _scope(request: Request) -> tuple:
-    st, u = ctx(request)
+    return await scope(*ctx(request))
+
+
+async def scope(st, u: str) -> tuple:
+    """(st, u, owner) for the run endpoints and the MCP run tools: local mode only, this machine's claude login."""
     _local_only(st, "workflow runs only work")
     return st, u, await engine.owner() or fail(409, "not_logged_in", "claude auth status shows no login: run claude and log in")
 
@@ -63,6 +73,12 @@ async def _step(st, o: str, rid: int, sid: int) -> dict:
 @router.post("/workflows/{cap_id}/runs", response_model=RunRef, status_code=202)
 async def start_run(cap_id: str, b: RunStart, request: Request):
     st, u, o = await _scope(request)
+    return {"run_id": await submit_run(st, u, o, cap_id, b.input, b.project, b.trigger)}
+
+
+async def submit_run(st, u: str, o: str, cap_id: str, text: str = "", project: str | None = None, trigger: str = "api") -> int:
+    """Queue a run of the workflow file as it is now (POST /runs, schedules, MCP run_workflow); 422 invalid_graph /
+    project_required."""
     c = _known(st, cap_id)
     if c["kind"] != "workflow":
         fail(422, "invalid", f"{cap_id} is a {c['kind']}, not a workflow")
@@ -73,11 +89,38 @@ async def start_run(cap_id: str, b: RunStart, request: Request):
     check_graph(g)
     if c["namespace"].startswith("project@"):  # a project's workflow runs in that project (its file is in its git)
         repo, pid = _cap_root(st, c).parent, c["namespace"].removeprefix("project@")
-    elif b.project and (p := await st.store.fetchrow("select id, path from projects where user_id = %s and name = %s", (u, b.project))):
+    elif project and (p := await st.store.fetchrow("select id, path from projects where user_id = %s and name = %s", (u, project))):
         repo, pid = p["path"], p["id"]
     else:
         fail(422, "project_required", "a user or plugin workflow needs a project to run in: pass project (its name)")
-    return {"run_id": await engine.submit(st, o, cap_id, g, sha, str(repo), pid, b.trigger, b.input)}
+    return await engine.submit(st, o, cap_id, g, sha, str(repo), pid, trigger, text)
+
+
+@router.put("/workflows/{cap_id}/schedule", response_model=Schedule)
+async def set_schedule(cap_id: str, b: ScheduleSet, request: Request):
+    """This login's cron for a project workflow (it runs in that project); the runner fires it (trigger `schedule`)
+    and holds a fire while you work (ctc.runner.schedule)."""
+    st, _, o = await _scope(request)
+    c = _known(st, cap_id)
+    if c["kind"] != "workflow" or not c["namespace"].startswith("project@"):
+        fail(422, "project_required", f"{cap_id} is not a project's workflow: only those can be scheduled")
+    if not schedule.valid(b.cron):
+        fail(422, "bad_cron", f"{b.cron!r} is not a cron: 5 fields, min hour dom mon dow")
+    r = await st.store.fetchrow(
+        "insert into wf_schedules (owner, workflow, cron, input, enabled) values (%s, %s, %s, %s, %s)"
+        " on conflict (owner, workflow) do update set cron = excluded.cron, input = excluded.input, enabled = excluded.enabled"
+        " returning *", (o, cap_id, b.cron, b.input, b.enabled))
+    schedule.ARMED[(o, cap_id)] = datetime.now(UTC)  # slots before this save never fire
+    engine.WAKE.set()  # the runner loop re-reads schedules and wakes at the next slot
+    return schedule.view(r, o)
+
+
+@router.delete("/workflows/{cap_id}/schedule", response_model=Ok)
+async def delete_schedule(cap_id: str, request: Request):
+    st, _, o = await _scope(request)
+    await st.store.execute("delete from wf_schedules where owner = %s and workflow = %s", (o, cap_id))
+    schedule.ARMED.pop((o, cap_id), None)
+    return Ok()
 
 
 @router.get("/runs", response_model=list[Run])
@@ -194,3 +237,33 @@ async def continue_run(rid: int, b: RunContinue, request: Request):
     if not await engine.resume(st, rid, o, b.when == "now"):
         fail(409, "not_quota", f"run {rid} is not stopped at a usage limit")
     return await _run(st, u, o, rid)
+
+
+@router.post("/workflows/{cap_id}/export", response_model=WorkflowExport)
+async def export_workflow(cap_id: str, request: Request):
+    """Write the workflow as a Claude Code workflow script, <root>/.claude/workflows/<name>.js (ctc.runner.export):
+    422 has_approval (a native run can't pause for a sign-off), 409 conflict when a different file is already there."""
+    st, _ = ctx(request)
+    _local_only(st, "workflows can only be exported")
+    c = _known(st, cap_id)
+    if c["kind"] != "workflow":
+        fail(422, "invalid", f"{cap_id} is a {c['kind']}, not a workflow")
+    try:
+        g = load(c["path"])
+    except OSError:
+        fail(404, "not_found", f"{c['path']} is gone; reindex")
+    check_graph(g)
+    if gate := next((n["id"] for n in g["nodes"] if n.get("type") == "approval"), None):
+        fail(422, "has_approval", f"{gate} is an approval node: a native workflow can't pause for a sign-off")
+    try:
+        js = to_js(g, c["name"], g.get("description") or c["description"] or "")
+    except ValueError as e:
+        fail(422, "not_exportable", str(e))
+    root = _cap_root(st, c)
+    path = root / "workflows" / f"{c['name']}.js"
+    _inside(path, root)
+    if path.exists() and path.read_text() != js:
+        fail(409, "conflict", f"{path} already exists and differs: delete or rename it, then export again")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(js)
+    return {"path": str(path)}

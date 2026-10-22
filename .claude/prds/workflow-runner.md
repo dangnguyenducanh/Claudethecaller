@@ -99,10 +99,10 @@ We'll know we're right when:
 |---|---|---|---|---|
 | 1 | Run a chain | Build an Agent → Shell → IF workflow, press Run. It runs on your login on its own branch. History shows each node's output, diff, tokens and session. | code done (2026-10-22), committed on `m5-runner-core`; WH2 + PR open | `m5-runner-core` |
 | 2 | Loops, approval, continue, compare | Fix → retest loops; pause for Approve before push or PR; continue after a quota hit; compare two runs. | code done (2026-10-22) | `m5-runner-loops` |
-| 3 | Parallel and merge | Fan out (for example, three reviewers) and join. | pending | `m5-runner-parallel` |
-| 4 | Hands-free triggers | Schedule on the canvas (waits while you work); start from a Claude chat. | pending | `m5-runner-triggers` |
-| 5 | Team runs | Teammates run repo workflows on their own logins; history storage pending. | pending | `m5-runner-team` |
-| 6 | Modes and export | Container mode with full bypass; export to native `.claude/workflows/*.js`. | pending | `m5-runner-modes` |
+| 3 | Parallel and merge | Fan out (for example, three reviewers) and join. | code done (2026-10-22) | `m5-runner-parallel` |
+| 4 | Hands-free triggers | Schedule on the canvas (waits while you work); start from a Claude chat. | code done (2026-10-22) | `m5-runner-triggers` |
+| 5 | Team runs | Teammates run repo workflows on their own logins; history storage pending. | code done (2026-10-22), WH4 pending | `m5-runner-team` |
+| 6 | Modes and export | Container mode with full bypass; export to native `.claude/workflows/*.js`. | code done (2026-10-22) | `m5-runner-modes` |
 
 **Milestone 1 progress (2026-10-22)**
 - **Built** (committed on `m5-runner-core`, cut from `b9-history-import`):

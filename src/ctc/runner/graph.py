@@ -1,10 +1,11 @@
 """Workflow walker (PLAN.md m5 "Walker rules"): pure functions over a graph dict and a JSON-able state dict, no I/O.
 
-Graph = {nodes: [{id, type, pos, ...}], edges: [{from, to, handle?}]}. M2 subset: trigger|agent|shell|if|approval and
-loops (back-edges, rule 5), one node at a time.
+Graph = {nodes: [{id, type, pos, ...}], edges: [{from, to, handle?}]}. Types: trigger|agent|shell|if|approval|merge,
+loops (back-edges, rule 5), ready readonly nodes in one batch (rule 7).
 State (wf_runs.state, `{}` = not started): {inbox: {node: {"<edge#>": "data"|"skip"}}, deferred: [edge#], ready: [node],
 visits: {node: n}, execs: n, skipped: [node]}; edge# is the edge's index in graph["edges"]. visits counts runs and skips.
-Engine loop: `while (r := ready(g, st)): run r[0] (visit = visits.get(id, 0) + 1); complete(g, st, r[0], output)`;
+Engine loop: `while (r := ready(g, st)): run batch(g, r) together (visit = visits.get(id, 0) + 1; a merge's output is
+merge_output() before its complete()), then complete(g, st, id, output) for each`;
 complete() returns the run's error when a loop passes its cap; a node that lands in `skipped` gets a skipped step row
 (visit = visits[id]).
 """
@@ -18,8 +19,7 @@ from pathlib import Path
 
 import yaml
 
-TYPES = {"trigger", "agent", "shell", "if", "approval"}
-LATER = {"merge": "M3"}
+TYPES = {"trigger", "agent", "shell", "if", "approval", "merge"}
 OPS = {"eq", "ne", "contains", "truthy"}
 PERMS = (None, "acceptEdits", "dontAsk", "plan")  # never bypassPermissions/auto on the host (Permissions decision)
 PUSH = re.compile(r"\b(git\s+push|gh\s+pr\s+(create|merge))\b")
@@ -96,7 +96,7 @@ def _open_quote(prefix: str) -> bool:
 
 
 def validate(g: dict) -> list[dict]:
-    """Rules 1 and 6 (merge still M3): [{message, node_id}], empty when the graph can run."""
+    """Rules 1 and 6: [{message, node_id}], empty when the graph can run."""
     errs: list[dict] = []
 
     def err(message, node_id=None):
@@ -107,15 +107,15 @@ def validate(g: dict) -> list[dict]:
     triggers = [n.get("id") for n in g["nodes"] if n.get("type") == "trigger"]
     if len(triggers) != 1:
         err(f"a workflow needs exactly one trigger, found {len(triggers)}", triggers[1] if len(triggers) > 1 else None)
+    if (g.get("settings") or {}).get("permission", "worktree") not in ("worktree", "container"):
+        err("settings.permission must be worktree or container")
     for n in g["nodes"]:
         nid, t = n.get("id"), n.get("type")
         if not isinstance(nid, str) or not SLUG.fullmatch(nid) or nid in ROOTS:
             err(f"bad node id {nid!r}: use letters, digits, - or _ (not input/run)", nid)
         elif ids.count(nid) > 1:
             err(f"duplicate node id {nid}", nid)
-        if t in LATER:
-            err(f"{t} nodes arrive in {LATER[t]}", nid)
-        elif t not in TYPES:
+        if t not in TYPES:
             err(f"unknown node type {t!r}", nid)
         if t == "agent" and not (n.get("prompt") or n.get("cap")):
             err("an agent node needs a prompt or a cap", nid)
@@ -175,6 +175,21 @@ def ready(g: dict, st: dict) -> list[str]:
             if i not in back:
                 _send(g, st, i, "skip", back)
     return list(st["ready"])
+
+
+def batch(g: dict, r: list[str]) -> list[str]:
+    """Rule 7: which of the ready nodes r run together: every readonly agent or shell node, else only the first by id
+    (a writer, IF, merge, approval or trigger runs alone)."""
+    byid = {n["id"]: n for n in g["nodes"]}
+    return sorted(n for n in r if byid[n]["type"] in ("agent", "shell") and byid[n].get("readonly")) or [min(r)]
+
+
+def merge_output(g: dict, st: dict, node_id: str, ctx: dict) -> dict:
+    """A ready merge's output, {inputs: {node_id: output}} over its data in-edges (ctx = finished nodes' outputs).
+    Call it before complete(), which clears the merge's inbox."""
+    box = st["inbox"].get(node_id, {})
+    srcs = [g["edges"][int(i)]["from"] for i in sorted(box, key=int) if box[i] == "data"]
+    return {"inputs": {n: ctx.get(n) for n in srcs}}
 
 
 def complete(g: dict, st: dict, node_id: str, output: dict | None) -> str | None:
@@ -300,19 +315,26 @@ if __name__ == "__main__":
             {"from": "blame", "to": "note"},
         ],
     }
-    def walk(g: dict, code) -> tuple[list, dict, str | None]:
-        """The engine loop without I/O: (nodes run in order, final state, run error); code(node_id) = a shell's exit."""
-        st, ctx, ran = {}, {"input": "go", "run": {"branch": "ctc/demo-1"}}, []
+    def walk(g: dict, code, ctx: dict | None = None, batches: list | None = None) -> tuple[list, dict, str | None]:
+        """The engine loop without I/O: (nodes run in order, final state, run error); code(node_id) = a shell's exit.
+        Pass ctx / batches to read the outputs / the batches that ran together afterwards."""
+        st, ran = {}, []
+        ctx = {"input": "go", "run": {"branch": "ctc/demo-1"}} if ctx is None else ctx
         while r := ready(g, st):
-            node = next(n for n in g["nodes"] if n["id"] == r[0])
-            out = {"trigger": {"input": "go"}, "agent": {"result": "ok"}, "approval": {"approved": True, "note": None},
-                   "shell": {"exit_code": code(node["id"])} if node["type"] == "shell" else None}.get(node["type"])
-            out = {"value": eval_if(node, ctx)} if node["type"] == "if" else out
-            ctx[node["id"]] = out
-            ran.append(node["id"])
-            if e := complete(g, st, node["id"], out):
-                return ran, st, e
-            st = json.loads(json.dumps(st))  # the engine checkpoints state to Postgres after every node
+            b = batch(g, r)
+            batches is not None and batches.append(b)
+            for nid in b:  # the whole batch runs before any of it completes, as in the engine
+                node = next(n for n in g["nodes"] if n["id"] == nid)
+                out = {"trigger": {"input": "go"}, "agent": {"result": "ok"}, "approval": {"approved": True, "note": None},
+                       "shell": {"exit_code": code(nid), "stdout_tail": nid} if node["type"] == "shell" else None,
+                       "if": {"value": eval_if(node, ctx)} if node["type"] == "if" else None,
+                       "merge": merge_output(g, st, nid, ctx) if node["type"] == "merge" else None}[node["type"]]
+                ctx[nid] = out
+            for nid in b:
+                ran.append(nid)
+                if e := complete(g, st, nid, ctx[nid]):
+                    return ran, st, e
+            st = json.loads(json.dumps(st))  # the engine checkpoints state to Postgres after every batch
         return ran, st, None
 
     g = load(good)
@@ -339,7 +361,9 @@ if __name__ == "__main__":
         {"from": "gate", "to": "pr"},
     ]})
     assert back_edges(fix_tests) == {5} and loop_body(fix_tests, 5, {5}) == {"test", "green", "fix"}
-    assert [e["message"] for e in validate(fix_tests)] == ["merge nodes arrive in M3"], validate(fix_tests)  # push gated
+    assert validate(fix_tests) == [], validate(fix_tests)  # push gated
+    assert batch(fix_tests, ["test", "review-b", "fix", "review-a"]) == ["review-a", "review-b"]  # rule 7: readonly first
+    assert batch(fix_tests, ["test", "fix"]) == ["fix"]  # no readonly node ready: the first writer by id, alone
     results = iter([1, 1, 0])  # red, red, green
     ran, st, e = walk(fix_tests, lambda n: next(results) if n == "test" else 0)
     assert e is None and ran == ["start", *["test", "green", "fix"] * 2, "test", "green", "review-a", "review-b", "join",
@@ -360,7 +384,7 @@ if __name__ == "__main__":
         return " | ".join(e["message"] for e in validate(load(g2)))
 
     no_gate = bad_ft(lambda x: (x["nodes"].pop(7), x["edges"].pop(), x["edges"][8].update(to="pr")))  # join -> pr
-    assert no_gate == "merge nodes arrive in M3 | git push / gh pr create|merge must sit behind an approval node", no_gate
+    assert no_gate == "git push / gh pr create|merge must sit behind an approval node", no_gate
     assert "no merge node inside a loop (join -> test)" in bad_ft(lambda x: x["edges"].append({"from": "join", "to": "test"}))
     assert "no approval node inside a loop" in bad_ft(lambda x: x["edges"][5].update(to="gate") or x["edges"].append(
         {"from": "gate", "to": "test"}))  # fix -> gate -> test: an approval in the loop body
@@ -368,8 +392,12 @@ if __name__ == "__main__":
     assert "max_visits" in bad_ft(lambda x: x["nodes"][1].update(max_visits="3"))
     assert "nobody.x names no node" in bad_ft(lambda x: x["nodes"][7].update(message="Push {{nobody.x}}?"))  # approval message
     root = Path(__file__).resolve().parents[3] / ".claude" / "ctc-workflows"
-    for name in ("loop-demo", "gate", "smoke"):
+    for name in ("loop-demo", "gate", "smoke", "three-reviewers"):
         assert validate(load(root / f"{name}.yaml")) == [], (name, validate(load(root / f"{name}.yaml")))
+    ctx3, b3 = {"input": "", "run": {"branch": "ctc/three-1"}}, []
+    ran, _, e = walk(load(root / "three-reviewers.yaml"), lambda _: 0, ctx3, b3)
+    assert e is None and b3 == [["start"], ["r1", "r2", "r3"], ["join"], ["merged"]], b3  # the 3 shells run together
+    assert ctx3["join"] == {"inputs": {n: {"exit_code": 0, "stdout_tail": n} for n in ("r1", "r2", "r3")}}, ctx3["join"]
     assert "approval" in validate(load(root / "bad-push.yaml"))[0]["message"]
     checks = iter([1, 1, 0])  # loop-demo: the counter reaches 3 on its third visit
     ran, st, e = walk(load(root / "loop-demo.yaml"), lambda n: next(checks) if n == "check" else 0)
@@ -386,13 +414,29 @@ if __name__ == "__main__":
     assert "approval" in bad(lambda x: x["nodes"][4].update(command="git push -u origin HEAD"))
     assert "approval" in bad(lambda x: x["nodes"][4].update(command="gh  pr create --draft"))
     assert "only an IF may branch" in bad(lambda x: x["edges"].append({"from": "blame", "to": "test"}))
-    assert "merge nodes arrive in M3" in bad(lambda x: x["nodes"].append({"id": "join", "type": "merge"}))
+    # a merge after an IF: ready once both in-edges hold a token (the untaken side's skip arrives at quiescence), and
+    # its output holds only the data inputs; with every input skipped it is skipped too
+    gm = load(copy.deepcopy(good) | {"nodes": good["nodes"] + [{"id": "join", "type": "merge"}],
+                                     "edges": good["edges"] + [{"from": "ship", "to": "join"}, {"from": "note", "to": "join"}]})
+    assert validate(gm) == [], validate(gm)
+    st = {}
+    for n, out in (("start", {}), ("fix", {}), ("test", {"exit_code": 0}), ("green", {"value": True}), ("ship", {})):
+        assert ready(gm, st) == [n], (n, st)
+        complete(gm, st, n, out)
+    assert st["inbox"]["join"] == {"6": "data"} and ready(gm, st) == ["join"] and st["skipped"] == ["blame", "note"], st
+    assert merge_output(gm, st, "join", {"ship": {"exit_code": 0}, "note": None}) == {"inputs": {"ship": {"exit_code": 0}}}
+    ctxm = {"input": "go", "run": {"branch": "b"}}
+    ran, st, e = walk(gm | {"edges": gm["edges"][:-2] + [{"from": "blame", "to": "join"}, {"from": "note", "to": "join"}]},
+                      lambda _: 0, ctxm)  # green: both merge inputs are on the skipped side
+    assert e is None and "join" not in ran and st["skipped"] == ["blame", "note", "join"], (ran, st)
     assert "names no node" in bad(lambda x: x["nodes"][4].update(command="echo {{nobody.result}}"))
     assert "duplicate" in bad(lambda x: x["nodes"].append({"id": "fix", "type": "shell", "command": "true"}))
     assert "unquoted" in bad(lambda x: x["nodes"][4].update(command='echo "it is {{fix.result}}"'))
     assert "unquoted" in bad(lambda x: x["nodes"][4].update(command="gh issue comment 1 --body '{{fix.result}}'"))
     assert bad(lambda x: x["nodes"][4].update(command='echo "it\'s" {{fix.result}}')) == ""
     assert "no bypass" in bad(lambda x: x["nodes"][1].update(permission_mode="bypassPermissions"))
+    assert "worktree or container" in bad(lambda x: x.update(settings={"permission": "host"}))
+    assert bad(lambda x: x.update(settings={"permission": "container"})) == ""
 
     ctx = {"input": "it's", "run": {"branch": "ctc/x-1"}, "fix": {"result": "a b; rm -rf ~", "so": {"k": [1]}}}
     assert render("echo {{fix.result}} {{ nope.x }} {{input}}", ctx, shell=True) == "echo 'a b; rm -rf ~' '' 'it'\"'\"'s'"

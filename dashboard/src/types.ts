@@ -48,6 +48,7 @@ export interface CapabilityDetail extends Capability {
   editable: boolean; vectors: number; cluster_members: string[]; recent_decisions: Decision[]
   steps?: WorkflowStep[] | null // workflows only (null otherwise)
   graph?: Graph | null; settings?: WorkflowSettings | null // workflows only (null otherwise)
+  schedule?: Schedule | null // workflows with a schedule (M4)
 }
 export interface WorkflowStep { cap: string; agent?: string | null } // the daemon reads `agent: null` back
 export interface NewCapability {
@@ -89,8 +90,8 @@ export interface Health { db: Svc; redis: Svc; embedder: Svc; reranker: Svc; llm
 export interface ApiKey { id: number; name: string; created_at: string; revoked_at: string | null; key?: string } // key only on create, shown once
 export interface NewApiKey { name: string }
 
-// Workflow runner, PLAN.md "Workflow runner (m5)" → Workflow file and API. Merge arrives in M3.
-export type NodeType = 'trigger' | 'agent' | 'shell' | 'if' | 'approval'
+// Workflow runner, PLAN.md "Workflow runner (m5)" → Workflow file and API.
+export type NodeType = 'trigger' | 'agent' | 'shell' | 'if' | 'approval' | 'merge' // merge has no fields of its own
 export interface WfNode {
   id: string; type: NodeType; pos: [number, number]; max_visits?: number
   input?: string // trigger
@@ -102,7 +103,8 @@ export interface WfNode {
   message?: string // approval
 }
 export interface Graph { nodes: WfNode[]; edges: { from: string; to: string; handle?: 'true' | 'false' }[]; defaults?: { max_visits?: number } } // a run's snapshot carries `defaults`
-export interface WorkflowSettings { permission: 'worktree'; allow_extra_usage: boolean; auto_resume: boolean; max_run_tokens: number | null }
+export interface WorkflowSettings { permission: 'worktree' | 'container'; allow_extra_usage: boolean; auto_resume: boolean; max_run_tokens: number | null }
+export interface Schedule { cron: string; input: string; enabled: boolean; next_at: string | null; last_fired_at: string | null } // cron in daemon local time
 
 export type RunStatus = 'queued' | 'running' | 'waiting' | 'done' | 'failed' | 'cancelled' | 'quota'
 export type RunTrigger = 'button' | 'cli' | 'api' | 'schedule' | 'mcp'

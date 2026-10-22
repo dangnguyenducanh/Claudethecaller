@@ -2,12 +2,13 @@
 and `bash -c`, each in its own process group so a timeout or cancel stops everything it started.
 
 CTC_CLAUDE_BIN overrides the claude binary (scripts/fake_claude_quota.sh, scripts/fake_claude_overage.sh).
-CLI: `python -m ctc.runner.proc agent "<prompt>" [--model haiku]`, `python -m ctc.runner.proc shell "<cmd>" --timeout N`.
+CLI: `python -m ctc.runner.proc agent "<prompt>" [--model haiku] [--container]`, `python -m ctc.runner.proc shell "<cmd>" --timeout N`.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import pwd
@@ -40,6 +41,38 @@ def child_env() -> dict:
     return env | {"HOME": pwd.getpwuid(os.getuid()).pw_dir, "DISABLE_AUTOUPDATER": "1"}
 
 
+def docker(name: str | None = None, wt: str | None = None, run: str | None = None) -> list[str]:
+    """Container mode (WB15): `docker run` of the pinned ctc-runner image (docker/ctc-runner.Dockerfile) as this user,
+    up to its `claude`, with the worktree mounted at its own host path (so the session's cwd, transcript dir and in_runs()
+    match a host run: never fed to the router, never counted as you being active) and the host's login mounted, so it
+    runs on the user's own claude.ai login. ponytail: git inside sees no repo (the worktree's .git points at the main
+    checkout, not mounted); the runner commits on the host."""
+    home = pwd.getpwuid(os.getuid()).pw_dir
+    return ["docker", "run", "--rm", "-i", *(["--name", name] if name else []), "--user", f"{os.getuid()}:{os.getgid()}",
+            *(["-e", f"CTC_RUN={run}"] if run else []), *(["-v", f"{wt}:{wt}", "-w", wt] if wt else []),
+            "-v", f"{home}/.claude:/home/claude/.claude", "-v", f"{home}/.claude.json:/home/claude/.claude.json",
+            f"ctc-runner:{cfg()['runner']['claude_version']}", "claude"]
+
+
+def in_container(argv: list[str], name: str, wt: str, run: str | None) -> list[str]:
+    """An agent_argv() argv -> the same claude run in the container named `name`. The container is the sandbox, so
+    acceptEdits becomes --dangerously-skip-permissions there (never on the host); dontAsk and plan stay."""
+    i = argv.index("--permission-mode")
+    perm = ["--dangerously-skip-permissions"] if argv[i + 1] == "acceptEdits" else argv[i:i + 2]
+    return [*docker(name, wt, run), *argv[1:i], *perm, *argv[i + 2:]]
+
+
+async def kill_containers(prefix: str) -> None:
+    """docker kill every running container whose name starts with prefix (`ctc-run-<run>-`, dash included): stopping
+    the docker CLI's process group leaves its container running. Touches no other container; no docker = nothing."""
+    try:
+        ps = await _stdout("docker", "ps", "--format", "{{.Names}}", "--filter", f"name={prefix}")
+        if names := [n for n in ps.split() if n.startswith(prefix)]:
+            await _stdout("docker", "kill", *names)
+    except (OSError, TimeoutError):
+        pass
+
+
 async def _stdout(*argv: str) -> str:
     p = await asyncio.create_subprocess_exec(*argv, stdin=DEVNULL, stdout=PIPE, stderr=DEVNULL, env=child_env())
     try:
@@ -49,18 +82,20 @@ async def _stdout(*argv: str) -> str:
         raise
 
 
-async def preflight() -> dict:
-    """`claude auth status` and `claude --version` against config runner.claude_version:
-    {authMethod, email, claude_version, ok, error}."""
+async def preflight(container: bool = False) -> dict:
+    """`claude auth status` and `claude --version` against config runner.claude_version, on the host or (container
+    mode) inside the ctc-runner image: {authMethod, email, claude_version, ok, error}."""
     r = {"authMethod": None, "email": None, "claude_version": None, "ok": False, "error": None}
-    try:
-        st = json.loads(await _stdout(_bin(), "auth", "status", "--json"))
-        r.update(authMethod=st.get("authMethod"), email=st.get("email"),
-                 claude_version=(await _stdout(_bin(), "--version")).split()[0])
-    except (OSError, ValueError, IndexError, AttributeError, TimeoutError) as e:
-        r["error"] = f"claude is not usable: {e!r}"
-        return r
     pin = cfg()["runner"]["claude_version"]
+    cmd = docker() if container else [_bin()]
+    try:
+        st = json.loads(await _stdout(*cmd, "auth", "status", "--json"))
+        r.update(authMethod=st.get("authMethod"), email=st.get("email"),
+                 claude_version=(await _stdout(*cmd, "--version")).split()[0])
+    except (OSError, ValueError, IndexError, AttributeError, TimeoutError) as e:
+        where = f" in ctc-runner:{pin} (docker build it from docker/ctc-runner.Dockerfile)" if container else ""
+        r["error"] = f"claude{where} is not usable: {e!r}"
+        return r
     if not st.get("loggedIn"):
         r["error"] = "claude is not logged in"
     elif r["authMethod"] != "claude.ai":
@@ -170,14 +205,18 @@ async def stop(pgid: int) -> None:
 
 
 async def run_agent(argv: list[str], prompt: str, cwd: str, log_path: str, timeout_s: float = 1800,
-                    env: dict | None = None, allow_extra_usage: bool = False) -> dict:
-    """Run one agent node, appending its stream-json lines to log_path as they come. Returns wf_steps fields:
+                    env: dict | None = None, allow_extra_usage: bool = False, container: str | None = None) -> dict:
+    """Run one agent node, appending its stream-json lines to log_path as they come; with `container` (a name), in
+    that container (in_container). Returns wf_steps fields:
     {status: done|failed|timeout|quota, error, output {result, structured_output, is_error, subtype}, exit_code,
     session_id, num_turns, usage, cost_usd, permission_denials, overage, resets_at}."""
     r = dict.fromkeys(("status", "error", "output", "exit_code", "session_id", "num_turns", "usage", "cost_usd",
                        "permission_denials", "resets_at"))
     r["overage"] = False
-    p = await asyncio.create_subprocess_exec(*argv, cwd=cwd, env=env or child_env(), stdin=PIPE, stdout=PIPE,
+    env = env or child_env()
+    if container:
+        argv = in_container(argv, container, cwd, env.get("CTC_RUN"))
+    p = await asyncio.create_subprocess_exec(*argv, cwd=cwd, env=env, stdin=PIPE, stdout=PIPE,
                                              stderr=PIPE, start_new_session=True, limit=2**26)
     err = asyncio.create_task(_tail(p.stderr))
     try:
@@ -199,6 +238,9 @@ async def run_agent(argv: list[str], prompt: str, cwd: str, log_path: str, timeo
     except TimeoutError:
         r["status"], r["error"] = "timeout", f"no result within {timeout_s} s"
     finally:
+        if container:  # stopping the docker CLI below would leave its container running; gone already = a no-op
+            with contextlib.suppress(OSError, TimeoutError):
+                await _stdout("docker", "kill", container)
         await stop(p.pid)  # an early stop, a timeout, a cancel, or whatever a clean exit left running
     r["exit_code"] = await p.wait()
     stderr = await err
@@ -250,7 +292,13 @@ if __name__ == "__main__":
     ap.add_argument("--model")
     ap.add_argument("--readonly", action="store_true")
     ap.add_argument("--resume", help="session id to fork")
+    ap.add_argument("--container", action="store_true", help="run the agent in the ctc-runner image (container mode)")
     a = ap.parse_args()
+    c = in_container(agent_argv({"prompt": "hi"}, {}, "s")[0], "ctc-run-1-a-1", "/wt", "1")  # self-check: container argv
+    assert "--dangerously-skip-permissions" in c and "--permission-mode" not in c and "/wt:/wt" in c, c
+    assert c[c.index("claude") + 1] == "-p" and c[c.index("--name") + 1] == "ctc-run-1-a-1" and "CTC_RUN=1" in c, c
+    c = in_container(agent_argv({"prompt": "hi", "readonly": True}, {}, "s")[0], "x", "/wt", None)
+    assert c[c.index("--permission-mode") + 1] == "dontAsk" and "--dangerously-skip-permissions" not in c, c
 
     async def main() -> int:
         if a.kind == "shell":
@@ -259,7 +307,7 @@ if __name__ == "__main__":
             print("timeout" if r["status"] == "timeout" else f"exit={o['exit_code']}", f"duration_ms={o['duration_ms']}")
             print(o["stdout_tail"], end="")
             return 0
-        pre = await preflight()
+        pre = await preflight(a.container)
         if not pre["ok"]:
             print(f"authMethod={pre['authMethod']} preflight error: {pre['error']}")
             return 1
@@ -267,7 +315,8 @@ if __name__ == "__main__":
         argv, prompt = agent_argv(node, {}, str(uuid.uuid4()), resume=a.resume)
         fd, log = tempfile.mkstemp(prefix="ctc-agent-", suffix=".jsonl")
         os.close(fd)
-        r = await run_agent(argv, prompt, os.getcwd(), log, a.timeout)
+        r = await run_agent(argv, prompt, os.getcwd(), log, a.timeout,
+                            container=f"ctc-run-cli-{uuid.uuid4().hex[:8]}" if a.container else None)
         if r["status"] == "done":
             print(f"authMethod={pre['authMethod']} result={r['output']['result']} session_id={r['session_id']} "
                   f"turns={r['num_turns']} exit={r['exit_code']}")

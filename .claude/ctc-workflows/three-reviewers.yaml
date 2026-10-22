@@ -1,0 +1,19 @@
+name: three-reviewers
+description: Workflow runner parallel test - three readonly shells sleep 5 s together, a merge collects their outputs (no claude)
+settings: {permission: worktree, allow_extra_usage: false, auto_resume: true, max_run_tokens: null}
+nodes:
+  - {id: start, type: trigger, input: "", pos: [0, 160]}
+  - {id: r1, type: shell, readonly: true, command: "sleep 5; echo r1", timeout_s: 60, pos: [200, 0]}
+  - {id: r2, type: shell, readonly: true, command: "sleep 5; echo r2", timeout_s: 60, pos: [200, 160]}
+  - {id: r3, type: shell, readonly: true, command: "sleep 5; echo r3", timeout_s: 60, pos: [200, 320]}
+  - {id: join, type: merge, pos: [400, 160]}
+  - {id: merged, type: shell, command: "echo merged", timeout_s: 30, pos: [600, 160]}
+edges:
+  - {from: start, to: r1}
+  - {from: start, to: r2}
+  - {from: start, to: r3}
+  - {from: r1, to: join}
+  - {from: r2, to: join}
+  - {from: r3, to: join}
+  - {from: join, to: merged}
+steps: []
