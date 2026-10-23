@@ -1,0 +1,59 @@
+name: site-human
+description: 'Human-built test: a coder builds a basic HTML/CSS site, a shell check
+  confirms it, a reviewer grades it'
+settings: {permission: worktree, allow_extra_usage: false, auto_resume: true, max_run_tokens: null}
+nodes:
+- id: start
+  type: trigger
+  pos: [0, 0]
+- id: coder
+  type: agent
+  pos: [240, 0]
+  prompt: 'Build a basic static website in site/: exactly site/index.html and site/styles.css,
+    no JavaScript, no external assets. Brief: {{input}}. Header with nav, hero with
+    a call-to-action, 3 cards, footer. Semantic HTML5 with lang and viewport meta,
+    link styles.css, responsive CSS with CSS variables and one breakpoint at 640px,
+    visible focus styles. Under 150 lines per file. Reply with one sentence naming
+    the files.'
+  model: sonnet
+  allowed_tools: [Read, Write, Edit, Glob]
+- id: check
+  type: shell
+  pos: [480, 0]
+  command: test -f site/index.html && test -f site/styles.css && grep -q styles.css
+    site/index.html && wc -l site/*
+- id: ok
+  type: if
+  pos: [720, 0]
+  op: eq
+  path: check.exit_code
+  value: 0
+- id: reviewer
+  type: agent
+  pos: [960, 0]
+  prompt: 'Review site/index.html and site/styles.css: valid semantic HTML, accessibility
+    (lang, headings, focus, contrast), responsive layout at 375px and 1280px. Report
+    at most 5 real problems. verdict is pass or fix.'
+  model: sonnet
+  json_schema:
+    type: object
+    properties:
+      verdict:
+        type: string
+        enum: [pass, fix]
+      issues:
+        type: array
+        items: {type: string}
+    required: [verdict, issues]
+  readonly: true
+- id: missing
+  type: shell
+  pos: [992, 254]
+  command: echo 'site files missing'
+edges:
+- {from: start, to: coder}
+- {from: coder, to: check}
+- {from: check, to: ok}
+- {from: ok, to: reviewer, handle: 'true'}
+- {from: ok, to: missing, handle: 'false'}
+steps: []

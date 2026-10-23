@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ctc.decision.bundle import StageRow, Step
 
@@ -113,6 +113,52 @@ class WorkflowStep(BaseModel):
     agent: str | None = None
 
 
+class WfNode(BaseModel):  # node fields: PLAN.md m5 "Workflow file"; ctc.runner.graph.validate checks them
+    model_config = ConfigDict(extra="allow")
+    id: str
+    type: str  # trigger | agent | shell | if | approval (M2)
+    pos: list[int | float] = [0, 0]
+
+
+class WfEdge(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    from_: str = Field(alias="from")
+    to: str
+    handle: str | None = None  # an IF's "true" | "false"
+
+    @field_validator("handle", mode="before")
+    @classmethod
+    def _yaml_bool(cls, v):  # YAML reads `handle: true` as a bool
+        return str(v).lower() if isinstance(v, bool) else v
+
+
+class Graph(BaseModel):
+    model_config = ConfigDict(extra="allow")  # a run's snapshot also carries the file's name, settings, defaults
+    nodes: list[WfNode]
+    edges: list[WfEdge]
+
+
+class WorkflowSettings(BaseModel):
+    permission: Literal["worktree", "container"] = "worktree"  # container: agent nodes run in the ctc-runner image (M6)
+    allow_extra_usage: bool = False
+    auto_resume: bool = True
+    max_run_tokens: int | None = Field(default=None, ge=1)
+
+
+class ScheduleSet(BaseModel):  # PUT /api/workflows/{cap_id}/schedule
+    cron: str  # min hour dom mon dow, daemon local time; 422 bad_cron
+    input: str = ""
+    enabled: bool = True
+
+
+class Schedule(BaseModel):  # GET /api/capabilities/{id} .schedule; PUT …/schedule returns it
+    cron: str
+    input: str
+    enabled: bool
+    next_at: datetime | None  # the next slot (in the past while a fire is held); null when disabled
+    last_fired_at: datetime | None  # the latest slot handled (fired, or skipped while no daemon ran)
+
+
 class Capability(BaseModel):
     id: str
     kind: Kind
@@ -136,6 +182,9 @@ class CapabilityDetail(Capability):
     cluster_members: list[str]
     recent_decisions: list[Decision]
     steps: list[WorkflowStep] | None = None  # workflows only
+    graph: Graph | None = None  # workflows saved with a graph
+    settings: WorkflowSettings | None = None  # workflows only
+    schedule: Schedule | None = None  # workflows with a schedule (local mode, this login's)
 
 
 class NewCapability(BaseModel):
@@ -146,12 +195,16 @@ class NewCapability(BaseModel):
     description: str = Field(min_length=1, max_length=2000)
     body: str | None = None
     steps: list[WorkflowStep] | None = None
+    graph: Graph | None = None  # workflows: replaces steps (they are derived from its agent nodes)
+    settings: WorkflowSettings | None = None
 
 
 class CapabilityPatch(BaseModel):
     description: str | None = Field(default=None, min_length=1, max_length=2000)
     body: str | None = None
     steps: list[WorkflowStep] | None = None
+    graph: Graph | None = None
+    settings: WorkflowSettings | None = None
 
 
 class OverrideSet(BaseModel):
@@ -300,6 +353,99 @@ class ApiKey(BaseModel):
     created_at: datetime
     revoked_at: datetime | None
     key: str | None = None  # only on create, shown once
+
+
+RunStatus = Literal["queued", "running", "waiting", "done", "failed", "cancelled", "quota"]
+RunTrigger = Literal["button", "cli", "api", "schedule", "mcp"]
+
+
+class RunStart(BaseModel):
+    input: str = ""
+    project: str | None = None  # a user or plugin workflow runs in this project (name); a project workflow in its own
+    trigger: RunTrigger = "api"
+
+
+class RunRef(BaseModel):
+    run_id: int
+
+
+class WorkflowExport(BaseModel):  # POST /api/workflows/{cap_id}/export
+    path: str  # the written <root>/.claude/workflows/<name>.js
+
+
+class RunApprove(BaseModel):
+    approve: bool
+    note: str | None = None
+
+
+class RunContinue(BaseModel):
+    when: Literal["now", "reset"]  # now: queued at once; reset: auto_resume, queued once quota_resets_at passes
+
+
+class Run(BaseModel):
+    id: int
+    workflow: str  # cap_id
+    project: str | None
+    status: RunStatus
+    trigger: RunTrigger
+    input: str
+    branch: str | None
+    worktree: str | None
+    pr_url: str | None
+    error: str | None
+    quota_resets_at: datetime | None
+    auto_resume: bool
+    created_at: datetime
+    started_at: datetime | None
+    ended_at: datetime | None
+    tokens: int
+    nodes_done: int  # done or skipped
+    nodes_total: int
+
+
+class DiffFile(BaseModel):  # git numstat; None for binary files
+    path: str
+    added: int | None
+    deleted: int | None
+
+
+class Diff(BaseModel):
+    diff: str  # first 64 KB
+    files: list[DiffFile]
+    truncated: bool
+
+
+class RunStep(BaseModel):  # types.ts `Step` (that name is the router's bundle step here)
+    id: int
+    node_id: str
+    visit: int
+    kind: str
+    status: Literal["running", "waiting", "done", "failed", "timeout", "cancelled", "quota", "skipped"]
+    input: str | None
+    output: dict | None
+    error: str | None
+    session_id: str | None
+    num_turns: int | None
+    tokens: dict[str, int] | None  # usage's *_tokens
+    cost_usd: float | None  # notional on a subscription
+    permission_denials: list | None
+    overage: bool | None
+    files: list[DiffFile] | None
+    started_at: datetime
+    ended_at: datetime | None
+
+
+class RunDetail(Run):
+    graph: Graph
+    file_sha: str
+    auth: dict | None  # {authMethod, email, claude_version}
+    steps: list[RunStep]
+
+
+class StepLog(BaseModel):
+    text: str
+    offset: int  # byte offset to ask for next
+    done: bool
 
 
 Svc = Literal["ok", "down"]

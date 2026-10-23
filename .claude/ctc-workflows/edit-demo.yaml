@@ -1,0 +1,17 @@
+name: edit-demo
+description: Screenshot demo - a shell node writes a file, a second checks it, an IF reports
+settings: {permission: worktree, allow_extra_usage: false, auto_resume: true, max_run_tokens: null}
+nodes:
+  - {id: start, type: trigger, input: "", pos: [0, 160]}
+  - {id: write, type: shell, command: "printf 'hello from ctc\\ninput: %s\\n' {{input}} > hello.txt && cat hello.txt", timeout_s: 30, pos: [220, 160]}
+  - {id: check, type: shell, command: "grep -q hello hello.txt", timeout_s: 30, pos: [440, 160]}
+  - {id: ok, type: if, path: check.exit_code, op: eq, value: 0, pos: [660, 160]}
+  - {id: green, type: shell, command: "echo green", timeout_s: 30, pos: [880, 80]}
+  - {id: red, type: shell, command: "echo red", timeout_s: 30, pos: [880, 240]}
+edges:
+  - {from: start, to: write}
+  - {from: write, to: check}
+  - {from: check, to: ok}
+  - {from: ok, to: green, handle: "true"}
+  - {from: ok, to: red, handle: "false"}
+steps: []

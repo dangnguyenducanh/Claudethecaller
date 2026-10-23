@@ -28,6 +28,7 @@ from ctc.decision.bundle import decide, followed
 from ctc.ingestion.scanner import project_id
 from ctc.memory.longterm import Memory, write_memory
 from ctc.retrieval.hybrid import search
+from ctc.runner.engine import in_runs
 from ctc.server.hooks import MAX_Q
 from ctc.server.jobs import COLS, submit
 
@@ -225,8 +226,8 @@ async def scan(store, user_id: str, claude_home, projects: list[str] | None = No
             if (want and not tags & want) or tags & skip:
                 n["excluded"] += 1
                 continue
-            if not cwd:
-                row.update(status="skipped", error="no cwd in any row")
+            if not cwd or in_runs(cwd):  # a workflow run's own claude never feeds the router (PLAN.md m5 decision 9)
+                row.update(status="skipped", error="a workflow run's own session" if cwd else "no cwd in any row")
             else:
                 p = await asyncio.to_thread(parse, f)
                 pid = project_id(cwd)
@@ -463,6 +464,9 @@ if __name__ == "__main__":
     from ctc.storage.local import doc_text
     from ctc.storage.store import Store
 
+    # in_runs (hooks, scan, backfill): a run's own claude under any home's runs dir, a teammate's too; nothing else
+    assert in_runs("/home/mate/.claudethecaller/runs/7/wt") and in_runs("/Users/x/.claudethecaller/runs")
+    assert not (in_runs("/home/mate/.claudethecaller/runsX/7") or in_runs("/home/mate/proj") or in_runs(""))
     SELF = "ctc_selfcheck_history"
     OWN = "-home-aiface-dangnguyenducanh-claudethecaller"  # this repo's sessions: never the real sample
     DSN = cfg()["database_url"]

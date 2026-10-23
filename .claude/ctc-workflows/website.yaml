@@ -1,0 +1,102 @@
+name: website
+description: 'Build a basic static website (HTML + CSS) from a brief: a coder writes
+  it, a shell check confirms the files, a reviewer grades it, a fixer applies the
+  review'
+settings: {permission: worktree, allow_extra_usage: false, auto_resume: true, max_run_tokens: 600000}
+nodes:
+- id: start
+  type: trigger
+  pos: [0, 200]
+  input: ''
+- id: coder
+  type: agent
+  pos: [220, 200]
+  model: sonnet
+  max_turns: 20
+  timeout_s: 900
+  allowed_tools: [Read, Write, Edit, Glob, 'Bash(ls:*)']
+  prompt: 'You are the coder. Build a basic static website in the folder site/ with
+    exactly two files: site/index.html and site/styles.css. No JavaScript, no frameworks,
+    no external assets or fonts.
+
+    Brief: {{input}}
+
+    Include: a header with the site name and a nav, a hero section with a call-to-action
+    link, a section with 3 feature cards, and a footer. Use semantic HTML5 with a
+    lang attribute and a viewport meta tag, link styles.css, and write responsive
+    CSS (CSS variables for colours, flex or grid, one mobile breakpoint at 640px,
+    visible focus styles, good contrast). Keep it under 150 lines per file. When done,
+    reply with one sentence listing the files you wrote.'
+- id: check
+  type: shell
+  pos: [440, 200]
+  timeout_s: 30
+  command: test -f site/index.html && test -f site/styles.css && grep -q 'styles.css'
+    site/index.html && wc -l site/index.html site/styles.css
+- id: files_ok
+  type: if
+  pos: [660, 200]
+  path: check.exit_code
+  op: eq
+  value: 0
+- id: reviewer
+  type: agent
+  pos: [880, 120]
+  model: sonnet
+  readonly: true
+  max_turns: 10
+  timeout_s: 600
+  prompt: 'You are the code reviewer. Review site/index.html and site/styles.css for:
+    valid semantic HTML, accessibility (lang, alt text, headings order, focus styles,
+    contrast), responsive layout at 375px and 1280px, and CSS quality. Only report
+    real problems a user would notice, at most 5. Set verdict to "fix" if there is
+    at least one issue worth fixing, otherwise "pass".'
+  json_schema:
+    type: object
+    properties:
+      verdict:
+        type: string
+        enum: [pass, fix]
+      issues:
+        type: array
+        items: {type: string}
+    required: [verdict, issues]
+- id: missing
+  type: shell
+  pos: [880, 300]
+  timeout_s: 10
+  command: echo 'site files missing or not linked'
+- id: needs_fix
+  type: if
+  pos: [1100, 120]
+  path: reviewer.structured_output.verdict
+  op: eq
+  value: fix
+- id: fixer
+  type: agent
+  pos: [1320, 40]
+  model: sonnet
+  max_turns: 15
+  timeout_s: 900
+  allowed_tools: [Read, Edit, Write]
+  prompt: 'You are the coder again. Apply these review findings to site/index.html
+    and site/styles.css, changing only what they ask for:
+
+    {{reviewer.structured_output.issues}}
+
+    Reply with one sentence per finding saying what you changed.'
+- id: approved
+  type: shell
+  pos: [1320, 200]
+  timeout_s: 10
+  command: echo 'reviewer passed the site'
+edges:
+- {from: start, to: coder}
+- {from: coder, to: check}
+- {from: check, to: files_ok}
+- {from: files_ok, to: reviewer, handle: 'true'}
+- {from: files_ok, to: missing, handle: 'false'}
+- {from: reviewer, to: needs_fix}
+- {from: needs_fix, to: fixer, handle: 'true'}
+- {from: needs_fix, to: approved, handle: 'false'}
+steps: []

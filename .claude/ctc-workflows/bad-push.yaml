@@ -1,0 +1,9 @@
+name: bad-push
+description: Workflow runner gate-rule test - a git push with no approval node before it; saving or running it must fail with 422
+settings: {permission: worktree, allow_extra_usage: false, auto_resume: true, max_run_tokens: null}
+nodes:
+  - {id: start, type: trigger, input: "", pos: [0, 160]}
+  - {id: push, type: shell, command: "git push origin HEAD", timeout_s: 30, pos: [200, 160]}
+edges:
+  - {from: start, to: push}
+steps: []

@@ -1,0 +1,32 @@
+name: shell-e2e
+description: 'Re-test of the editor fixes: a shell writes a file, an IF branches on
+  its exit code'
+settings: {permission: worktree, allow_extra_usage: false, auto_resume: true, max_run_tokens: null}
+nodes:
+- id: start
+  type: trigger
+  pos: [0, 0]
+- id: write
+  type: shell
+  pos: [240, 0]
+  command: printf 'hello from ctc\n' > hello.txt
+- id: ok
+  type: if
+  pos: [480, 0]
+  op: eq
+  path: write.exit_code
+  value: 0
+- id: 'yes'
+  type: shell
+  pos: [720, 0]
+  command: echo yes
+- id: 'no'
+  type: shell
+  pos: [733, 211]
+  command: echo no
+edges:
+- {from: start, to: write}
+- {from: write, to: ok}
+- {from: ok, to: 'yes', handle: 'true'}
+- {from: ok, to: 'no', handle: 'false'}
+steps: []

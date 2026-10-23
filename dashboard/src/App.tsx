@@ -5,28 +5,32 @@ import Keys from './Keys'
 import Library from './Library'
 import Memories from './Memories'
 import Overview from './Overview'
+import Runs from './Runs'
 import Sessions from './Sessions'
 import Workflows from './Workflows'
 import type { Health, Project, ProjectDetail, Range } from './types'
 import { colorOf, fmtTime } from './ui'
 
-const VIEWS = ['overview', 'library', 'workflows', 'sessions', 'memories', 'jobs', 'keys'] as const
+const VIEWS = ['overview', 'library', 'workflows', 'runs', 'sessions', 'memories', 'jobs', 'keys'] as const
 type View = (typeof VIEWS)[number]
 const SHARED_ONLY: View[] = ['keys']
 export type ViewProps = { project: string | null; range: Range; setRange: (r: Range) => void; projects: string[] }
 
-/** '#library' → view; '#decision/12' → the Overview with decision 12 open. */
-function parseHash(): { view: View; decision: number | null } {
+/** '#library' → view; '#decision/12' → the Overview with decision 12 open; '#run/7' → run 7's page; '#compare/7/9[/node]' → runs 7 and 9 compared. */
+function parseHash(): { view: View; decision: number | null; run: number | null; compare: string | null } {
   const h = location.hash.slice(1)
-  const m = /^decision\/(\d+)$/.exec(h)
-  if (m) return { view: 'overview', decision: Number(m[1]) }
-  return { view: VIEWS.includes(h as View) ? (h as View) : 'overview', decision: null }
+  const m = /^(decision|run)\/(\d+)$/.exec(h)
+  if (m) return m[1] === 'run' ? { view: 'runs', decision: null, run: Number(m[2]), compare: null } : { view: 'overview', decision: Number(m[2]), run: null, compare: null }
+  const c = /^compare\/(\d+\/\d+(?:\/[a-z0-9-]+)?)$/.exec(h)
+  if (c) return { view: 'runs', decision: null, run: null, compare: c[1] }
+  return { view: VIEWS.includes(h as View) ? (h as View) : 'overview', decision: null, run: null, compare: null }
 }
 
 const ICONS: Record<View, string> = {
   overview: 'M3 13h4v8H3zM10 3h4v18h-4zM17 9h4v12h-4z',
   library: 'M4 4h6v16H4zM14 4h6v16h-6z',
   workflows: 'M5 5h5v5H5zM14 14h5v5h-5zM7.5 10v3a2 2 0 0 0 2 2H14',
+  runs: 'M7 4l12 8-12 8z',
   sessions: 'M4 6h16M4 12h16M4 18h10',
   keys: 'M15 7a4 4 0 1 1-3.4 6L4 20.6V17h3v-2h2v-2h2.6A4 4 0 0 1 15 7z',
   jobs: 'M12 7v5l3 2M21 12a9 9 0 1 1-3-6.7M21 4v5h-5',
@@ -52,6 +56,8 @@ function readTheme() {
 export default function App() {
   const [view, setView] = useState<View>(() => parseHash().view)
   const [decisionId, setDecisionId] = useState<number | null>(() => parseHash().decision)
+  const [runId, setRunId] = useState<number | null>(() => parseHash().run)
+  const [compare, setCompare] = useState<string | null>(() => parseHash().compare)
   const [project, setProject] = useState<string | null>(null)
   const [range, setRange] = useState<Range>('30d')
   const [projects, setProjects] = useState<Project[]>([])
@@ -77,9 +83,9 @@ export default function App() {
     loadProjects()
     setRev(r => r + 1)
   }
-  useEffect(() => { location.hash = decisionId ? `decision/${decisionId}` : view }, [view, decisionId])
+  useEffect(() => { location.hash = decisionId ? `decision/${decisionId}` : runId ? `run/${runId}` : compare ? `compare/${compare}` : view }, [view, decisionId, runId, compare])
   useEffect(() => { // back/forward and pasted #links switch views or open a decision
-    const onHash = () => { const h = parseHash(); setView(h.view); setDecisionId(h.decision) }
+    const onHash = () => { const h = parseHash(); setView(h.view); setDecisionId(h.decision); setRunId(h.run); setCompare(h.compare) }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
@@ -103,7 +109,7 @@ export default function App() {
           claudethecaller
         </div>
         {VIEWS.filter(v => !SHARED_ONLY.includes(v) || health?.mode === 'shared').map(v => (
-          <button key={v} className={'navitem' + (v === view ? ' on' : '')} onClick={() => { setDecisionId(null); setView(v) }}>
+          <button key={v} className={'navitem' + (v === view ? ' on' : '')} onClick={() => { setDecisionId(null); setRunId(null); setCompare(null); setView(v) }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d={ICONS[v]} /></svg>
             {v[0].toUpperCase() + v.slice(1)}
           </button>
@@ -145,6 +151,7 @@ export default function App() {
         {view === 'overview' && <Overview {...props} decisionId={decisionId} onDecision={setDecisionId} />}
         {view === 'library' && <Library {...props} />}
         {view === 'workflows' && <Workflows {...props} theme={theme} />}
+        {view === 'runs' && <Runs runId={runId} compare={compare} onRun={setRunId} theme={theme} />}
         {view === 'sessions' && <Sessions {...props} />}
         {view === 'memories' && <Memories {...props} />}
         {view === 'jobs' && <Jobs {...props} />}

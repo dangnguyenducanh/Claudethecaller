@@ -3,7 +3,8 @@
 `uv run python -m ctc.server.app` serves it on the unix socket (local mode, 0600) and 127.0.0.1:port from one loop.
 Shared mode: `uvicorn ctc.server.app:app --port 18310 --workers N` (no socket). CTC_WORKER=0 runs no job worker and
 submits no startup jobs (a second daemon on the same DB, e.g. a check instance with a temp CTC_CLAUDE_HOME, whose
-`index` jobs would delete the real library's rows).
+`index` jobs would delete the real library's rows), and no workflow runner (local mode only; its startup sweep would
+fail the real daemon's running runs).
 """
 
 from __future__ import annotations
@@ -25,7 +26,8 @@ from starlette.exceptions import HTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from ctc.config import ROOT, cfg
-from ctc.server import api, hooks, library
+from ctc.runner.engine import run_runner, sweep
+from ctc.server import api, hooks, library, runs
 from ctc.server.jobs import run_worker, submit
 from ctc.server.mcp import mcp, mcp_app
 from ctc.server.state import State, close_state, open_state
@@ -58,6 +60,7 @@ async def _warm(st: State) -> None:
 async def lifespan(app: FastAPI):
     st = await open_state()
     app.state.st = app.state.ctc = st  # api/library read .st, hooks/mcp read .ctc
+    runner = None
     try:
         st.tasks += [asyncio.create_task(run_writer(st)), st.cache.subscribe_inval(lambda m: _inval(st, m))]
         if os.environ.get("CTC_WORKER", "1") != "0":
@@ -67,10 +70,19 @@ async def lifespan(app: FastAPI):
                 await submit(st, "import_memory", {})
                 if st.cfg["history"]["on_start"]:  # incremental: unchanged transcripts are skipped by (size, mtime)
                     await submit(st, "history", {})
+                runner = asyncio.create_task(run_runner(st))  # sweeps a dead daemon's running runs before it claims
+                st.tasks.append(runner)
         st.tasks.append(asyncio.create_task(_warm(st)))
         async with mcp.session_manager.run():
             yield
     finally:
+        if runner:  # stop the walker (its node's process group goes with it), then fail what it was running
+            runner.cancel()
+            await asyncio.gather(runner, return_exceptions=True)
+            try:
+                await sweep(st)
+            except Exception:
+                log.exception("runner: shutdown sweep failed; the next start sweeps")
         await close_state(st)
 
 
@@ -83,8 +95,9 @@ def _err(status: int, code: str, message: str, headers=None) -> JSONResponse:
 
 @app.exception_handler(HTTPException)
 async def _http_error(request: Request, e: HTTPException) -> JSONResponse:
-    d = e.detail if isinstance(e.detail, dict) else {"code": CODES.get(e.status_code, f"http_{e.status_code}"), "message": str(e.detail)}
-    return _err(e.status_code, d.get("code", f"http_{e.status_code}"), d.get("message", ""), e.headers)
+    d = e.detail if isinstance(e.detail, dict) else {"message": str(e.detail)}  # dict details may add fields (node_id)
+    return JSONResponse({"error": {"code": CODES.get(e.status_code, f"http_{e.status_code}"), "message": "", **d}},
+                        e.status_code, headers=e.headers)
 
 
 @app.exception_handler(RequestValidationError)
@@ -137,6 +150,7 @@ if cfg()["mode"] == "shared":
 app.include_router(hooks.router)
 app.include_router(api.router)
 app.include_router(library.router)
+app.include_router(runs.router)
 app.mount("/mcp", mcp_app())
 
 
@@ -154,8 +168,21 @@ if cfg()["mode"] == "local":  # DNS rebinding: a web page can't reach the open 1
     # ponytail: local-mode /api writes are still open to every local user on the TCP port; token or socket-only if that matters
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "ctc"])  # hooks/CLI send Host: ctc
 DIST = Path(os.environ.get("CTC_DASHBOARD_DIST") or ROOT / "dashboard" / "dist")
+
+
+class _Dist(StaticFiles):
+    """index.html names the hashed assets/* of the current build, so the browser must revalidate it on every load
+    (cheap: ETag -> 304); without a Cache-Control header Chrome kept a stale page after a rebuild. assets/* still cache."""
+
+    def file_response(self, full_path, stat_result, scope, status_code=200):
+        r = super().file_response(full_path, stat_result, scope, status_code)
+        if str(full_path).endswith(".html"):
+            r.headers["cache-control"] = "no-cache"
+        return r
+
+
 if DIST.is_dir():  # after every route: /api, /v1 and /mcp win
-    app.mount("/", StaticFiles(directory=DIST, html=True), name="dashboard")
+    app.mount("/", _Dist(directory=DIST, html=True), name="dashboard")
 
 
 def _uds(path: Path) -> socket.socket:
