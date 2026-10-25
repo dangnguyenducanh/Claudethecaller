@@ -12,3 +12,4 @@ dashboard/dist/
 .env
 .claude/settings.local.json
 dashboard/tsconfig.tsbuildinfo
+/graphify/
