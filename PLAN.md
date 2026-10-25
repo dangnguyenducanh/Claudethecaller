@@ -12,8 +12,8 @@
 - **Evidence:** owner's history (319 sessions, 2026-10-20): ~10,000 tool calls, 52 `Skill` calls (~0.5%), 17 distinct skills of 300+ installed. SRA-Bench (2026) sees the same.
 - **Users:** coders with large skill libraries. Portfolio project, so built from scratch (ratel, MCPGateway, metamcp are references only).
 - **Success:** after install, the Skill/Agent share of tool calls rises well above 0.5%; Recall@5 ≥ 0.90; latency targets hold.
-- **In scope (Claude Code only):** index, hybrid search + rerank, decider, prefetch, cache, long-term memory, MCP tool + suggest-only hook, CLI, dashboard, benchmark; local mode and self-hosted shared mode (API keys, rate limits) for coders anywhere.
-- **Out of scope:** other agents, executing workflows, blocking the agent, billing / sign-up SaaS, marketplace, training models from scratch.
+- **In scope (Claude Code only):** index, hybrid search + rerank, decider, prefetch, cache, long-term memory, MCP tool + suggest-only hook, CLI, dashboard, benchmark; local mode and self-hosted shared mode (API keys, rate limits) for coders anywhere; workflow runner (m5): run saved workflows locally, one at a time, on each user's own Claude login.
+- **Out of scope:** other agents, blocking the agent, billing / sign-up SaaS, marketplace, training models from scratch; running workflows on someone else's subscription or as a hosted service (Anthropic terms).
 
 ## Stack
 
@@ -31,6 +31,10 @@
 | CLI | `typer` |
 | Dashboard | TypeScript: React + Vite + Recharts + React Flow |
 | Packaging | `uv`, `pnpm`, `docker-compose.yml` |
+| Workflow runner | `src/ctc/runner/` asyncio walker in the daemon. Agent node = the pinned `claude -p` on the user's login; Shell node = `bash -c`; one git worktree per run under `~/.claudethecaller/runs/<id>/wt` |
+| Scheduling | `croniter` 6.2.4 (the only new Python dependency) |
+| Run logs | `~/.claudethecaller/runs/<id>/<node>-<visit>.jsonl.gz` |
+| Container mode (M6) | Docker image `ctc-runner:<claude_version>` (Node base plus the pinned Claude Code CLI) |
 
 ## Constraints
 
@@ -41,7 +45,8 @@
 - Models run locally; capabilities, decisions and memories live in Supabase; benchmark data in `data/` stays local; `Llm.json` strips secrets from every LLM call; the DB password lives only in `.env`.
 - IDs are namespaced: `plugin:name`, `user:name`, `project@<sha8>:name`. Claude-facing names use `invoke` (`name` for user/project, else the id).
 - Any prompt language.
-- Rules while building: stay in the step's scope; no secrets, `.env`, `data/` or weights in commits; never write the real `~/.claude/` until H3 (use a temp `HOME`); if only the owner can unblock it, say so and stop.
+- Rules while building: stay in the step's scope; no secrets, `.env`, `data/` or weights in commits; never write the real `~/.claude/` until H3 (use a temp `HOME`), except m5 runner child processes, which use the real login; if only the owner can unblock it, say so and stop.
+- Workflow runner (m5): subscription only, local-only execution, never re-execute a side effect; full list in "Workflow runner (m5) → Constraints".
 
 ## Files
 
@@ -133,7 +138,7 @@ Four tracks. H = owner step. Commit after each step.
 
 **Order:** F3 → F4 (done first, on mock data) → H0 → B3 → B4 → K1 → F1 → H1 → K2 → H2 → B4b → B5 → B6 → F2 → H3 → K3 → A1, A2 → B7 → B8 → A3 → B9 → H4 → K4 → F3 → F4 → H6 → F5.
 
-**Branches:** `m1-retrieval-core` (B1–B4, K1–K2, F1), `m2-agent-integration` (B4b, B5–B6, F2, K3), `m3-memory` (B7–B8, A3, K4), `m4-dashboard` (F3–F5), `ai-<name>` per AI step; PR into `staging` at the end of each (see Git workflow and CI/CD).
+**Branches:** `m1-retrieval-core` (B1–B4, K1–K2, F1), `m2-agent-integration` (B4b, B5–B6, F2, K3), `m3-memory` (B7–B8, A3, K4), `m4-dashboard` (F3–F5), `m5-runner-core` (all of m5, one commit per milestone; see "Workflow runner (m5)"), `ai-<name>` per AI step; PR into `staging` at the end of each (see Git workflow and CI/CD).
 
 ### Done
 
@@ -477,3 +482,342 @@ All JSON uses `orjson`. Errors: `{"error": {"code": "not_found", "message": "…
 | SRA-Bench, ToolRet | after M1 |
 
 Tune on dev only; test queries never come from the enricher.
+
+---
+
+## Workflow runner (m5)
+
+Requirements, owner decisions and research: `.claude/prds/workflow-runner.md`. F5 saves move to `<root>/.claude/ctc-workflows/` once WB5 lands.
+
+### Goal and architecture
+- **Goal:** run a saved canvas workflow unattended on the user's own Claude login, on its own git branch, and record every node's output, diff, tokens and resumable session.
+- **Architecture:** one asyncio runner task in the existing daemon walks the graph. Agent nodes run the pinned `claude -p --output-format stream-json --verbose` as a subprocess, and Shell nodes run `bash -c`, both inside a per-run git worktree. After each node, the walker state is saved to Postgres in the same transaction as the step row. A crash fails the run and re-runs nothing. Approval and quota pauses put the run back in the queue through the same claim.
+- **Data:** run summaries go to Supabase (3 tables in `ctc`). Raw logs go to `~/.claudethecaller/runs/<id>/`. Runs use neither Redis nor `ctc.jobs`.
+
+### Decisions
+| Area | Choice | Rejected | Why |
+|---|---|---|---|
+| Orchestration | Hand-rolled walker: `src/ctc/runner/graph.py` (pure functions) driven by `engine.py` (asyncio). The state is data in `wf_runs.state`, not replayed code. | **LangGraph 1.2.x**: "resumes from the start of the node, re-executing all logic" (https://docs.langchain.com/oss/python/langgraph/interrupts), and about 10 packages including langchain-core and langsmith. **DBOS 3.3**: steps run at least once, and names are global across a shared system DB, so teammates' daemons clash (https://docs.dbos.dev/explanations/sharing-a-system-database). **Temporal, Hatchet, Prefect, Inngest**: an extra server each. | "Never re-run a side effect" holds by construction. Both judges picked it; scores were hand-rolled 9/9/8/8/7, DBOS 7–8.5, LangGraph 6–8. One new dependency. |
+| Recovery | Step row inserted as `running` before spawn, guarded by `unique (run_id,node_id,visit)`. The outcome and the checkpoint are written in one transaction. The startup sweep turns `running` into `failed` and kills orphans. `waiting`, `quota` and `queued` runs survive. | Resuming mid-run after a crash | PRD rule |
+| Database and logs | Supabase `ctc.wf_runs`, `wf_steps`, `wf_schedules`. Diffs are stored up to 64 KB; the full diff is `git show` on the kept branch. Logs: `~/.claudethecaller/runs/<id>/<node>-<visit>.jsonl.gz`. | Logs in Postgres (20–60 MB a week against the 500 MB free tier); SQLite | About 1–2 MB a week in the DB |
+| Queue | One runner task. Claim: `update … where id = (select … status='queued' … for update skip locked)`. A partial unique index `(owner) where status='running'` allows one running run per owner. | `ctc.jobs` (retries, 60 s timeout and re-queue would duplicate side effects) | Enforced by the DB |
+| Scheduling | `croniter` 6.2.4, a 30 s loop and a per-owner `wf_schedules` row, plus the idle wait (decision 8) | crontab, APScheduler | A schedule spends one person's quota |
+| Live updates | Poll `GET /api/runs/{id}` every 1.5 s; logs by byte offset (`ponytail:`, upgrade path is SSE) | SSE (`fastapi.sse`, the upgrade), WebSocket, Supabase Realtime | Same pattern as `useJob` |
+| Workflow file | `<root>/.claude/ctc-workflows/<name>.yaml` with `settings`, `nodes`, `edges` and positions, plus a `steps:` list derived for the router | `.claude/workflows/` (native `.js` lives there) | Committed in git, which is the team model |
+| Compare runs | `git diff <branchA>..<branchB>`, or per node `git diff <A.post_sha> <B.post_sha>`; both branches live in the same repo | Storing outputs for text diffing | The branches already exist |
+| Quota continue | The node goes `quota` with its `session_id` kept. **Continue** re-claims the run and re-enters that node with `--resume <session_id>` and the prompt "Continue where you left off". Auto-continue at `quota_resets_at` if `auto_resume` is set. | Re-running the node from scratch | The half-done work is kept |
+| Extra usage | Parse `rate_limit_event`; if it shows overage and `allow_extra_usage` is false, stop the node and mark it `quota` (reason `extra_usage`) **(unverified field)** | | Default: never spend money silently |
+| CLI pin | `config/server.yaml runner.claude_version`. The auth check refuses to run if `claude --version` differs. `ctc runner upgrade` runs the auth smoke and rewrites the pin. The child env sets `DISABLE_AUTOUPDATER=1` **(unverified)**. | Following auto-updates | Bare-mode risk |
+| Permissions | Per workflow `settings.permission`: `worktree` (default: `--permission-mode acceptEdits`, per-node `--allowedTools`, `--permission-prompts none`) or `container` (M6: `docker run` of a pinned `ctc-runner` image with the worktree and only the login file of `~/.claude` mounted, `--dangerously-skip-permissions`) | Bypass on the host | Owner decision 5 |
+| Native export | `POST /api/workflows/{id}/export` writes `.claude/workflows/<name>.js`. Agent → `agent()`; Shell → `agent("Run exactly: …, report exit code", {schema})`; IF → a JS `if` on a structured output; loops → a capped `while`; parallel → `parallel()`. Refused if the workflow has an approval node. | Native workflows as the engine | It can't pause, and gives less control |
+| Frontend | Keep Vite 8.3.4, React 19.3.1 and `@xyflow/react` 12.12.0 (multiple handles per node by `id`). Diff viewer: our own `<pre>`, about 15 lines. Plain forms, cron as a text input, no auto-layout, types from `pnpm gen:types`, hash routes. | react-diff-view (add if split view is needed), diff2html, Monaco, react-hook-form, cronstrue, dagre, react-router | The canvas shell already exists |
+| Agent node runtime | Explicit child env: `os.environ` minus the API-key variables, plus `HOME=<real>`, `CTC_RUN=<id>`, `DISABLE_AUTOUPDATER=1`. `cwd=<worktree>`, `start_new_session=True`. Flags: `-p --output-format stream-json --verbose --session-id <uuid4> --permission-mode acceptEdits --allowedTools … --disallowedTools "Bash(git push:*)" "Bash(gh pr:*)" --permission-prompts none --strict-mcp-config --mcp-config <node or empty> [--model --effort --agent --json-schema --max-turns]`. Readonly nodes get `dontAsk` and read tools only. Timeout: SIGINT → 10 s → SIGTERM → 5 s → SIGKILL, sent to the process group. | Agent SDK, `--bare`, host bypass | Verified flags on 2.1.306. Unverified: `--session-id` combined with `--fork-session`, and whether `dontAsk` denies everything not on the allowlist. WB3 checks both. |
+| Team | Own daemon and login per teammate. Rows are keyed by `owner` (the `claude auth status` email). Run endpoints are `_local_only`. History storage: pending. | Shared-mode execution | Policy |
+| Router isolation | Hooks whose `cwd` is under `~/.claudethecaller/runs/` return empty: no suggestions, decisions, `extract` jobs or `own-eval` rows | | Decision 9 |
+
+### Workflow file
+```yaml
+name: fix-tests
+description: Run tests, fix until green (max 3), reviewers, then draft PR after approval
+settings: {permission: worktree, allow_extra_usage: false, auto_resume: true, max_run_tokens: null}
+defaults: {model: sonnet, max_turns: 30, timeout_s: 1800, max_visits: 3}
+nodes:
+  - {id: start, type: trigger, input: "", pos: [0, 160]}
+  - {id: test, type: shell, command: "uv run pytest -x -q", timeout_s: 600, pos: [180, 160]}
+  - {id: green, type: if, path: test.exit_code, op: eq, value: 0, pos: [380, 160]}   # ops: eq|ne|contains|truthy; missing path = false
+  - {id: fix, type: agent, cap: "user:tdd-fix", prompt: "Tests fail:\n{{test.stdout_tail}}\nGoal: {{input}}",
+     allowed_tools: [Read, Edit, Write, "Bash(uv run pytest:*)"], pos: [380, 320]}
+  - {id: review-a, type: agent, readonly: true, prompt: "Review for bugs", json_schema: {type: object}, pos: [580, 80]}
+  - {id: review-b, type: agent, readonly: true, agent: security-reviewer, prompt: "Security review", pos: [580, 220]}
+  - {id: join, type: merge, pos: [780, 150]}
+  - {id: gate, type: approval, message: "Push {{run.branch}} and open a draft PR?", pos: [960, 150]}
+  - {id: pr, type: shell, command: "git push -u origin HEAD && gh pr create --draft --fill", pos: [1140, 150]}
+edges:
+  - {from: start, to: test}
+  - {from: test, to: green}
+  - {from: green, to: review-a, handle: "true"}
+  - {from: green, to: review-b, handle: "true"}
+  - {from: green, to: fix, handle: "false"}
+  - {from: fix, to: test}            # back-edge, capped by test.max_visits
+  - {from: review-a, to: join}
+  - {from: review-b, to: join}
+  - {from: join, to: gate}
+  - {from: gate, to: pr}
+steps: [{cap: "user:tdd-fix"}, {agent: security-reviewer}]   # derived on save, for the router
+```
+- **Node fields:**
+  - Agent: `prompt cap agent model effort permission_mode allowed_tools mcp_config json_schema resume_from max_turns timeout_s readonly on_error`. `cap` prefixes the prompt with `/<invoke>`.
+  - Shell: `command timeout_s readonly`.
+  - Every node: `max_visits`, `pos`.
+- **Templates:** `{{input}}`, `{{<node>.<dotted.path>}}`, `{{run.branch}}`. Filled by one regex plus a dotted lookup; missing or skipped values become `""`.
+- **Outputs:**
+  - agent `{result ≤64 KB, structured_output, is_error, subtype}`; `is_error` fails the run unless `on_error: continue`
+  - shell `{exit_code, stdout_tail 4 KB, stderr_tail 4 KB, duration_ms}`; a non-zero exit is data
+  - if `{value}`; merge `{inputs: {node: output}}`; approval `{approved, note}`; trigger `{input}`
+- **Runner settings** go in `config/server.yaml`: `runner: {claude_version: "2.1.306", idle_wait_min: 15, poll_s: 1.5}`.
+
+### Walker rules (`graph.py`)
+1. **Load.** There is exactly one `trigger`. A DFS from it marks an edge as a **back-edge** if it points to a node on the DFS stack; every other edge is forward.
+2. **Ready.** Each forward edge carries a token, `data` or `skip`. A node is ready when every inbound forward edge has a token and at least one token is `data`. A back-edge carrying `data` makes its target ready directly.
+3. **IF.** The taken handle gets `data`. The untaken edges go into `state.deferred`, not into the inbox.
+4. **Quiescence.** When nothing is ready or running:
+   - deferred edges become `skip` tokens
+   - a node whose tokens are all `skip` is recorded as `skipped` and sends `skip` downstream
+   - repeat until a node is ready or nothing changes; nothing changing means the run is `done`
+   - `skip` never travels on a back-edge
+5. **Back-edge fires.**
+   - The loop body is the set of nodes reachable forward from the target that can also reach the source; clear its inbox and deferred entries.
+   - Increment `visits[target]`. If it now exceeds `max_visits`, fail with `loop cap reached at <id>`.
+   - Backstop: total executions ≤ Σ `max_visits` + node count.
+6. **Validator.**
+   - No `merge`, and no non-IF node that fans out, inside a loop body.
+   - Every IF has both handles.
+   - Ids are unique slugs, and edges point at real nodes.
+   - Templates reference only existing ids.
+   - The push/PR gate rule holds.
+   - Errors are `{message, node_id}`.
+7. **Batches (M3).**
+   - Ready `readonly` nodes run together under `asyncio.gather`; otherwise only the first ready writer runs.
+   - Each node's commit and diff happen under one `asyncio.Lock`.
+
+### Constraints
+
+- **Subscription only.**
+  - Use the installed, unmodified `claude`. No Agent SDK, no API key, never `--bare`.
+  - Check on every claim:
+    - `claude auth status` reports `loggedIn` and `authMethod == "claude.ai"`
+    - the version matches the pin
+    - `apiKeySource` in the init event is null or `none`, otherwise the run fails with `api_key_billing`
+- **Local only.** The runner, `/api/runs*` and the MCP run tools are `_local_only`. Tokens are never stored or relayed.
+- **Never re-execute a side effect.** No automatic retry after a failure. A crash means `failed`. A quota hit means `quota` and can be continued.
+- **One running run per owner,** enforced by a DB index.
+- **Never the user's checkout.**
+  - Worktree and branch `ctc/<wf>-<id>`, kept after the run.
+  - A Shell node matching `\b(git\s+push|gh\s+pr\s+(create|merge))\b` must sit behind an approval node.
+  - Agent nodes get the matching `--disallowedTools`.
+  - Trusted repos only.
+- **Shell templates are quoted** with `shlex.quote`.
+- **Runs never feed the router** (decision 9).
+- **H3 exception, runs only.** The child's `HOME` is the real home.
+
+### Data model
+```sql
+create table if not exists ctc.wf_runs (
+  id bigint generated always as identity primary key,
+  owner text not null,                                   -- claude auth status .email
+  workflow text not null,                                -- cap_id
+  project_id text references ctc.projects on delete set null,
+  file_sha text not null, graph jsonb not null,          -- snapshot at submit
+  trigger text not null check (trigger in ('button','cli','api','schedule','mcp')),
+  status text not null default 'queued'
+    check (status in ('queued','running','waiting','done','failed','cancelled','quota')),
+  input text not null default '',
+  state jsonb not null default '{}',                     -- {visits, inbox, deferred, ready, execs}
+  repo text, worktree text, branch text, base_sha text, pr_url text,
+  auth jsonb,                                            -- {authMethod, email, claude_version}
+  error text,
+  quota_resets_at timestamptz, auto_resume boolean not null default true,   -- decision 2
+  tokens bigint not null default 0,                      -- running total, for max_run_tokens
+  created_at timestamptz not null default now(), started_at timestamptz, ended_at timestamptz);
+create unique index if not exists wf_runs_one_running on ctc.wf_runs (owner) where status = 'running';
+create index if not exists wf_runs_owner on ctc.wf_runs (owner, id desc);
+
+create table if not exists ctc.wf_steps (
+  id bigint generated always as identity primary key,
+  run_id bigint not null references ctc.wf_runs on delete cascade,
+  node_id text not null, visit int not null, kind text not null,   -- trigger|agent|shell|if|merge|approval
+  status text not null check (status in ('running','waiting','done','failed','timeout','cancelled','quota','skipped')),
+  input text, output jsonb, error text,
+  session_id text, num_turns int, usage jsonb, cost_usd real,      -- cost is notional
+  permission_denials jsonb, overage boolean,
+  pre_sha text, post_sha text, files jsonb, diff text,             -- diff ≤ 64 KB
+  log_path text,
+  started_at timestamptz not null default now(), ended_at timestamptz,
+  unique (run_id, node_id, visit));
+
+create table if not exists ctc.wf_schedules (
+  owner text not null, workflow text not null, cron text not null, input text not null default '',
+  enabled boolean not null default true, last_fired_at timestamptz,
+  primary key (owner, workflow));
+-- RLS on, no policies (like every ctc table)
+```
+
+### API
+All endpoints are `_local_only` and scoped to the owner. Shapes go into `dashboard/src/types.ts` through `pnpm gen:types`.
+
+- `Run` = `{id, workflow, project, status, trigger, input, branch, worktree, pr_url, error, quota_resets_at, auto_resume, created_at, started_at, ended_at, tokens, nodes_done, nodes_total}`
+- `RunDetail` = `Run & {graph, file_sha, auth, steps: Step[]}`
+- `Step` = `{id, node_id, visit, kind, status, input, output, error, session_id, num_turns, tokens{…}, cost_usd, permission_denials, overage, files, started_at, ended_at}`
+
+| Method + path | Body / query | Returns |
+|---|---|---|
+| `GET /api/capabilities/{id}` (extended) | | adds `graph`, `settings`, `schedule {cron, input, enabled, next_at, last_fired_at}` |
+| `POST`/`PATCH /api/capabilities` (extended) | `graph` replaces `steps` for workflows | `Capability`; 422 `invalid_graph {message, node_id}` |
+| `POST /api/workflows/{cap_id}/runs` | `{input?, project?, trigger?}` | `202 {run_id}`; 422 `invalid_graph` / `project_required` |
+| `GET /api/runs` | `workflow?`, `status?`, `trigger?`, `limit`, `before` | `Run[]` |
+| `GET /api/runs/{id}` | | `RunDetail` |
+| `GET /api/runs/{id}/steps/{sid}/log` | `offset` | `{text, offset, done}` |
+| `GET /api/runs/{id}/steps/{sid}/diff` | | `{diff, files, truncated}` |
+| `GET /api/runs/{id}/diff` | | the run's whole diff, `base_sha..HEAD` |
+| `GET /api/runs/compare` | `a`, `b`, `node?` | `{diff, files, truncated}`; whole runs = `git diff <a.branch>..<b.branch>`, one node = its `post_sha`s |
+| `POST /api/runs/{id}/cancel` | | `Run` |
+| `POST /api/runs/{id}/approve` | `{approve, note?}` | `Run`; 409 `not_waiting` |
+| `POST /api/runs/{id}/continue` | `{when: now\|reset}` | `Run`; `quota` → `queued` now, or sets `auto_resume`; 409 `not_quota` |
+| `PUT` / `DELETE /api/workflows/{cap_id}/schedule` | `{cron, input?, enabled}` | schedule + `next_at`; 422 `bad_cron` |
+| `POST /api/workflows/{cap_id}/export` | | `{path}`; 422 `has_approval` (M6) |
+| `/mcp` | `run_workflow(workflow, input="")` → `{run_id}`; `workflow_status(run_id)` → `{status, error, quota_resets_at, steps[]}` | |
+| CLI | `ctc run <wf> [--input] [--project] [--wait]`, `ctc runs`, `ctc cancel <id>`, `ctc continue <id> [--now]`, `ctc runner upgrade` | |
+
+### Build order (m5)
+Tracks: WB = backend, WF = frontend, WH = owner. Each milestone branch is cut from the previous one and PRed into `main`.
+
+#### M1: Run a chain (`m5-runner-core`)
+- **Result 2026-10-22:** built and tested end to end on a test daemon: `smoke` done (~41k fresh tokens), cancel and `kill -9` leave no orphans, fake quota/extra-usage end `quota`, the token cap stops before a node, two website workflows (coder → check → IF → reviewer [→ fixer]) built real sites, one built and run by hand in the browser. Fixed on the way: shell-template injection, host permission bypass, agent names, cap counting cache reads, run canvas fit, 5 editor bugs, stale `index.html` cache. WH2 (owner's own chain) open.
+- [x] **WH1 — owner: scope**
+  - Move Part 3 into `PLAN.md` and apply the Product line change.
+  - Grant the runs-only H3 exception.
+  - Approve `.claude/ctc-workflows/`.
+  - Done when: `grep -c "Workflow runner (m5)" PLAN.md` prints `1` on a commit.
+- [x] **WB1 — schema**
+  - Add the three tables to `src/ctc/storage/schema.sql`, plus `croniter==6.2.4` and the `runner:` block in `config/server.yaml`.
+  - Done when: `uv run python -c "import asyncio;from ctc.server.state import open_state;s=asyncio.run(open_state());print(asyncio.run(s.store.fetchval('select count(*) from wf_runs')))"` prints `0`.
+- [x] **WB2 — walker** (`src/ctc/runner/graph.py`, pure functions)
+  - `load`, `validate` (rules 1 and 6; in M1 any push/PR node is rejected), `ready`, `complete`, quiescence, `render(tpl, ctx, shell=False)`, `eval_if`, `derived_steps`.
+  - Done when: `uv run python -m ctc.runner.graph` passes its `__main__` asserts:
+    - IF picks the right branch, and the untaken branch is `skipped`
+    - bad graphs are rejected
+    - `render` shell-quotes values
+- [x] **WB3 — node processes** (`src/ctc/runner/proc.py`)
+  - `child_env()`.
+  - `preflight()`: auth status, version against the pin.
+  - `agent_argv()`.
+  - `run_agent()`: stream to the log; parse `system/init` (`session_id`, `apiKeySource`), `rate_limit_event` (overage) and `result`.
+  - `run_shell()`.
+  - `stop(pgid)`.
+  - The quota regex `/hit your (\w+ )?limit.*?resets ([^\n"]+)/i`.
+  - `CTC_CLAUDE_BIN` overrides the binary; `scripts/fake_claude_quota.sh` fakes a quota hit.
+  - Done when all three hold:
+    - `uv run python -m ctc.runner.proc agent "reply with ok"` prints `authMethod=claude.ai result=ok session_id=<uuid> turns=1 exit=0`
+    - `… shell "sleep 99" --timeout 2` prints `timeout`, and `pgrep -f "sleep 99"` is empty
+    - the fake binary prints `status=quota resets_at=…`
+
+  Also record whether `--session-id` with `--fork-session` and `dontAsk` behave as assumed.
+- [x] **WB4 — engine** (`src/ctc/runner/engine.py`)
+  - `claim()`:
+    - quota gate
+    - preflight
+    - on the first start, `git worktree add -b ctc/<wf>-<id> ~/.claudethecaller/runs/<id>/wt HEAD`
+  - Per node:
+    1. Claim the step row.
+    2. Spawn.
+    3. Under the lock, `git add -A && git commit --allow-empty -m "ctc: <node>#<visit>"`, then numstat and the diff (≤ 64 KB).
+    4. In one transaction, update the step and `wf_runs.state`, adding to `tokens`.
+    5. Gzip the log.
+    6. Capture `pr_url`.
+  - `max_run_tokens` exceeded → `failed`.
+  - Done when: `uv run python -m ctc.runner.engine .claude/ctc-workflows/smoke.yaml --input hi` prints every node `done` or `skipped`, and `git worktree list | grep ctc/smoke-` matches.
+- [x] **WB5 — daemon, API, CLI, library**
+  - Runner task in the lifespan; `CTC_WORKER=0` turns it off.
+  - Startup sweep through `/proc/*/environ` `CTC_RUN=<id>`.
+  - `src/ctc/server/runs.py` endpoints (all but approve, continue, compare, schedule and export).
+  - `hooks.py` returns empty under the runs dir.
+  - `library.py`: `ctc-workflows/`, `graph`, 422.
+  - `scanner.py` glob.
+  - `cli.py`: `run`, `runs`, `cancel`, `runner upgrade`.
+  - Done when: `uv run ctc daemon stop; uv run ctc daemon start && uv run ctc index && uv run ctc run smoke --input hi --wait && curl -s 127.0.0.1:18310/api/runs?limit=1 | jq -e '.[0].status=="done"'`.
+- [x] **WB6 — cancel, crash, quota stop, extra-usage guard**
+  - Done when all four hold:
+    - Cancel of `sleep.yaml` → `cancelled`, and `pgrep -f "sleep 600"` is empty.
+    - `kill -9` of the daemon, then a restart → `failed  daemon stopped mid-run`, with no orphan process.
+    - The fake quota binary → `quota` with `quota_resets_at` set; a rerun creates no new steps.
+    - A fake overage binary with `allow_extra_usage: false` → `quota`, reason `extra_usage`.
+- [x] **WF1 — types and client**
+  - Done when: `pnpm -C dashboard gen:types && pnpm -C dashboard build`.
+- [x] **WF2 — canvas**
+  - Node views: trigger, agent, shell, if (`true`/`false` handles); dashed back-edges.
+  - Remove `chainOrder` and `isValid`; save sends `graph`; a 422 highlights the node.
+  - Done when: after a UI save, `curl -s 127.0.0.1:18310/api/capabilities/<id> | jq '.graph.nodes|length'` prints the node count.
+- [x] **WF3 — node and workflow settings panel**
+  - Plain forms per node type, plus workflow `settings`: permission, allow extra usage, auto resume, max run tokens.
+  - Done when: the edited prompt and settings show up in `.claude/ctc-workflows/<name>.yaml`.
+- [x] **WF4 — Run button**
+  - Done when: after clicking Run, `curl -s …/api/runs?limit=1 | jq -r '.[0].trigger'` prints `button`.
+- [x] **WF5 — runs list and run detail**
+  - Canvas overlay with a status colour per node, Output and Meta tabs, and a copy button for `claude --resume`.
+  - Done when: `#run/<id>` shows every node in its final colour.
+- [x] **WF6 — live progress, log and diff**
+  - 1.5 s poll, `LogView`, `DiffView`.
+  - Done when: an open page updates without a reload, and `…/steps/<sid>/diff | jq '.files|length'` is ≥ 1 for an editing node.
+- [ ] **WH2 — owner: first real chain, then PR `m5-runner-core`**
+
+#### M2: Loops, approval, continue, compare (`m5-runner-loops`)
+- **Result 2026-10-22:** loop-demo counts 1–3 then done; a 4th visit fails with `loop cap reached`; gate waits across a daemon restart, approve → done, reject → cancelled; bad-push → 422; continue after quota re-claims the same step row and resumes the same session (`--resume`, 1 Haiku run); compare returns whole-run and per-node diffs. Recorded UI test 33/33. Auto re-queue at the reset time checked only with a fake binary.
+- [x] **WB7 — loops** (rules 5–6, visit numbering, `loop-demo.yaml`)
+  - Done when:
+    - the fix-tests asserts pass: red, red, green runs the reviewers and join exactly once; a fourth red hits `loop cap`
+    - `ctc run loop-demo --wait` shows visits 1–3
+- [x] **WB8 — approval gate**
+  - An approval node sets `waiting` and frees the lane.
+  - `approve` → `queued`; reject → `cancelled`.
+  - The gate rule replaces the M1 blanket reject.
+  - Done when: a `gate` run stays `waiting` across a daemon restart and is `done` after approve, and `bad-push.yaml` gets 422.
+- [x] **WB9 — continue after quota**
+  - `POST …/continue` and `ctc continue`. The quota'd step is re-claimed as the same visit and re-run with `--resume <session_id> -p "Continue where you left off."`.
+  - The cron loop auto-continues `quota` runs with `auto_resume` once `quota_resets_at` has passed.
+  - Done when: a fake-quota run continued with `CTC_CLAUDE_BIN` reset to the real binary ends `done`, and its log shows `--resume <same session_id>`.
+- [x] **WB10 — compare runs** (`GET /api/runs/compare`)
+  - Done when: two `loop-demo` runs give `curl -s '…/runs/compare?a=<1>&b=<2>' | jq -e '.files|type=="array"'`.
+- [x] **WF7 — loops on the canvas**: "loop ≤ N" edge labels, `×N` badges, a visit selector.
+- [x] **WF8 — approval and quota banners**
+  - "Waiting at `<node>`" with the run diff and Approve/Reject.
+  - "Out of usage, resets at …" with **Continue when reset** and **Continue now**.
+  - Done when: both banners work after a daemon restart.
+- [x] **WF9 — compare page**: tick two runs in the list → `#compare/<a>/<b>[/<node>]` with `DiffView`.
+
+#### M3: Parallel and merge (`m5-runner-parallel`)
+- **Result 2026-10-22:** `three-reviewers` ends `done` in 8.8 s (three `sleep 5` shells in one batch, three `ctc: rN#1` commits) and the merge output has 3 inputs; a mixed batch runs the readonly nodes together, then the writer alone; cancel mid-sleep leaves the run and all three steps `cancelled` and no `sleep` process; a merge inside a loop is refused (422). `smoke` (fake binary), `loop-demo` and `gate` end as at M2.
+- [x] **WB11 — parallel and merge** (rule 7, merge `{inputs}`, the commit lock, `three-reviewers.yaml`)
+  - Done when: the run ends `done` in under 9 s and the merge output has 3 inputs.
+- [x] **WF10 — merge view**: several nodes shown running at once.
+
+#### M4: Hands-free triggers (`m5-runner-triggers`)
+- **Result 2026-10-22:** `* * * * *` on `edit-demo` fired a `schedule` run 24 s after the save, then every minute; with `CTC_IDLE_WAIT_MIN=60` and a session active nothing fired over two slots (`next_at` stays in the past); a `waiting` `gate` run held its own schedule; a bad cron → 422 `bad_cron`. MCP: `claude -p --model haiku` called `run_workflow` + `workflow_status` (1 Haiku run), and the run ended `done` with trigger `mcp`. Schedule editor checked by build only (no browser on this host).
+- [x] **WB12 — schedules and idle wait**
+  - A 30 s loop over the owner's enabled schedules; fire when `croniter(cron, last_fired_at or now).get_next() <= now`.
+  - Skip missed fires older than 2 min.
+  - Don't fire if this workflow is already active, or during a quota window.
+  - **Idle wait:** hold the fire while the newest transcript under `~/.claude/projects/` not belonging to a runner (directory names containing `claudethecaller-runs` are excluded) was modified within `idle_wait_min`.
+  - Done when: a `* * * * *` schedule produces a `schedule` run within 70 s, and with `idle_wait_min: 60` while a session is active, no run.
+- [x] **WB13 — MCP tools** (`run_workflow`, `workflow_status` in `mcp.py`)
+  - Done when: `claude -p --strict-mcp-config --mcp-config '{"mcpServers":{"ctc":{"type":"http","url":"http://127.0.0.1:18310/mcp"}}}' --allowedTools 'mcp__ctc__*' "call run_workflow for smoke, then workflow_status"` prints a run id and a status.
+- [x] **WF11 — schedule editor**
+  - Cron input on the trigger node, "Next run …", and `schedule`/`mcp` shown in the runs list.
+- [ ] **WH3 — owner: success check**
+  - Done when: `select count(distinct workflow), count(*), avg((status='done')::int) from ctc.wf_runs` gives ≥ 3, ≥ 20 and ≥ 0.8, and no run has `authMethod <> 'claude.ai'`. Then open the PRs for M2–M4.
+
+#### M5: Team runs (`m5-runner-team`), history storage pending
+- **Result 2026-10-22:** a run owned by `someone@else.test` is missing from `/api/runs`, 404 on detail, diff, log, cancel, approve and continue, 422 on compare, and `no run` in `workflow_status`; its schedule stays hidden; a prompt hook from a teammate's runs dir writes nothing. History import and backfill now skip runner transcripts; 11 projects and 14 sessions imported from them before this fix are still in Supabase (owner to delete). Fresh-clone check and WH4 pending.
+- [x] **WB14 — team check**
+  - Every runner query filters on `owner`; teammates' runs never reach router stats; README note.
+  - Done when: a fresh clone runs `smoke` to `done` and lists only that login's runs.
+- [ ] **WH4 — owner: a teammate runs `smoke` on their own daemon and login**
+
+#### M6: Modes and export (`m5-runner-modes`)
+- **Result 2026-10-22:** a container-mode `smoke` ends `done` with `authMethod` `claude.ai` (1 Haiku run), `ctc-run-<run>-agent-1` visible while it runs; cancel and a `kill -9` of the daemon both leave no `ctc-run-*` container (tested with the agent's API pointed at a dead port, no quota). Export: `edit-demo` → `.claude/workflows/edit-demo.js` (Claude Code lists it as `/edit-demo`), again → 200, edited by hand → 409, `gate` → 422 `has_approval`. The native run is unverified: the one Haiku `claude -p "run the edit-demo workflow"` proposed a plan instead of calling Workflow.
+- [x] **WB15 — container mode**
+  - `docker/ctc-runner.Dockerfile` (Node base plus `@anthropic-ai/claude-code@<claude_version>`).
+  - With `settings.permission: container`, Agent nodes run `docker run --rm -i --name ctc-run-<run>-<node>-<visit> --user <uid>:<gid> -v <wt>:<wt> -v <wt>/.git:<wt>/.git:ro -w <wt> -v ~/.claudethecaller/runs/<run>/claude:/home/claude --mount type=bind,src=~/.claude/.credentials.json,dst=/home/claude/.claude/.credentials.json ctc-runner:<v> claude -p --dangerously-skip-permissions …` (the worktree at its host path, so its sessions count as runner sessions; a per-run home with a copy of `~/.claude.json` minus projects and MCP servers, so an agent can't plant a hook or MCP server the host's claude would run); shell nodes stay on the host. The runner's own git calls on a worktree pass `--git-dir` (its admin dir, found from the main repo) and never read the worktree's `.git` file.
+  - The auth check runs inside the container too.
+  - Done when: a container-mode `smoke` ends `done` and `wf_runs.auth->>'authMethod'` is `claude.ai` **(unverified: credential file mount)**.
+- [x] **WB16 — native export** (`POST …/export`, mapping as in Decisions)
+  - Done when: exporting `loop-demo` writes `.claude/workflows/loop-demo.js`, and `claude -p "run the loop-demo workflow"` with a `Workflow` allow rule completes; exporting `gate` returns 422.
+- [x] **WF12 — settings and Export button**: a permission mode selector (worktree/container) and an Export button with its result path.
+
+### Still unverified
+- What `-p` returns at a usage limit (exit code, `subtype`). The plan matches the error text; paste a real one into `fake_claude_quota.sh` when it happens.
+- The fields of `rate_limit_event` and the overage flag, seen once and undocumented.
+- `--session-id` combined with `--fork-session`; `dontAsk` denying everything not on the allowlist (WB3 checks both).
+- Whether `DISABLE_AUTOUPDATER=1` stops auto-updates; whether a `setup-token` token works under bare mode.
+- Container mode: mounting `~/.claude` credentials into Docker.
+- Whether `--setting-sources` and similar reducers lower the ~44k startup tokens. Measure only if WH3 shows quota pressure.
+- Library versions from the design pass: croniter 6.2.4, FastAPI 0.156.4, React Flow 12.12.0.

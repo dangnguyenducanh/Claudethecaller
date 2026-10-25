@@ -1,7 +1,8 @@
 import { ApiError } from './api'
 import type {
-  Activity, ApiKey, Capability, CapabilityDetail, Decision, DedupPair, Health, HistoryFile, HistoryStatus, Job, Kind, Kpis, Memory, MemoryDetail, MemoryKind,
-  MemoryWrite, Project, ProjectDetail, Session, SessionDetail, StageRow, Step, Timeline, WorkflowStep,
+  Activity, ApiKey, Capability, CapabilityDetail, Decision, DecisionStep, DedupPair, Graph, Health, HistoryFile, HistoryStatus,
+  Job, Kind, Kpis, Memory, MemoryDetail, MemoryKind, MemoryWrite, Project, ProjectDetail, Session, SessionDetail, StageRow,
+  Timeline, WorkflowSettings, WorkflowStep,
 } from './types'
 
 // Deterministic fake backend with the exact shapes and rules of PLAN.md "API design → Dashboard + CRUD".
@@ -22,7 +23,7 @@ let projects: { name: string; path: string }[] = ['claudethecaller', 'storefront
 const nsOf = (project: string) => `project@${hash8(projects.find(p => p.name === project)?.path ?? project)}`
 
 // ---- capabilities ----
-type Cap = { id: string; kind: Kind; namespace: string; name: string; description: string; body: string; path: string; cluster_id: string | null; steps?: WorkflowStep[] }
+type Cap = { id: string; kind: Kind; namespace: string; name: string; description: string; body: string; path: string; cluster_id: string | null; steps?: WorkflowStep[]; graph?: Graph; settings?: WorkflowSettings }
 const editable = (ns: string) => ns === 'user' || ns.startsWith('project@')
 const invokeOf = (c: Cap) => (editable(c.namespace) ? c.name : c.id)
 const rootOf = (ns: string, project?: string) => (ns === 'user' ? '~/.claude' : `${projects.find(p => p.name === project)?.path ?? '~/code/' + project}/.claude`)
@@ -103,7 +104,7 @@ const PROMPTS: [string, string[]][] = [
   ['what does this error message mean?', []],
   ['thanks, looks good', []],
 ]
-const makeSteps = (ids: string[]): Step[] => ids.map((id, i) => {
+const makeSteps = (ids: string[]): DecisionStep[] => ids.map((id, i) => {
   const c = capById(id)
   return {
     order: i + 1, cap_id: id, invoke: invokeOf(c), kind: c.kind, agent: c.kind !== 'agent' && i === 0 && rand() < 0.4 ? 'ecc:code-reviewer' : null,
@@ -284,7 +285,7 @@ function capRow(c: Cap, project: string | null): Capability {
 }
 function capDetail(c: Cap, project: string | null): CapabilityDetail {
   return { ...capRow(c, project), name: c.name, invoke: invokeOf(c), path: c.path, body: c.body, summary: null, triggers: [],
-    editable: editable(c.namespace), vectors: 1, steps: c.kind === 'workflow' ? c.steps ?? [] : null, cluster_members: c.cluster_id ? caps.filter(x => x.cluster_id === c.cluster_id && x.id !== c.id).map(x => x.id) : [],
+    editable: editable(c.namespace), vectors: 1, steps: c.kind === 'workflow' ? c.steps ?? [] : null, graph: c.graph ?? null, settings: c.settings ?? null, cluster_members: c.cluster_id ? caps.filter(x => x.cluster_id === c.cluster_id && x.id !== c.id).map(x => x.id) : [],
     recent_decisions: decisions.filter(d => d.steps.some(s => s.cap_id === c.id)).slice(0, 20) }
 }
 function memDetail(m: Memory): MemoryDetail {
@@ -300,13 +301,13 @@ const live = (s: Session): Session => {
 }
 
 // ---- writes ----
-function createCap(b: { kind: Kind; scope: 'user' | 'project'; project?: string; name: string; description: string; body?: string; steps?: WorkflowStep[] }): Capability {
+function createCap(b: { kind: Kind; scope: 'user' | 'project'; project?: string; name: string; description: string; body?: string; steps?: WorkflowStep[]; graph?: Graph; settings?: WorkflowSettings }): Capability {
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(b.name ?? '')) fail(422, 'invalid', 'name must match ^[a-z0-9][a-z0-9-]{0,63}$')
   if (b.scope === 'project' && !projects.some(p => p.name === b.project)) fail(422, 'invalid', 'project scope needs an existing project')
   const namespace = b.scope === 'user' ? 'user' : nsOf(b.project!)
   const id = `${namespace}:${b.name}`
   if (caps.some(c => c.id === id)) fail(409, 'conflict', `${id} already exists`)
-  const cap: Cap = { id, kind: b.kind, namespace, name: b.name, description: b.description, steps: b.steps, cluster_id: null,
+  const cap: Cap = { id, kind: b.kind, namespace, name: b.name, description: b.description, steps: b.steps, graph: b.graph, settings: b.settings, cluster_id: null,
     path: `${rootOf(namespace, b.project)}/${fileOf(b.kind, b.name)}`, body: '' }
   cap.body = b.kind === 'workflow' ? bodyOf(cap) : b.body || bodyOf(cap)
   caps = [cap, ...caps]
@@ -390,6 +391,7 @@ export function handle(method: string, path: string, body: unknown): unknown {
       if (!editable(c.namespace)) fail(403, 'read_only', `managed by plugin ${c.namespace}; use an override`)
       if (typeof b.description === 'string') c.description = b.description
       if (Array.isArray(b.steps)) c.steps = b.steps as WorkflowStep[]
+      if (b.graph) { c.graph = b.graph as Graph; c.settings = b.settings as WorkflowSettings } // ponytail: no derived steps or graph checks in the mock
       c.body = typeof b.body === 'string' && c.kind !== 'workflow' ? b.body : bodyOf(c)
       return capRow(c, null)
     }

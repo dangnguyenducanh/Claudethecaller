@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, create_model
 
 from ctc.ingestion.scanner import project_id
 from ctc.memory.longterm import NOOP_MIN, UPDATE_MIN, Memory, write_memory
+from ctc.runner.engine import in_runs
 
 MAX_NEW, MAX_EXISTING, TURN_CHARS = 8, 20, 2000
 ACTIONS = {"ADD": "written", "NOOP": "noop", "UPDATE": "updated", "SUPERSEDE": "superseded"}
@@ -180,7 +181,7 @@ async def run_backfill(st, payload: dict, progress) -> dict:
     # ponytail: re-running backfill re-extracts every session (one LLM call each, mostly NOOPs); skip a session whose
     # last done extract job saw the same transcript size if re-runs get common
     for i, f in enumerate(files):
-        if cwd := await asyncio.to_thread(transcript_cwd, f):
+        if (cwd := await asyncio.to_thread(transcript_cwd, f)) and not in_runs(cwd):  # not a workflow run's claude
             await st.store.ensure_project(cwd, user)
             await submit(st, "extract", {"session_id": f.stem, "transcript_path": str(f), "project_id": project_id(cwd), "user_id": user}, user)
             submitted += 1

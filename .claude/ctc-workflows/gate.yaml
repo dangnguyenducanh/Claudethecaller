@@ -1,0 +1,13 @@
+name: gate
+description: Workflow runner approval test - a shell node writes a file, an approval node waits for a human, then a shell node runs (no claude)
+settings: {permission: worktree, allow_extra_usage: false, auto_resume: true, max_run_tokens: null}
+nodes:
+  - {id: start, type: trigger, input: "", pos: [0, 160]}
+  - {id: write, type: shell, command: "echo hi > x", timeout_s: 30, pos: [200, 160]}
+  - {id: approve, type: approval, message: "Push {{run.branch}}? (test: nothing is pushed)", pos: [400, 160]}
+  - {id: push, type: shell, command: "echo pushed", timeout_s: 30, pos: [600, 160]}
+edges:
+  - {from: start, to: write}
+  - {from: write, to: approve}
+  - {from: approve, to: push}
+steps: []

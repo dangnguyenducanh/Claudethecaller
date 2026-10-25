@@ -1,0 +1,17 @@
+name: smoke
+description: Workflow runner smoke test - a readonly haiku agent answers one word, a shell node checks it is not empty, an IF picks the green or red branch
+settings: {permission: worktree, allow_extra_usage: false, auto_resume: true, max_run_tokens: null}
+nodes:
+  - {id: start, type: trigger, input: "", pos: [0, 160]}
+  - {id: agent, type: agent, readonly: true, model: haiku, max_turns: 2, timeout_s: 300, prompt: "Reply with one short word.", pos: [200, 160]}
+  - {id: check, type: shell, command: "test -n {{agent.result}}", timeout_s: 30, pos: [400, 160]}
+  - {id: ok, type: if, path: check.exit_code, op: eq, value: 0, pos: [600, 160]}
+  - {id: green, type: shell, command: "echo green", timeout_s: 30, pos: [800, 80]}
+  - {id: red, type: shell, command: "echo red", timeout_s: 30, pos: [800, 240]}
+edges:
+  - {from: start, to: agent}
+  - {from: agent, to: check}
+  - {from: check, to: ok}
+  - {from: ok, to: green, handle: "true"}
+  - {from: ok, to: red, handle: "false"}
+steps: []
