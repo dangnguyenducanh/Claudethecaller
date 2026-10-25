@@ -6,7 +6,7 @@ Local skill/workflow router for coding agents. **`PLAN.md` is the single source 
 
 - Development follows the **build order** in `PLAN.md`: four tracks (Backend, Benchmark, Frontend, AI later), one Done-when command per step, one branch per phase or step (`m1-retrieval-core`, `b9-history-import`, …), PR into `staging`; `staging` → `main` is the release (PLAN.md "Git workflow and CI/CD").
 - Follow the rules under "Constraints" in `PLAN.md`: stay in the current step's scope.
-- No tests for now: the owner will guide testing later. Each step in `PLAN.md` says how to code it.
+- Each step in `PLAN.md` says how to code it.
 - Code style: shortest working solution; stdlib and already-chosen deps first; no abstractions with one implementation; mark known corner-cuts with a `ponytail:` comment.
 
 ## Working agreement: propose first, work only after approval
@@ -62,6 +62,20 @@ Code knowledge graph at `graphify-out/graph.json`: a local AST graph of this rep
 | Broad architecture review | read `graphify-out/GRAPH_REPORT.md` |
 
 Exit code 3 means the name is ambiguous: retry with a more specific name or file path. Read raw files only for lines the graph already located. The PreToolUse hook in `.claude/settings.json` nudges toward the graph; it never blocks. `/graphify` runs the full skill (`.claude/skills/graphify/SKILL.md`).
+
+## Agent skills
+
+### Issue tracker
+
+Specs and tickets live as local markdown under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default roles, label string = role name (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` + `docs/adr/` at the repo root, created lazily. See `docs/agents/domain.md`.
 
 ## Project memory
 
