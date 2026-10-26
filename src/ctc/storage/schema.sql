@@ -244,6 +244,7 @@ alter table {schema}.wf_runs
 alter table {schema}.wf_runs add column if not exists pinned boolean not null default false;
 -- marker = completed without executing (reused from the parent run, pinned output, disabled pass-through)
 alter table {schema}.wf_steps add column if not exists marker text check (marker in ('reused', 'pinned', 'disabled'));
+alter table {schema}.wf_steps add column if not exists tries int not null default 1;  -- shell retry-on-fail tries (US7)
 
 create table if not exists {schema}.wf_schedules (
   owner text not null,

@@ -46,7 +46,7 @@ RUN_COLS = """r.id, r.workflow, coalesce(p.name, r.project_id) as project, r.sta
   jsonb_array_length(coalesce(r.graph->'nodes', '[]')) as nodes_total"""
 RUN_FROM = "wf_runs r left join projects p on p.user_id = %(u)s and p.id = r.project_id"
 STEP_COLS = """s.id, s.node_id, s.visit, s.kind, s.status, s.input, s.output, s.error, s.session_id, s.num_turns, s.usage,
-  s.cost_usd, s.permission_denials, s.overage, s.files, s.diff, s.log_path, s.started_at, s.ended_at, s.marker"""
+  s.cost_usd, s.permission_denials, s.overage, s.files, s.diff, s.log_path, s.started_at, s.ended_at, s.marker, s.tries"""
 
 
 async def _scope(request: Request) -> tuple:

@@ -236,7 +236,7 @@ function Meta({ run, step }: { run: RunDetail; step: Step }) {
   const [copied, setCopied] = useState(false)
   const cmd = run.worktree && step.session_id ? `cd ${run.worktree} && claude --resume ${step.session_id}` : ''
   const rows: [string, unknown][] = [
-    ['kind', step.kind], ['visit', step.visit], ['session', step.session_id], ['turns', step.num_turns],
+    ['kind', step.kind], ['visit', step.visit], ['tries', step.tries > 1 && step.tries], ['session', step.session_id], ['turns', step.num_turns],
     ['tokens', step.tokens && JSON.stringify(step.tokens)], ['cost (notional)', step.cost_usd != null && `$${step.cost_usd.toFixed(4)}`],
     ['denials', step.permission_denials?.length && JSON.stringify(step.permission_denials)], ['overage', step.overage != null && String(step.overage)],
     ['files', step.files?.length], ['started', fmtTime(step.started_at)], ['ended', step.ended_at && fmtTime(step.ended_at)],
