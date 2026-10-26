@@ -1,6 +1,6 @@
 # 01 — runner-test-seam
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: none
 Spec: `.scratch/n8n-parity/spec.md` (read it first; this ticket implements part of it)
 Touches: src/ctc/runner/ (read only), tests/conftest.py (shared fixtures other tickets import), tests/test_runner_engine.py, scripts/fake_claude.sh (new)
@@ -23,3 +23,5 @@ Build the one main test seam from the spec: a pytest fixture that creates a thro
 This ticket IS the tests. Keep the helper tiny and documented in the test module docstring.
 
 ## Comments
+
+2026-10-26 — resolved on branch `n8n-01-runner-test-seam`, merged into `m5-n8n-parity` (tasks T001–T007 + T169). Seam: tests/conftest.py fixtures `scratch_db` (throwaway `ctc_test_<hex>` schema, wf_runs ids offset per session to 10^9+x so `kill_run` never hits real or other-lane runs), `seam`, `in_store(fn)`, `walk_run(rid)`, `run_yaml(yaml, input, claude_script)` (dict/list = scripted results, str = another fake binary such as scripts/fake_claude_quota.sh); scripts/fake_claude.sh (CTC_FAKE_CLAUDE_SCRIPT file or dir). CI: `db-selfchecks` runs `uv run pytest -q tests`. Note: the store self-check uses a fixed `ctc_selfcheck` schema, so parallel check.sh runs on one scratch DB can collide; rerun on a collision.
