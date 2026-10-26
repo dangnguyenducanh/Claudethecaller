@@ -33,12 +33,15 @@ from psycopg.types.json import Jsonb
 
 from ctc.runner import notify
 from ctc.runner.graph import (
+    MAX_ITEMS,
     _reach,
     batch,
     complete,
     conditions,
+    current_item,
     eval_if,
     eval_switch,
+    foreach_step,
     merge_output,
     passthrough,
     ready,
@@ -363,6 +366,8 @@ def _input(node: dict, ctx: dict, resume: str | None) -> tuple[str, list[str] | 
         return render(node.get("message") or "", ctx), None
     if node["type"] == "merge":  # its inputs are the joined nodes' outputs, shown as the step's output
         return "", None
+    if node["type"] == "foreach":
+        return f"{node['items']} (max_items {node.get('max_items', MAX_ITEMS)})", None
     return ctx["input"], None
 
 
@@ -443,6 +448,12 @@ async def execute(st, run: dict) -> None:
 
     async def spawn(node: dict, text: str, argv: list[str] | None, log_path: Path | None, canned: dict | None,
                     nctx: dict) -> dict:
+        if node["type"] == "foreach":  # FR-032; a reused one too, so a retry child rebuilds its item state
+            try:
+                out = foreach_step(g, wst, node, ctx)
+            except ValueError as e:  # items is not a JSON array: the run fails
+                return {"status": "failed", "error": str(e)}
+            return canned or {"status": "done", "output": out}
         if canned:  # completed without executing: no process, no commit, no pre/post sha
             return canned
         if node["type"] == "merge":  # its inputs are the data tokens in its inbox, which complete() clears
@@ -478,7 +489,9 @@ async def execute(st, run: dict) -> None:
             jobs = []  # (step id, node, input text, argv, log path, canned, nctx): every row is inserted `running` before any spawn
             for nid in b:
                 node = nodes[nid] | {"visit": wst["visits"].get(nid, 0) + 1}
-                nctx = ctx | {"run": ctx["run"] | {"visit": node["visit"]}, "now": datetime.now(UTC).isoformat(timespec="seconds")}
+                # {{item}} / {{index}} inside a for-each body, from the saved walker state (so a resumed run keeps them)
+                nctx = ctx | {"run": ctx["run"] | {"visit": node["visit"]}, "now": datetime.now(UTC).isoformat(timespec="seconds")
+                              } | current_item(g, wst, nid)
                 if row := reused.get((nid, node["visit"])):  # its copied row is final: no input, no insert, no log
                     jobs.append((row["id"], node, None, None, None, {"status": "done", "output": row["output"],
                                                                       "session_id": row["session_id"], "marker": "reused"}, nctx))

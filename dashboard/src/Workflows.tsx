@@ -13,7 +13,7 @@ import { Header, Search, fmtTime } from './ui'
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
 const KIND_COLOR: Record<Kind, string> = { skill: '#7c8cff', agent: '#b38cff', command: '#f59e42', workflow: '#3ddc97' }
-const TYPE_COLOR: Record<NodeType, string> = { trigger: '#3ddc97', agent: '#b38cff', shell: '#f59e42', if: '#7c8cff', switch: '#c77dff', approval: '#f5b14a', merge: '#4ac9f5', stop: '#f25f5c' }
+const TYPE_COLOR: Record<NodeType, string> = { trigger: '#3ddc97', agent: '#b38cff', shell: '#f59e42', if: '#7c8cff', switch: '#c77dff', approval: '#f5b14a', merge: '#4ac9f5', stop: '#f25f5c', foreach: '#5ec4b6' }
 const OPS: Op[] = ['eq', 'ne', 'gt', 'ge', 'lt', 'le', 'contains', 'not_contains', 'regex', 'exists', 'truthy']
 const CASE_RE = /^[a-z0-9][a-z0-9_-]*$/ // graph.CASE: switch case names are their output handles
 const DND = 'application/ctc-cap'
@@ -38,7 +38,7 @@ function NodeView({ id, type, data, selected }: NodeProps<FlowNode>) {
   const inbound = useNodeConnections({ handleType: 'target' }).length
   const cases = data.cases ?? []
   const errOut = (type === 'agent' || type === 'shell') && data.on_error === 'error_output' // 'ok' = the id-less default handle
-  const outs = type === 'if' ? ['true', 'false'] : type === 'switch' ? [...cases.map(c => c.name), 'default'] : errOut ? ['ok', 'error'] : null
+  const outs = type === 'if' ? ['true', 'false'] : type === 'switch' ? [...cases.map(c => c.name), 'default'] : type === 'foreach' ? ['body', 'done'] : errOut ? ['ok', 'error'] : null
   const updateInternals = useUpdateNodeInternals()
   const outKey = outs?.join('\n')
   useEffect(() => updateInternals(id), [id, outKey, updateInternals]) // React Flow caches handle positions
@@ -48,6 +48,7 @@ function NodeView({ id, type, data, selected }: NodeProps<FlowNode>) {
     : type === 'approval' || type === 'stop' ? firstLine(data.message)
     : type === 'merge' ? `waits for ${inbound} input${inbound === 1 ? '' : 's'}`
     : type === 'switch' ? `${cases.length} case${cases.length === 1 ? '' : 's'} + default`
+    : type === 'foreach' ? `each ${data.items || '?'} (≤ ${data.max_items ?? 50})`
     : data.conditions ? `${condText(data.conditions[0] ?? {})}${data.conditions.length > 1 ? ` +${data.conditions.length - 1}` : ''}`
     : condText(data)
   // the run page's status is the latest visit's marker ?? status, so a disabled step arrives as 'disabled'
@@ -65,7 +66,7 @@ function NodeView({ id, type, data, selected }: NodeProps<FlowNode>) {
     </div>
   )
 }
-export const nodeTypes = { trigger: NodeView, agent: NodeView, shell: NodeView, if: NodeView, switch: NodeView, approval: NodeView, merge: NodeView, stop: NodeView }
+export const nodeTypes = { trigger: NodeView, agent: NodeView, shell: NodeView, if: NodeView, switch: NodeView, approval: NodeView, merge: NodeView, stop: NodeView, foreach: NodeView }
 
 /** An error edge (on_error: error_output) is drawn red. ponytail: a switch case named 'error' is red too. */
 const errStyle = (h?: string | null) => (h === 'error' ? { style: { stroke: 'var(--bad)' } } : {})
@@ -96,11 +97,15 @@ export function backEdges(nodes: { id: string; type?: string }[], edges: { id: s
 }
 if (import.meta.env.DEV) console.assert([...backEdges([{ id: 's', type: 'trigger' }, { id: 'a' }, { id: 'b' }],
   [{ id: '1', source: 's', target: 'a' }, { id: '2', source: 'a', target: 'b' }, { id: '3', source: 'b', target: 'a' }])].join() === '3', 'backEdges self-check failed')
-/** Back-edges dashed and labelled with the target's cap: its max_visits, else the graph default, else 3 (the walker's default). */
+/** Back-edges dashed and labelled with the target's cap: its max_visits, else the graph default, else 3 (the walker's default);
+ *  a for-each body's way back with its max_items (default 50). */
 export const dashBack = (nodes: FlowNode[], edges: Edge[], max = 3) => {
   const b = backEdges(nodes, edges)
-  const cap = (id: string) => nodes.find(n => n.id === id)?.data.max_visits ?? max
-  return edges.map(e => (b.has(e.id) ? { ...e, className: 'back', label: `${e.label ? e.label + ' · ' : ''}loop ≤ ${cap(e.target)}` } : e))
+  const cap = (id: string) => {
+    const n = nodes.find(x => x.id === id)
+    return n?.type === 'foreach' ? `each ≤ ${n.data.max_items ?? 50}` : `loop ≤ ${n?.data.max_visits ?? max}`
+  }
+  return edges.map(e => (b.has(e.id) ? { ...e, className: 'back', label: `${e.label ? e.label + ' · ' : ''}${cap(e.target)}` } : e))
 }
 
 /** A workflow saved before graphs (`steps:` only) → the trigger chained to one Agent node per step. */
@@ -117,8 +122,8 @@ const freeId = (base: string, taken: string[]) => {
   return id
 }
 const TPL = /\{\{\s*([\w.-]+)\s*\}\}/g // graph.TPL
-/** A rename's references: every {{from…}} at any depth and every `path` / `resume_from` value naming `from` now names `to`,
- *  spacing and tail kept. Port of rename_node in src/ctc/runner/graph.py: keep the two in sync. */
+/** A rename's references: every {{from…}} at any depth and every `path` / `resume_from` / `items` value naming `from` now
+ *  names `to`, spacing and tail kept. Port of rename_node in src/ctc/runner/graph.py: keep the two in sync. */
 export function renameRefs(data: WfData, from: string, to: string): WfData {
   const ref = (s: string) => (s.split('.')[0] === from ? to + s.slice(from.length) : s)
   const walk = (v: unknown, key?: string): unknown => {
@@ -126,13 +131,14 @@ export function renameRefs(data: WfData, from: string, to: string): WfData {
     if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x, k)]))
     if (typeof v !== 'string') return v
     const s = v.replace(TPL, (m, r: string) => m.replace(r, ref(r)))
-    return key === 'path' || key === 'resume_from' ? ref(s) : s
+    return key === 'path' || key === 'resume_from' || key === 'items' ? ref(s) : s
   }
   return walk(data) as WfData
 }
 if (import.meta.env.DEV) {
-  const r = renameRefs({ command: 'echo {{fix.result}} {{ fixer.x }}', path: 'fix.exit_code' }, 'fix', 'repair')
-  console.assert(r.command === 'echo {{repair.result}} {{ fixer.x }}' && r.path === 'repair.exit_code', 'renameRefs self-check failed')
+  const r = renameRefs({ command: 'echo {{fix.result}} {{ fixer.x }}', path: 'fix.exit_code', items: 'fix.structured_output' }, 'fix', 'repair')
+  console.assert(r.command === 'echo {{repair.result}} {{ fixer.x }}' && r.path === 'repair.exit_code' && r.items === 'repair.structured_output',
+    'renameRefs self-check failed')
 }
 const snap = (g: Graph, s: WorkflowSettings, desc: string) => JSON.stringify([g, s, desc.trim()])
 const json = (v: unknown) => (v === undefined ? '' : JSON.stringify(v, null, 2))
@@ -249,7 +255,7 @@ function NodeForm({ n, ids, agents, set, rename, renameHandle, dropHandle, lastO
       }} />
       {n.type === 'trigger' && area('input', 'Default input')}
       {n.type === 'agent' && <>
-        {area('prompt', 'Prompt: {{input}}, {{node.field}}, {{run.branch}}, {{run.id}}, {{run.visit}}, {{now}}, {{vars.name}}')}
+        {area('prompt', 'Prompt: {{input}}, {{node.field}}, {{run.branch}}, {{run.id}}, {{run.visit}}, {{now}}, {{vars.name}}; in a for-each body {{item}}, {{index}}')}
         {text('cap', 'Capability (prefixes the prompt with /<invoke>)')}
         {pick('agent', 'Agent', agents, 'none')}
         <div className="row2">{text('model', 'Model')}{text('effort', 'Effort')}</div>
@@ -286,7 +292,12 @@ function NodeForm({ n, ids, agents, set, rename, renameHandle, dropHandle, lastO
         set('path', undefined); set('op', undefined); set('value', undefined) // the old single form becomes conditions
       }} />}
       {n.type === 'switch' && <Cases cases={d.cases ?? []} set={c => set('cases', c)} renameHandle={renameHandle} dropHandle={dropHandle} />}
-      {!['trigger', 'if', 'switch'].includes(n.type!) && check('disabled', 'Disabled: runs pass straight through (output = upstream output)')}
+      {n.type === 'foreach' && <>
+        {text('items', 'Items: path to a JSON array, e.g. names.stdout_tail')}
+        {num('max_items', 'Max items (default 50)')}
+        <div className="muted">body → nodes → back here, once per item, in order; {'{{item}}'} and {'{{index}}'} inside the body; done → {'{items: [...]}'}</div>
+      </>}
+      {!['trigger', 'if', 'switch', 'foreach'].includes(n.type!) && check('disabled', 'Disabled: runs pass straight through (output = upstream output)')}
       {num('max_visits', 'Max visits')}
       {area('notes', 'Notes (shown on hover)')}
     </>
@@ -605,6 +616,7 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
             <button className="btn" disabled={locked} onClick={() => add('approval', { message: 'Approve and continue?' })}>+ Approval</button>
             <button className="btn" disabled={locked} onClick={() => add('merge', {})}>+ Merge</button>
             <button className="btn" disabled={locked} onClick={() => add('stop', { message: 'Stopped: {{input}}' })}>+ Stop</button>
+            <button className="btn" disabled={locked} onClick={() => add('foreach', { items: '' })}>+ For-each</button>
             <Search value={q} onChange={setQ} placeholder="Find a capability" />
           </div>
           <div className="wf-list">
@@ -624,7 +636,7 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
               <Controls showInteractive={false} />
             </ReactFlow>
           </NodeCtx.Provider>
-          {nodes.length <= 1 && <div className="wf-hint">Drag capabilities here (each becomes an Agent node) or add Shell, IF, Switch, Approval, Merge and Stop nodes,<br />then connect them from the trigger. Edges that loop back are drawn dashed.</div>}
+          {nodes.length <= 1 && <div className="wf-hint">Drag capabilities here (each becomes an Agent node) or add Shell, IF, Switch, Approval, Merge, Stop and For-each nodes,<br />then connect them from the trigger. Edges that loop back are drawn dashed.</div>}
         </div>
         <aside className="wf-panel card pad">
           <fieldset className="form" disabled={locked}>
@@ -645,5 +657,5 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
 }
 
 export default function Workflows(props: ViewProps & { theme: string }) {
-  return <><Header crumb="Workflows" title="Workflow editor" sub="Agent, Shell, IF, Switch, Approval, Merge and Stop nodes on a canvas; each run gets its own git branch and worktree" /><ReactFlowProvider><Editor {...props} /></ReactFlowProvider></>
+  return <><Header crumb="Workflows" title="Workflow editor" sub="Agent, Shell, IF, Switch, Approval, Merge, Stop and For-each nodes on a canvas; each run gets its own git branch and worktree" /><ReactFlowProvider><Editor {...props} /></ReactFlowProvider></>
 }

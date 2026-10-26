@@ -11,7 +11,8 @@ output (graph.passthrough); stop -> throw new Error(<its message>). Templates fi
 workflow's `args` (else the trigger's input), {{vars.x}} the file's vars:, {{now}} the time, {{node.x}} that node's
 output, shell values single-quoted like shlex.quote. Every string from the graph is embedded with json.dumps, so no
 prompt or command can break out into code.
-Not exported: approval nodes (a native run can't pause for a sign-off: the caller refuses them), {{run.id}},
+Not exported: approval nodes (a native run can't pause for a sign-off: the caller refuses them), for-each nodes
+(has_foreach: no native equivalent yet), {{run.id}},
 {{run.visit}} and {{run.trigger}} (no native run record), settings.max_run_minutes (no native wall clock), error edges
 (on_error: error_output; a native agent's failure is not a branch, so they are refused), regex conditions
 (Python re and JS RegExp differ, so a script could branch where the walker would not), and per-node
@@ -76,6 +77,8 @@ def to_js(g: dict, name: str, description: str = "") -> str:
     nodes = {n["id"]: (g.get("defaults") or {}) | n for n in g["nodes"]}
     if gate := next((i for i, n in nodes.items() if n["type"] == "approval"), None):
         raise ValueError(f"has_approval: {gate}")
+    if fe := next((i for i, n in nodes.items() if n["type"] == "foreach"), None):
+        raise ValueError(f"has_foreach: {fe}: for-each has no native equivalent yet; remove it to export")
     if e := next((e for e in g["edges"] if str(e.get("handle")).lower() == "error"
                   and nodes[e["from"]]["type"] != "switch"), None):  # a switch's "error" is a case name
         raise ValueError(f"error_edge: {e['from']} -> {e['to']}: a native workflow has no error branch")
