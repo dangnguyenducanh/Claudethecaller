@@ -1,6 +1,6 @@
 # 07 — schedule-head-version
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: none
 Spec: `.scratch/n8n-parity/spec.md` (read it first; this ticket implements part of it)
 Touches: src/ctc/runner/schedule.py, src/ctc/server/runs.py (schedule enable path), tests/test_schedule.py
@@ -21,3 +21,5 @@ A scheduled run of a project-scope workflow loads the file from the project's co
 Unit tests with a tmp git repo; engine seam not needed.
 
 ## Comments
+
+2026-10-26 — resolved on branch `n8n-07-schedule-head-version`, merged into `m5-n8n-parity` (tasks T106–T109 in specs/001-n8n-parity/tasks.md). `schedule.committed()` reads `git show HEAD:./<rel>`; `tick()` submits with `head=True`; `submit_run(head=...)` raises 422 `not_committed`; `set_schedule` validates the saved graph when enabling. Tests: tests/test_schedule.py (8, one DB case on its own throwaway schema).
