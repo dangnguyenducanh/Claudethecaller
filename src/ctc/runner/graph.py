@@ -8,7 +8,9 @@ default, and the first matching case's handle fires. An agent or shell node may 
 started with pinned completes it with that output instead of running it (the engine applies it, not the walker).
 `disabled: true` on any node but trigger, IF and switch: the engine completes it without running it, its output the
 upstream output (passthrough()). A shell with `idempotent: true` may carry `retry: {max_tries: 1..5, wait_s: 0..300}`:
-the engine re-runs it while it exits non-zero or times out (agents never auto-retry).
+the engine re-runs it while it exits non-zero or times out (agents never auto-retry). An agent or shell picks `on_error:
+stop|continue|error_output` (default stop; legacy `fail` = stop): with error_output its out-edges with handle `error`
+carry its failure ({error, output_tail, exit_code}, complete(failed=True)) and the others its success.
 State (wf_runs.state, `{}` = not started): {inbox: {node: {"<edge#>": "data"|"skip"}}, deferred: [edge#], ready: [node],
 visits: {node: n}, execs: n, skipped: [node]}; edge# is the edge's index in graph["edges"]. visits counts runs and skips.
 Engine loop: `while (r := ready(g, st)): run batch(g, r) together (visit = visits.get(id, 0) + 1; a merge's output is
@@ -139,6 +141,7 @@ def validate(g: dict) -> list[dict]:
     nodes = [(g.get("defaults") or {}) | n for n in g["nodes"]]  # as the engine and the exporter see them
     ids = [n.get("id") for n in nodes]
     known = set(ids)
+    byid = {n.get("id"): n for n in nodes}
     triggers = [n.get("id") for n in nodes if n.get("type") == "trigger"]
     if len(triggers) != 1:
         err(f"a workflow needs exactly one trigger, found {len(triggers)}", triggers[1] if len(triggers) > 1 else None)
@@ -181,6 +184,13 @@ def validate(g: dict) -> list[dict]:
                       and type(rt.get("max_tries")) is int and 1 <= rt["max_tries"] <= 5
                       and type(w := rt.get("wait_s", 0)) in (int, float) and 0 <= w <= 300):
                 err("retry must be {max_tries: 1-5, wait_s: 0-300 (seconds)}", nid)
+        if (oe := n.get("on_error")) is not None:  # FR-014; "fail" is the old editor's word for stop
+            if t not in ("agent", "shell"):
+                err("on_error is for agent and shell nodes only", nid)
+            elif oe not in ("stop", "continue", "error_output", "fail"):
+                err(f"on_error must be stop, continue or error_output, not {oe!r}", nid)
+            elif oe == "error_output" and not any(e.get("from") == nid and _handle(e) == "error" for e in g["edges"]):
+                err("on_error: error_output needs an error edge (the red error handle)", nid)  # else a failure skips all
         if "pin" in n:
             pin = n["pin"]
             if t not in ("agent", "shell"):
@@ -234,8 +244,10 @@ def validate(g: dict) -> list[dict]:
         if e.get("from") not in known or e.get("to") not in known:
             err(f"edge {e.get('from')} -> {e.get('to')} points at a missing node",
                 next((x for x in (e.get("from"), e.get("to")) if x in known), None))
+        src = byid.get(e.get("from")) or {}
+        if src and _handle(e) == "error" and src.get("type") not in ("if", "switch") and src.get("on_error") != "error_output":
+            err(f"edge {e['from']} -> {e.get('to')}: an error edge needs on_error: error_output on {e['from']}", e["from"])
     if len(triggers) == 1:
-        byid = {n.get("id"): n for n in nodes}
         gates = {nid for nid, n in byid.items() if n.get("type") == "approval" and not n.get("disabled")}  # disabled: passes
         ungated = _reach(triggers[0], [(e.get("from"), e.get("to")) for e in g["edges"]], gates)
         for nid in sorted(ungated - gates):
@@ -253,8 +265,9 @@ def validate(g: dict) -> list[dict]:
                 t = byid.get(nid, {}).get("type")
                 if t in ("merge", "approval"):
                     err(f"no {t} node inside a loop ({loop})", nid)
-                elif t not in ("if", "switch") and sum(e.get("from") == nid for e in g["edges"]) > 1:
-                    err(f"only an IF or Switch may branch inside a loop ({loop})", nid)
+                elif t not in ("if", "switch") and len(hs := [_handle(e) == "error" for e in g["edges"] if e.get("from") == nid]) > 1 \
+                        and not (byid.get(nid, {}).get("on_error") == "error_output" and sorted(hs) == [False, True]):
+                    err(f"only an IF or Switch may branch inside a loop ({loop})", nid)  # error_output: one ok + one error
     return errs
 
 
@@ -301,10 +314,11 @@ def passthrough(g: dict, st: dict, node_id: str, ctx: dict):
     return ctx.get(srcs[0]) if srcs else None
 
 
-def complete(g: dict, st: dict, node_id: str, output: dict | None) -> str | None:
+def complete(g: dict, st: dict, node_id: str, output: dict | None, failed: bool = False) -> str | None:
     """Record a finished node: data on every out-edge; an IF ({value}: handle true/false) or a switch ({case}: handle
-    = case name or default) sends data on the taken handle and defers the rest (rule 3); a back-edge fires last (rule 5).
-    Returns the run's error when a loop passes its cap. Mutates st."""
+    = case name or default) sends data on the taken handle and defers the rest (rule 3); any other node sends data on
+    its `error` edges when failed (on_error: error_output) and on the others when not, deferring the rest the same way;
+    a back-edge fires last (rule 5). Returns the run's error when a loop passes its cap. Mutates st."""
     st["ready"].remove(node_id)
     st["inbox"].pop(node_id, None)
     st["visits"][node_id] = st["visits"].get(node_id, 0) + 1
@@ -312,10 +326,11 @@ def complete(g: dict, st: dict, node_id: str, output: dict | None) -> str | None
     back = back_edges(g)
     t = next(n for n in g["nodes"] if n["id"] == node_id)["type"]
     taken = (str(bool((output or {}).get("value"))).lower() if t == "if"
-             else str((output or {}).get("case")) if t == "switch" else None)  # None: no handle, nothing deferred
+             else str((output or {}).get("case")) if t == "switch" else None)  # None: error edges iff failed
     outs = [i for i, e in enumerate(g["edges"]) if e["from"] == node_id]
     for i in sorted(outs, key=lambda i: i in back):  # defer before a fire, so the fire clears this pass's deferrals
-        if taken is not None and _handle(g["edges"][i]) != taken:
+        h = _handle(g["edges"][i])
+        if (h != taken) if taken is not None else ((h == "error") != failed):
             st["deferred"].append(i)
         elif i not in back:
             _send(g, st, i, "data", back)

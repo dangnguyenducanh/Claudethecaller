@@ -105,11 +105,12 @@ export interface WfNode {
   disabled?: boolean // any node but trigger, IF and Switch: runs pass straight through
   input?: string // trigger
   prompt?: string; cap?: string; agent?: string; model?: string; effort?: string; permission_mode?: 'acceptEdits' | 'dontAsk' | 'plan' // agent
-  allowed_tools?: string[]; mcp_config?: unknown; json_schema?: unknown; resume_from?: string; max_turns?: number; on_error?: 'fail' | 'continue'
+  allowed_tools?: string[]; mcp_config?: unknown; json_schema?: unknown; resume_from?: string; max_turns?: number
   readonly?: boolean // agent only: read tools + dontAsk; ready readonly agents batch in parallel
   command?: string // shell
   idempotent?: boolean; retry?: { max_tries: number; wait_s?: number } // shell only: max_tries 1..5, wait_s 0..300
   timeout_s?: number // agent and shell
+  on_error?: 'stop' | 'continue' | 'error_output' // agent and shell; error_output adds the red 'error' handle
   pin?: { output: Record<string, unknown> } // agent and shell; used only by runs started with pinned
   path?: string; op?: Op; value?: unknown // if, the old single-condition form
   conditions?: Condition[]; combine?: 'and' | 'or' // if
@@ -118,7 +119,7 @@ export interface WfNode {
 }
 export interface Graph {
   nodes: WfNode[]
-  edges: { from: string; to: string; handle?: string }[] // IF 'true' | 'false'; Switch case name | 'default'
+  edges: { from: string; to: string; handle?: string }[] // IF 'true' | 'false'; Switch case name | 'default'; agent/shell 'error'
   defaults?: { max_visits?: number } // a run's snapshot carries `defaults`
 }
 export interface WorkflowSettings { permission: 'worktree' | 'container'; allow_extra_usage: boolean; auto_resume: boolean; max_run_tokens: number | null }
