@@ -5,19 +5,24 @@ trigger `schedule` once nothing holds it: a queued/running/waiting run of that w
 owner, or a non-runner Claude session active in the last runner.idle_wait_min minutes (decision 8; env
 CTC_IDLE_WAIT_MIN overrides, 0 = off). A held slot fires when the hold ends, and several held slots fire once. A slot
 that passed while no daemon ran (over 2 min before this one started) is skipped. Either way last_fired_at becomes that
-slot, the latest one handled, so nothing at or before it fires again.
+slot, the latest one handled, so nothing at or before it fires again. A scheduled run walks the project's workflow file
+as committed at HEAD (half-edited files never run unattended) and records that version's sha256 as file_sha.
 `python -m ctc.runner.schedule` runs the self-check.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import yaml
 from croniter import croniter
+
+from ctc.runner.graph import load
 
 log = logging.getLogger(__name__)
 MISSED = timedelta(minutes=2)  # a slot this long before the daemon started passed while no daemon ran: skipped
@@ -67,6 +72,19 @@ def _base(r: dict, o: str) -> datetime:
     return max([t for t in (r["last_fired_at"], ARMED.get((o, r["workflow"]))) if t] or [STARTED])
 
 
+async def committed(repo: str, path: str) -> tuple[dict, str] | None:
+    """(graph, sha256 of its bytes) of the workflow file at path as committed at repo's HEAD; None when it has no
+    committed version (never committed, no commit yet, not a repo)."""
+    from ctc.runner.engine import git  # engine imports this module
+
+    rel = Path(path).resolve().relative_to(Path(repo).resolve()).as_posix()
+    try:
+        text = await git(repo, "show", f"HEAD:./{rel}")  # ./ = relative to repo, which can sit below the git top level
+    except RuntimeError:
+        return None
+    return load(next(yaml.safe_load_all(text), None) or {}), hashlib.sha256(text.encode()).hexdigest()
+
+
 def view(r: dict | None, o: str) -> dict | None:
     """A wf_schedules row as the API's schedule: next_at is the next slot (in the past while one is held), null when off."""
     if not r:
@@ -102,8 +120,9 @@ async def tick(st, o: str | None) -> float:
                 log.info("schedule %s: skipped %s, it passed while no daemon ran", w, slot)
                 continue
             try:  # the slot is spent either way: a run that can't start is not retried every pass
-                log.info("schedule %s: fired %s as run %s", w, slot, await submit_run(st, "local", o, w, r["input"], None, "schedule"))
-            except Exception as e:  # noqa: BLE001 - HTTPException (file gone, invalid graph) or the DB
+                rid = await submit_run(st, "local", o, w, r["input"], None, "schedule", head=True)
+                log.info("schedule %s: fired %s as run %s", w, slot, rid)
+            except Exception as e:  # noqa: BLE001 - HTTPException (file gone, not committed, invalid graph) or the DB
                 log.warning("schedule %s: slot %s not run: %s", w, slot, getattr(e, "detail", e))
     except Exception:
         log.exception("runner: schedule pass failed")

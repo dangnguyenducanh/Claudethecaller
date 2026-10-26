@@ -1,15 +1,20 @@
-import { Background, Controls, ReactFlow } from '@xyflow/react'
-import { Fragment, useEffect, useState } from 'react'
+import { Background, Controls, ReactFlow, useNodesInitialized, useReactFlow } from '@xyflow/react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { NEED_DAEMON, api, errText, usingMock } from './api'
 import type { Diff, RunDetail, RunStatus, Step } from './types'
-import { Header, Segmented, fmtTime, fmtTokens } from './ui'
+import { Header, Segmented, fmtMs, fmtTime, fmtTokens } from './ui'
 import { NodeCtx, dashBack, nodeTypes, toFlow } from './Workflows'
 
 const PILL: Record<string, string> = { running: 'warn', waiting: 'warn', quota: 'warn', done: 'good', failed: 'bad', timeout: 'bad' } // run and step statuses
-const ACTIVE: RunStatus[] = ['queued', 'running', 'waiting']
+// ponytail: polls every 1.5 s through a quota window (can be hours); slow quota polling if DB load shows, SSE is the upgrade path (PLAN.md:505)
+const ACTIVE: RunStatus[] = ['queued', 'running', 'waiting', 'quota']
 const POLL_MS = 1500 // config/server.yaml runner.poll_s
 const MAX_ROWS = 1000
 const TABS = ['output', 'log', 'diff', 'meta'] as const
+type RetryBody = { from_node?: string; to_node?: string }
+/** engine.fresh_tokens: every count but cache reads, as wf_runs.tokens adds them up. */
+const freshTokens = (t: Record<string, number>) => Object.entries(t).reduce((n, [k, v]) => (k === 'cache_read_input_tokens' ? n : n + v), 0)
+const took = (s: Step) => (s.status === 'running' ? 'running' : s.status === 'skipped' || !s.ended_at ? '—' : fmtMs(Date.parse(s.ended_at) - Date.parse(s.started_at)))
 
 /** Loads, then reloads every 1.5 s while `again(result)` holds; stops on unmount or when `deps` change. */
 function usePoll<T>(load: () => Promise<T>, again: (t: T) => boolean, deps: unknown[]): [T | null, string] {
@@ -74,6 +79,21 @@ function RunList({ onOpen }: { onOpen: (id: number) => void }) {
   )
 }
 
+/** The fitView prop can fire before the custom nodes are measured, leaving the run graph off-screen (QC D1): fit once
+ * when React Flow reports every node measured. */
+function FitOnce() {
+  const measured = useNodesInitialized()
+  const { fitView } = useReactFlow()
+  const done = useRef(false)
+  useEffect(() => {
+    if (measured && !done.current) {
+      done.current = true
+      void fitView({ maxZoom: 1 })
+    }
+  }, [measured, fitView])
+  return null
+}
+
 function RunPage({ id, theme, onBack }: { id: number; theme: string; onBack: () => void }) {
   const [rev, setRev] = useState(0)
   const [run, err] = usePoll(() => api.run(id), r => ACTIVE.includes(r.status), [id, rev])
@@ -86,13 +106,22 @@ function RunPage({ id, theme, onBack }: { id: number; theme: string; onBack: () 
 
   const visits: Record<string, Step[]> = {} // every visit per node, in visit order
   for (const s of [...run.steps].sort((a, b) => a.visit - b.visit)) (visits[s.node_id] ??= []).push(s)
-  const status = Object.fromEntries(Object.entries(visits).map(([n, vs]) => [n, vs[vs.length - 1].status]))
+  // the latest visit that ran (a trailing skip, e.g. a loop's or for-each's last pass, is not the node's outcome; QC D2),
+  // else the latest one; reused / pinned / disabled label the node
+  const status = Object.fromEntries(Object.entries(visits).map(([n, vs]) => {
+    const s = [...vs].reverse().find(v => v.status !== 'skipped') ?? vs[vs.length - 1]
+    return [n, s.marker ?? s.status]
+  }))
   const runs = Object.fromEntries(Object.entries(visits).map(([n, vs]) => [n, vs.filter(s => s.status !== 'skipped').length]))
   const f = toFlow(run.graph) // read once by the uncontrolled canvas below
   const vs = sel ? visits[sel] ?? [] : []
   const step = vs.find(s => s.visit === visit) ?? vs[vs.length - 1]
   const act = (call: () => Promise<unknown>) => async () => { try { setMsg(''); await call(); setRev(r => r + 1) } catch (e) { setMsg(errText(e)) } }
   const cancel = act(() => api.cancelRun(run.id))
+  const retry = async (body: RetryBody) => { // a new run linked to this one; open it
+    try { setMsg(''); const r = await api.retryRun(run.id, { ...body, trigger: 'button' }); location.hash = `run/${r.run_id}` } catch (e) { setMsg(errText(e)) }
+  }
+  const ended = !ACTIVE.includes(run.status)
   const wait = run.steps.find(s => s.status === 'waiting')
 
   return (
@@ -102,10 +131,12 @@ function RunPage({ id, theme, onBack }: { id: number; theme: string; onBack: () 
         <button className="btn" onClick={onBack}>All runs</button>
         <button className="btn" onClick={() => setWhole(!whole)}>{whole ? 'Hide' : 'Show'} run diff</button>
         {ACTIVE.includes(run.status) && <button className="btn danger" onClick={cancel}>Cancel</button>}
+        {run.status === 'failed' && <button className="btn" title="A new run from the failed step, reusing the earlier outputs" onClick={() => retry({})}>Retry</button>}
       </Header>
       <div className="toolbar">
         <span className={'tag ' + (PILL[run.status] ?? '')}>{run.status}</span>
         {run.branch && <span className="mono">{run.branch}</span>}
+        {run.parent_run_id && <a href={`#run/${run.parent_run_id}`}>from run #{run.parent_run_id}{run.from_node ? ` at ${run.from_node}` : ''}{run.to_node ? `, up to ${run.to_node}` : ''}</a>}
         {run.pr_url && <a href={run.pr_url} target="_blank" rel="noreferrer">{run.pr_url}</a>}
         {run.error && <span className="err">{run.error}</span>}
         {(msg || err) && <span className="err">{msg || err}</span>}
@@ -141,13 +172,32 @@ function RunPage({ id, theme, onBack }: { id: number; theme: string; onBack: () 
               proOptions={{ hideAttribution: true }}>
               <Background gap={20} />
               <Controls showInteractive={false} />
+              <FitOnce />
             </ReactFlow>
           </NodeCtx.Provider>
         </div>
         <aside className="wf-panel card pad">
-          {step ? <StepPanel run={run} step={step} visits={vs.length > 1 ? vs : []} onVisit={setVisit} />
+          {step ? <StepPanel run={run} step={step} visits={vs.length > 1 ? vs : []} onVisit={setVisit} onRetry={ended ? retry : undefined} />
             : <div className="muted">{sel ? `${sel} has not run yet.` : 'Click a node to see its output, log, diff and session.'}</div>}
         </aside>
+      </div>
+      <div className="card tablewrap">
+        <table>
+          <thead><tr><th>Node</th><th className="num">Visit</th><th>Status</th><th className="num">Duration</th><th className="num">Tokens</th><th>Error</th></tr></thead>
+          <tbody>
+            {run.steps.map(s => ( // the API's order: s.id, which is start order
+              <tr key={s.id} className="click" onClick={() => { setSel(s.node_id); setVisit(s.visit) }}>
+                <td className="mono">{s.node_id}</td>
+                <td className="num">{s.visit}</td>
+                <td><span className={'tag ' + (PILL[s.status] ?? '')}>{s.status}</span>{s.marker && <span className="tag">{s.marker}</span>}</td>
+                <td className="num">{took(s)}</td>
+                <td className="num">{s.tokens ? fmtTokens(freshTokens(s.tokens)) : '—'}</td>
+                <td className="err">{(s.error ?? '').split('\n')[0]}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!run.steps.length && <div className="empty">No steps yet.</div>}
       </div>
     </>
   )
@@ -174,13 +224,21 @@ function Compare({ a, b, node }: { a: number; b: number; node: string }) {
   )
 }
 
-function StepPanel({ run, step, visits, onVisit }: { run: RunDetail; step: Step; visits: Step[]; onVisit: (v: number) => void }) {
+/** onRetry: set once the run has ended; starts a new run from / up to this step's node. */
+function StepPanel({ run, step, visits, onVisit, onRetry }: { run: RunDetail; step: Step; visits: Step[]; onVisit: (v: number) => void; onRetry?: (b: RetryBody) => void }) {
   const [tab, setTab] = useState<(typeof TABS)[number]>('output') // kept while switching nodes
+  const trig = run.graph.nodes.find(n => n.type === 'trigger')?.id
   return (
     <div className="form">
       <div className="card-title mono">{step.node_id}<span className={'tag ' + (PILL[step.status] ?? '')}>{step.status}</span>
+        {step.marker && <span className="tag">{step.marker}</span>}
         {visits.length > 0 && <select aria-label="Visit" value={step.visit} onChange={e => onVisit(Number(e.target.value))}>
           {visits.map(s => <option key={s.visit} value={s.visit}>visit {s.visit}</option>)}</select>}</div>
+      {step.marker === 'reused' && <div className="muted">Output reused from run #{run.parent_run_id}</div>}
+      {onRetry && step.status !== 'skipped' && <div className="actions">
+        <button className="btn" title="A new run from this node, reusing the earlier outputs" onClick={() => onRetry({ from_node: step.node_id })}>Run from here</button>
+        <button className="btn" title="A new run from the start that stops after this node" onClick={() => onRetry({ from_node: trig, to_node: step.node_id })}>Run to here</button>
+      </div>}
       <Segmented options={TABS} value={tab} onChange={setTab} />
       {tab === 'output' && <>
         {step.error && <div className="err">{step.error}</div>}
@@ -199,7 +257,7 @@ function Meta({ run, step }: { run: RunDetail; step: Step }) {
   const [copied, setCopied] = useState(false)
   const cmd = run.worktree && step.session_id ? `cd ${run.worktree} && claude --resume ${step.session_id}` : ''
   const rows: [string, unknown][] = [
-    ['kind', step.kind], ['visit', step.visit], ['session', step.session_id], ['turns', step.num_turns],
+    ['kind', step.kind], ['visit', step.visit], ['tries', step.tries > 1 && step.tries], ['session', step.session_id], ['turns', step.num_turns],
     ['tokens', step.tokens && JSON.stringify(step.tokens)], ['cost (notional)', step.cost_usd != null && `$${step.cost_usd.toFixed(4)}`],
     ['denials', step.permission_denials?.length && JSON.stringify(step.permission_denials)], ['overage', step.overage != null && String(step.overage)],
     ['files', step.files?.length], ['started', fmtTime(step.started_at)], ['ended', step.ended_at && fmtTime(step.ended_at)],

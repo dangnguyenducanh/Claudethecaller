@@ -235,6 +235,18 @@ create table if not exists {schema}.wf_steps (
   ended_at timestamptz,
   unique (run_id, node_id, visit)
 );
+-- a retry / run-from / run-to: a new run linked to its parent (set null, so pruning a parent never fails)
+alter table {schema}.wf_runs
+  add column if not exists parent_run_id bigint references {schema}.wf_runs (id) on delete set null,
+  add column if not exists from_node text,
+  add column if not exists to_node text;
+-- run started with pinned: nodes with pin return pin.output (editor and CLI only)
+alter table {schema}.wf_runs add column if not exists pinned boolean not null default false;
+-- seconds spent `running` over all claims (not quota/approval waits or a planned stop's downtime): max_run_minutes
+alter table {schema}.wf_runs add column if not exists active_s double precision not null default 0;
+-- marker = completed without executing (reused from the parent run, pinned output, disabled pass-through)
+alter table {schema}.wf_steps add column if not exists marker text check (marker in ('reused', 'pinned', 'disabled'));
+alter table {schema}.wf_steps add column if not exists tries int not null default 1;  -- shell retry-on-fail tries (US7)
 
 create table if not exists {schema}.wf_schedules (
   owner text not null,

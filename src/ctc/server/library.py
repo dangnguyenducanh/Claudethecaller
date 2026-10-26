@@ -9,6 +9,7 @@ invalid_graph) and `settings`, plus the `steps:` the router reads, derived from 
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import os
@@ -33,7 +34,7 @@ from ctc.memory.longterm import Memory as MemoryRow
 from ctc.memory.longterm import _unit, write_memory
 from ctc.runner import schedule
 from ctc.runner.engine import SETTINGS, owner
-from ctc.runner.graph import derived_steps, load, validate
+from ctc.runner.graph import derived_steps, load, validate, warnings
 from ctc.server import jobs
 from ctc.server.api import (
     DEC_COLS,
@@ -66,6 +67,7 @@ from ctc.server.schemas import (
     Ok,
     Override,
     OverrideSet,
+    SavedCapability,
     Scope,
     WorkflowSettings,
     to_decision,
@@ -121,6 +123,14 @@ def _inside(path: Path, root: Path) -> None:
         fail(403, "forbidden", f"{path} is in the real ~/.claude: set CTC_CLAUDE_HOME to a temp dir (or CTC_ALLOW_REAL_CLAUDE_HOME=1 after H3)")
 
 
+def _sha(path: Path) -> str | None:
+    """sha256 hex of a file's bytes (the editor's file_hash, runs.py's wf_runs.file_sha); None when it cannot be read."""
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
 def _local_only(st, what: str = "capability files can only be edited") -> None:
     if st.cfg["mode"] != "local":  # shared mode: never write files (or run workflows) on the daemon host for a remote client
         fail(403, "forbidden", f"{what} in local mode")
@@ -146,24 +156,28 @@ def _yaml(meta: dict) -> str:  # a ctc-workflows file: no frontmatter, no body; 
     return yaml.safe_dump(meta, sort_keys=False, allow_unicode=True, default_flow_style=None)
 
 
-def check_graph(g: dict) -> dict:
-    """ctc.runner.graph.validate; its first error -> 422 invalid_graph {message, node_id}."""
+def check_graph(g: dict) -> list[dict]:
+    """ctc.runner.graph.validate; its first error -> 422 invalid_graph {message, node_id, warnings}. Returns the
+    graph's warnings() (never blocking)."""
     try:
         errs = validate(g)
     except (AttributeError, TypeError, KeyError) as e:  # not the shape the walker reads (a hand-edited file)
         errs = [{"message": f"malformed workflow: {e!r}", "node_id": None}]
+    warns = warnings(g)
     if errs:
-        raise HTTPException(422, {"code": "invalid_graph", **errs[0]})
-    return g
+        raise HTTPException(422, {"code": "invalid_graph", **errs[0], "warnings": warns})
+    return warns
 
 
-def _wf_meta(graph: Graph | None, settings: WorkflowSettings | None) -> dict:
-    """The workflow file keys a save writes: settings; nodes + edges (validated) and the router's steps derived from them."""
-    meta = {"settings": settings.model_dump()} if settings else {}
+def _wf_meta(graph: Graph | None, settings: WorkflowSettings | None, vars: dict | None = None) -> tuple[dict, list[dict]]:
+    """(the workflow file keys a save writes, the graph's warnings): settings; nodes + edges (validated, with the file's
+    vars: block, which the editor never sends) and the router's steps derived from them."""
+    meta, warns = {"settings": settings.model_dump()} if settings else {}, []
     if graph:
-        g = check_graph(load(graph.model_dump(by_alias=True, exclude_none=True)))
+        g = load(graph.model_dump(by_alias=True, exclude_none=True))
+        warns = check_graph(g | {"vars": vars or {}, "settings": settings.model_dump() if settings else {}})
         meta |= {"nodes": g["nodes"], "edges": g["edges"], "steps": derived_steps(g)}
-    return meta
+    return meta, warns
 
 
 def _wf_doc(path: str) -> dict:
@@ -205,6 +219,7 @@ async def capability(cap_id: str, request: Request, project: str | None = None):
     if wf and st.cfg["mode"] == "local" and (o := await owner()):  # this login's (PUT /api/workflows/{id}/schedule)
         sched = schedule.view(await st.store.fetchrow("select * from wf_schedules where owner = %s and workflow = %s", (o, cap_id)), o)
     return {**c, "editable": c["namespace"] == "user" or c["namespace"].startswith("project@"), "schedule": sched,
+            "file_hash": _sha(Path(c["path"])),
             "cluster_members": sorted(i for i, x in st.store.catalog.items() if cl and x["cluster_id"] == cl and i != cap_id),
             "recent_decisions": [to_decision(r) for r in decs],
             "steps": [s for s in _workflow_steps(c["path"]) if isinstance(s.get("cap"), str)] if wf else None,
@@ -212,7 +227,7 @@ async def capability(cap_id: str, request: Request, project: str | None = None):
             "settings": SETTINGS | (doc.get("settings") or {}) if wf else None}
 
 
-@router.post("/capabilities", response_model=Capability, status_code=201)
+@router.post("/capabilities", response_model=SavedCapability, status_code=201)
 async def create_capability(b: NewCapability, request: Request):
     st, u = ctx(request)
     _local_only(st)
@@ -229,9 +244,10 @@ async def create_capability(b: NewCapability, request: Request):
     _inside(path, root)
     if f"{ns}:{b.name}" in st.store.catalog:
         fail(409, "conflict", f"{ns}:{b.name} already exists")
-    meta = {"name": b.name, "description": b.description}
+    meta, warns = {"name": b.name, "description": b.description}, []
     if b.kind == "workflow":
-        meta |= _wf_meta(b.graph, b.settings)
+        m, warns = _wf_meta(b.graph, b.settings)
+        meta |= m
         if not b.graph:
             meta["steps"] = [s.model_dump(exclude_none=True) for s in b.steps or []]
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -241,10 +257,10 @@ async def create_capability(b: NewCapability, request: Request):
     except FileExistsError:
         fail(409, "conflict", f"{path} already exists")
     await _reindex(st, path, b.kind, ns)
-    return await _cap(st, u, f"{ns}:{b.name}", await project_id(st, u, b.project))
+    return {**await _cap(st, u, f"{ns}:{b.name}", await project_id(st, u, b.project)), "warnings": warns}
 
 
-@router.patch("/capabilities/{cap_id}", response_model=Capability)
+@router.patch("/capabilities/{cap_id}", response_model=SavedCapability)
 async def update_capability(cap_id: str, b: CapabilityPatch, request: Request):
     st, u = ctx(request)
     c = _known(st, cap_id)
@@ -252,6 +268,8 @@ async def update_capability(cap_id: str, b: CapabilityPatch, request: Request):
         fail(422, "invalid", "description must not be blank")
     path = Path(c["path"])
     _inside(path, _cap_root(st, c))
+    if b.base_hash is not None and _sha(path) != b.base_hash:  # a deleted file (None) is a conflict too
+        fail(409, "changed_on_disk", f"{path} changed on disk since it was loaded: reload it, or save without base_hash to overwrite")
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
@@ -265,13 +283,29 @@ async def update_capability(cap_id: str, b: CapabilityPatch, request: Request):
         fail(422, "invalid", f"{path} has no YAML {'mapping' if plain else 'frontmatter'} to edit")
     if b.description is not None:
         meta["description"] = b.description
+    warns = []
     if c["kind"] == "workflow":
-        meta |= _wf_meta(b.graph, b.settings)
+        old = meta["settings"] if isinstance(meta.get("settings"), dict) else {}
+        m, warns = _wf_meta(b.graph, b.settings, meta.get("vars"))
+        meta |= m
+        if b.settings:  # the editor sends only WorkflowSettings' fields: keep YAML-only keys (settings.notify)
+            meta["settings"] = old | b.settings.model_dump()
         if b.steps is not None and not b.graph:
             meta["steps"] = [s.model_dump(exclude_none=True) for s in b.steps]
-    path.write_text(_yaml(meta) if plain else _render(meta, body if b.body is None else b.body), encoding="utf-8")
+    # write a temp file beside the real one, re-check the hash, then rename: an edit that landed since the first check
+    # is refused, never overwritten. ponytail: an edit in the microseconds between re-check and rename still loses
+    # (a lock on the file if several writers ever share one)
+    real = path.resolve()  # a symlinked file stays a symlink
+    tmp = real.with_name(f".{real.name}.{uuid.uuid4().hex[:8]}.tmp")
+    tmp.write_text(_yaml(meta) if plain else _render(meta, body if b.body is None else b.body), encoding="utf-8")
+    with contextlib.suppress(OSError):
+        shutil.copymode(real, tmp)
+    if b.base_hash is not None and _sha(real) != b.base_hash:
+        tmp.unlink()
+        fail(409, "changed_on_disk", f"{path} changed on disk while saving: reload it, or save without base_hash to overwrite")
+    os.replace(tmp, real)
     await _reindex(st, path, c["kind"], c["namespace"])
-    return await _cap(st, u, cap_id)
+    return {**await _cap(st, u, cap_id), "file_hash": _sha(path), "warnings": warns}
 
 
 @router.delete("/capabilities/{cap_id}", response_model=Ok)

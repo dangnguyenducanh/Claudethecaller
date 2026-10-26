@@ -1,17 +1,35 @@
 """Workflow walker (PLAN.md m5 "Walker rules"): pure functions over a graph dict and a JSON-able state dict, no I/O.
 
-Graph = {nodes: [{id, type, pos, ...}], edges: [{from, to, handle?}]}. Types: trigger|agent|shell|if|approval|merge,
-loops (back-edges, rule 5), ready readonly nodes in one batch (rule 7).
+Graph = {nodes: [{id, type, pos, ...}], edges: [{from, to, handle?}], vars?: {name: value}, settings?}; the trigger
+may declare `inputs: [{name, type: string|number|bool|json, required, default, description}]`, which every run start
+checks and coerces (coerce_inputs()) into {{input.<name>}}; without them {{input}} is the run's free text. Types:
+trigger|agent|shell|if|switch|approval|merge|stop (fails the run with its rendered message; no out-edges), loops
+(back-edges, rule 5), ready readonly agents in one batch (rule 7). Templates (render()) read input, run.*, now,
+vars.* and node outputs; warnings() flags refs that would render empty. An IF tests `conditions: [{path, op,
+value}]` (or the old single path/op/value) joined by `combine: and|or`; ops: eq ne gt ge lt le contains not_contains
+regex exists truthy. A switch has `cases: [{name, conditions, combine}]`; its out-edges' handles are case names or
+default, and the first matching case's handle fires. An agent or shell node may carry `pin: {output: {...}}`: a run
+started with pinned completes it with that output instead of running it (the engine applies it, not the walker).
+`disabled: true` on any node but trigger, IF and switch: the engine completes it without running it, its output the
+upstream output (passthrough()). A shell with `idempotent: true` may carry `retry: {max_tries: 1..5, wait_s: 0..300}`:
+the engine re-runs it while it exits non-zero or times out (agents never auto-retry). An agent or shell picks `on_error:
+stop|continue|error_output` (default stop; legacy `fail` = stop): with error_output its out-edges with handle `error`
+carry its failure ({error, output_tail, exit_code}, complete(failed=True)) and the others its success.
+A foreach (`items`: path to a JSON array, `max_items` default 50) is a loop head: its `body` edge enters nodes that
+all lead back to it, run once per item in order with {{item}} and {{index}} (current_item()); its output is
+foreach_step(): {item, index} per pass, then {items: [body outputs]} on its `done` edge. max_visits count per item.
 State (wf_runs.state, `{}` = not started): {inbox: {node: {"<edge#>": "data"|"skip"}}, deferred: [edge#], ready: [node],
-visits: {node: n}, execs: n, skipped: [node]}; edge# is the edge's index in graph["edges"]. visits counts runs and skips.
+visits: {node: n}, execs: n, skipped: [node], each: {foreach: {items, out, truncated_from, last}}, base: {node:
+visits at its item's start}}; edge# is the edge's index in graph["edges"]. visits counts runs and skips.
 Engine loop: `while (r := ready(g, st)): run batch(g, r) together (visit = visits.get(id, 0) + 1; a merge's output is
-merge_output() before its complete()), then complete(g, st, id, output) for each`;
+merge_output() and a foreach's foreach_step() before its complete()), then complete(g, st, id, output) for each`;
 complete() returns the run's error when a loop passes its cap; a node that lands in `skipped` gets a skipped step row
 (visit = visits[id]).
 """
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 import shlex
@@ -19,13 +37,24 @@ from pathlib import Path
 
 import yaml
 
-TYPES = {"trigger", "agent", "shell", "if", "approval", "merge"}
-OPS = {"eq", "ne", "contains", "truthy"}
+TYPES = {"trigger", "agent", "shell", "if", "switch", "approval", "merge", "stop", "foreach"}
+OPS = {"eq", "ne", "gt", "ge", "lt", "le", "contains", "not_contains", "regex", "exists", "truthy"}
+NUM = re.compile(r"\s*-?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][-+]?[0-9]+)?\s*")  # [0-9], not \d: export.py reuses it in JS
+REGEX_MAX = 10_000  # chars of a value a regex condition searches
 PERMS = (None, "acceptEdits", "dontAsk", "plan")  # never bypassPermissions/auto on the host (Permissions decision)
 PUSH = re.compile(r"\b(git\s+push|gh\s+pr\s+(create|merge))\b")
 SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+CASE = re.compile(r"[a-z0-9][a-z0-9_-]*")  # switch case names: lowercase, so they compare to _handle() as-is
 TPL = re.compile(r"\{\{\s*([\w.-]+)\s*\}\}")
-ROOTS = {"input", "run"}  # template roots that are not node ids, so not allowed as ids
+ROOTS = {"input", "run", "now", "vars", "item", "index"}  # template roots that are not node ids, so not allowed as ids
+RUN_KEYS = {"branch", "id", "visit", "trigger"}
+MAX_ITEMS = 50  # a foreach's default max_items
+INPUT_TYPES = ("string", "number", "bool", "json")  # a trigger input's type (coerce_inputs)
+BOOLS = {"true": True, "1": True, "yes": True, "on": True, "false": False, "0": False, "no": False, "off": False}
+# a node type's output fields, as proc.run_agent / run_shell and the engine write them (warnings() checks refs against them)
+OUT_KEYS = {"trigger": {"input"}, "agent": {"result", "structured_output", "is_error", "subtype"},
+            "shell": {"exit_code", "stdout_tail", "stderr_tail", "duration_ms"}, "if": {"value"}, "switch": {"case"},
+            "approval": {"approved", "note"}, "merge": {"inputs"}, "foreach": {"items", "item", "index", "truncated_from"}}
 _MISSING = object()
 
 
@@ -34,6 +63,45 @@ def load(src) -> dict:
     workflow: legacy `workflows/*.yaml|md` files are frontmatter plus a body."""
     g = (next(yaml.safe_load_all(Path(src).read_text()), None) if isinstance(src, (str, Path)) else dict(src)) or {}
     return g | {"nodes": g.get("nodes") or [], "edges": g.get("edges") or []}
+
+
+def coerce_inputs(trigger: dict, given: dict) -> dict:
+    """A run's typed inputs: given {name: value} checked against the trigger's `inputs` and coerced (a number from
+    "3" or "2.5", a bool from true/1/yes/on or false/0/no/off, json from its text); an absent, None or "" value takes
+    the default, else is "<name> is required" when required, else is left out. ValueError with every problem, '; '-joined."""
+    decl = trigger.get("inputs") or []
+    names = [i["name"] for i in decl]
+    errs = [f"unknown input {x}; declared: {', '.join(names)}" for x in given if x not in names]
+    out = {}
+    for i in decl:
+        name, t, v = i["name"], i.get("type") or "string", given.get(i["name"])
+        if v is None or v == "":
+            if i.get("default") is None:
+                errs += [f"{name} is required"] if i.get("required") else []
+                continue
+            v = i["default"]
+        if t == "string" and isinstance(v, (str, int, float)) and not isinstance(v, bool):
+            out[name] = str(v)
+        elif t == "number" and isinstance(v, (int, float)) and not isinstance(v, bool):
+            out[name] = v
+        elif t == "number" and isinstance(v, str) and NUM.fullmatch(v):
+            out[name] = int(v) if re.fullmatch(r"\s*-?[0-9]+\s*", v) else float(v)
+        elif t == "bool" and isinstance(v, bool):
+            out[name] = v
+        elif t == "bool" and isinstance(v, str) and v.strip().lower() in BOOLS:
+            out[name] = BOOLS[v.strip().lower()]
+        elif t == "json" and isinstance(v, str):
+            try:
+                out[name] = json.loads(v)
+            except ValueError as e:
+                errs.append(f"input {name} is not valid JSON: {e}")
+        elif t == "json":
+            out[name] = v
+        else:
+            errs.append(f"input {name} must be a {t}{' (true/false)' if t == 'bool' else ''}, got {v!r}")
+    if errs:
+        raise ValueError("; ".join(errs))
+    return out
 
 
 def _handle(e: dict) -> str:
@@ -80,6 +148,13 @@ def loop_body(g: dict, i: int, back: set[int]) -> set[str]:
     return _reach(e.get("to"), fwd) & _reach(e.get("from"), [(b, a) for a, b in fwd])
 
 
+def foreach_body(g: dict, fid: str) -> set[str]:
+    """FR-032: a foreach's body, the nodes reachable from its `body` edges' targets without walking past it."""
+    edges = [(e.get("from"), e.get("to")) for e in g["edges"]]
+    starts = [e.get("to") for e in g["edges"] if e.get("from") == fid and _handle(e) == "body"]
+    return set().union(*(_reach(s, edges, {fid}) for s in starts)) - {fid}
+
+
 def max_visits(g: dict, node_id: str) -> int:
     """A node's max_visits ?? the graph's defaults.max_visits ?? 3."""
     n = next((n for n in g["nodes"] if n.get("id") == node_id), {})
@@ -95,6 +170,29 @@ def _open_quote(prefix: str) -> bool:
     return False
 
 
+def _conds_errors(conds, combine) -> list[str]:
+    """What is wrong with an IF's (or a switch case's) conditions list and combine; [] when they can run."""
+    if not isinstance(conds, list) or not conds:
+        return ["conditions must be a non-empty list of {path, op, value}"]
+    errs = [] if combine in (None, "and", "or") else [f"combine must be and or or, not {combine!r}"]
+    for i, c in enumerate(conds, 1):
+        if not isinstance(c, dict):
+            errs.append(f"condition {i} must be a mapping with path, op and value")
+            continue
+        if not isinstance(c.get("path"), str) or not c["path"]:
+            errs.append(f"condition {i} needs a path")
+        if (op := c.get("op")) not in OPS:
+            errs.append(f"condition {i}: unknown op {op!r}, use one of {sorted(OPS)}")
+        elif op == "regex" and c.get("value") is None:
+            errs.append(f"condition {i}: a regex needs a value")
+        elif op == "regex":
+            try:
+                re.compile(str(c["value"]))
+            except re.error as e:
+                errs.append(f"bad regex {c['value']!r}: {e}")
+    return errs
+
+
 def validate(g: dict) -> list[dict]:
     """Rules 1 and 6: [{message, node_id}], empty when the graph can run."""
     errs: list[dict] = []
@@ -105,66 +203,248 @@ def validate(g: dict) -> list[dict]:
     nodes = [(g.get("defaults") or {}) | n for n in g["nodes"]]  # as the engine and the exporter see them
     ids = [n.get("id") for n in nodes]
     known = set(ids)
+    byid = {n.get("id"): n for n in nodes}
     triggers = [n.get("id") for n in nodes if n.get("type") == "trigger"]
     if len(triggers) != 1:
         err(f"a workflow needs exactly one trigger, found {len(triggers)}", triggers[1] if len(triggers) > 1 else None)
     if (g.get("settings") or {}).get("permission", "worktree") not in ("worktree", "container"):
         err("settings.permission must be worktree or container")
+    for k in ("max_run_minutes", "approval_timeout_minutes"):  # FR-035
+        if (v := (g.get("settings") or {}).get(k)) is not None and not (type(v) in (int, float) and v > 0):
+            err(f"settings.{k} must be a number > 0")
+    vs = g.get("vars")
+    if vs is not None and not (isinstance(vs, dict) and all(isinstance(k, str) and SLUG.fullmatch(k) for k in vs)):
+        err("vars must be a mapping of name: value")  # FR-033: {{vars.<name>}}
     for n in nodes:
         nid, t = n.get("id"), n.get("type")
         if not isinstance(nid, str) or not SLUG.fullmatch(nid) or nid in ROOTS:
-            err(f"bad node id {nid!r}: use letters, digits, - or _ (not input/run)", nid)
+            err(f"bad node id {nid!r}: use letters, digits, - or _ (not {'/'.join(sorted(ROOTS))})", nid)
         elif ids.count(nid) > 1:
             err(f"duplicate node id {nid}", nid)
         if t not in TYPES:
             err(f"unknown node type {t!r}", nid)
+        if t == "trigger" and n.get("inputs") is not None:  # FR-036: typed run inputs, {{input.<name>}}
+            decl = n["inputs"]
+            if not isinstance(decl, list) or not all(isinstance(i, dict) for i in decl):
+                err("trigger inputs must be a list of {name, type, required, default, description}", nid)
+                decl = []
+            seen = set()
+            for i in decl:
+                name, it = i.get("name"), i.get("type") or "string"
+                if not isinstance(name, str) or not SLUG.fullmatch(name):
+                    err(f"bad input name {name!r}: use letters, digits, - or _", nid)
+                elif name in seen:
+                    err(f"duplicate input {name}", nid)
+                seen.add(name)
+                if it not in INPUT_TYPES:
+                    err(f"input {name}: type must be string, number, bool or json, not {it!r}", nid)
+                if "required" in i and type(i["required"]) is not bool:
+                    err(f"input {name}: required must be true or false", nid)
+                if "description" in i and not isinstance(i["description"], str):
+                    err(f"input {name}: description must be text", nid)
+                if it in INPUT_TYPES and isinstance(name, str):
+                    try:
+                        coerce_inputs({"inputs": [{"name": name, "type": it}]}, {name: i.get("default")})
+                    except ValueError as e:
+                        err(f"input {name}: bad default: {e}", nid)
         if t == "agent" and not (n.get("prompt") or n.get("cap")):
             err("an agent node needs a prompt or a cap", nid)
         if t == "agent" and n.get("permission_mode") not in PERMS:
             err("permission_mode must be acceptEdits, dontAsk or plan: no bypass on the host", nid)
         if t == "shell" and not n.get("command"):
             err("a shell node needs a command", nid)
+        if t == "stop" and not (isinstance(n.get("message"), str) and n["message"].strip()):
+            err("a stop node needs a message: the run fails with it", nid)
+        if t == "stop" and any(e.get("from") == nid for e in g["edges"]):
+            err("a stop node has no out-edges", nid)
+        if t == "shell" and n.get("readonly"):
+            err("readonly is for agent nodes only: shells never batch in parallel", nid)
         if (v := n.get("max_visits")) is not None and not (type(v) is int and v >= 1):
             err("max_visits must be a whole number >= 1", nid)
+        if "notes" in n and not isinstance(n["notes"], str):
+            err("notes must be text", nid)
+        if (v := n.get("disabled")) is not None and type(v) is not bool:
+            err("disabled must be true or false", nid)
+        elif v and t in ("trigger", "if", "switch", "foreach"):  # FR-016: a branching node has no one handle to pass through on
+            err(f"{'an' if t[0] in 'aeiou' else 'a'} {t} node cannot be disabled: delete it or rewire its branches", nid)
+        if (v := n.get("idempotent")) is not None and type(v) is not bool:
+            err("idempotent must be true or false", nid)
+        elif v and t != "shell":
+            err("idempotent is for shell nodes only", nid)
+        if (rt := n.get("retry")) is not None:  # FR-013: re-running is safe only for a shell the author marked so
+            if t != "shell":
+                err("retry is for idempotent shell nodes only: agents never auto-retry", nid)
+            elif n.get("idempotent") is not True:
+                err("retry needs idempotent: true: the command is re-run as is", nid)
+            elif not (isinstance(rt, dict) and set(rt) <= {"max_tries", "wait_s"}
+                      and type(rt.get("max_tries")) is int and 1 <= rt["max_tries"] <= 5
+                      and type(w := rt.get("wait_s", 0)) in (int, float) and 0 <= w <= 300):
+                err("retry must be {max_tries: 1-5, wait_s: 0-300 (seconds)}", nid)
+        if (oe := n.get("on_error")) is not None:  # FR-014; "fail" is the old editor's word for stop
+            if t not in ("agent", "shell"):
+                err("on_error is for agent and shell nodes only", nid)
+            elif oe not in ("stop", "continue", "error_output", "fail"):
+                err(f"on_error must be stop, continue or error_output, not {oe!r}", nid)
+            elif oe == "error_output" and not any(e.get("from") == nid and _handle(e) == "error" for e in g["edges"]):
+                err("on_error: error_output needs an error edge (the red error handle)", nid)  # else a failure skips all
+        if "pin" in n:
+            pin = n["pin"]
+            if t not in ("agent", "shell"):
+                err("only agent and shell nodes can be pinned", nid)
+            elif not (isinstance(pin, dict) and list(pin) == ["output"] and isinstance(pin["output"], dict)):
+                err("pin must be {output: {...}}: one JSON object", nid)
+            else:
+                try:
+                    json.dumps(pin["output"])
+                except (TypeError, ValueError):
+                    err("pin.output must be plain JSON (no dates or binary)", nid)
         cmd = str(n.get("command") or "")
         if t == "shell" and any(_open_quote(cmd[:m.start()]) for m in TPL.finditer(cmd)):
             err("leave {{...}} unquoted in a shell command: the runner shell-quotes it", nid)
         if t == "if":
-            if n.get("op") not in OPS or not n.get("path"):
-                err(f"an if node needs a path and an op in {sorted(OPS)}", nid)
+            if "conditions" not in n:
+                if n.get("op") not in OPS or not n.get("path"):
+                    err(f"an if node needs a path and an op in {sorted(OPS)}", nid)
+            elif any(k in n for k in ("path", "op", "value")):
+                err("use either path/op/value or conditions, not both", nid)
+            else:
+                for m in _conds_errors(n["conditions"], n.get("combine")):
+                    err(m, nid)
             if {_handle(e) for e in g["edges"] if e.get("from") == nid} != {"true", "false"}:
                 err("an if node needs exactly its true and false edges", nid)
-        refs = TPL.findall(f"{n.get('prompt') or ''} {n.get('command') or ''} {n.get('message') or ''}") + (
-            [n["path"]] if t == "if" and n.get("path") else [])
-        for ref in refs:
+        if t == "switch":
+            cases = n.get("cases")
+            if not isinstance(cases, list) or not cases or not all(isinstance(c, dict) for c in cases):
+                err("a switch node needs cases: [{name, conditions, combine}]", nid)
+                cases = []
+            names = [c.get("name") for c in cases]
+            for c in cases:
+                name = c.get("name")
+                if not isinstance(name, str) or not CASE.fullmatch(name) or name == "default":
+                    err(f"bad case name {name!r}: use lowercase letters, digits, - or _ (not default)", nid)
+                elif names.count(name) > 1:
+                    err(f"duplicate case name {name}", nid)
+                for m in _conds_errors(c.get("conditions"), c.get("combine")):
+                    err(f"case {name}: {m}", nid)
+            for h in sorted({_handle(e) for e in g["edges"] if e.get("from") == nid} - {*map(str, names), "default"}):
+                err(f"switch edge handle {h} is not a case name or default", nid)
+        if t == "foreach":  # FR-032; items is checked below, with the forward edges
+            if (v := n.get("max_items")) is not None and not (type(v) is int and v >= 1):
+                err("max_items must be a whole number >= 1", nid)
+            hs = [_handle(e) for e in g["edges"] if e.get("from") == nid]
+            for h in sorted(set(hs) - {"body", "done"}):
+                err(f"foreach edge handle {h} must be body or done", nid)
+            body = foreach_body(g, nid) if hs.count("body") == 1 else set()
+            if hs.count("body") != 1:
+                err("a foreach node needs exactly one body edge", nid)
+            elif not body:
+                err("a foreach body needs at least one node", nid)
+            all_edges = [(e.get("from"), e.get("to")) for e in g["edges"]]
+            for x in sorted(body):
+                if nid not in _reach(x, all_edges):  # an edge out of the body makes its target body, so this says it
+                    err(f"{x} never returns to {nid}", x)
+            for e in g["edges"]:
+                if e.get("to") in body and e.get("from") not in body and not (e.get("from") == nid and _handle(e) == "body"):
+                    err(f"{e.get('from')} -> {e.get('to')} enters the body of {nid} from outside", e.get("to"))
+        for ref in _refs(n):
             if ref.split(".")[0] not in known | ROOTS:
                 err(f"{ref} names no node", nid)
     for e in g["edges"]:
         if e.get("from") not in known or e.get("to") not in known:
             err(f"edge {e.get('from')} -> {e.get('to')} points at a missing node",
                 next((x for x in (e.get("from"), e.get("to")) if x in known), None))
+        src = byid.get(e.get("from")) or {}
+        if src and _handle(e) == "error" and src.get("type") not in ("if", "switch") and src.get("on_error") != "error_output":
+            err(f"edge {e['from']} -> {e.get('to')}: an error edge needs on_error: error_output on {e['from']}", e["from"])
+    bodies = set().union(*(foreach_body(g, x) for x, n in byid.items() if n.get("type") == "foreach"))
+    for nid, n in byid.items():
+        for root in sorted({ref.split(".")[0] for ref in _refs(n)} & {"item", "index"} if nid not in bodies else ()):
+            err(f"{{{{{root}}}}} is only set inside a for-each body", nid)
     if len(triggers) == 1:
-        byid = {n.get("id"): n for n in nodes}
-        gates = {nid for nid, n in byid.items() if n.get("type") == "approval"}
+        gates = {nid for nid, n in byid.items() if n.get("type") == "approval" and not n.get("disabled")}  # disabled: passes
         ungated = _reach(triggers[0], [(e.get("from"), e.get("to")) for e in g["edges"]], gates)
         for nid in sorted(ungated - gates):
             if byid.get(nid, {}).get("type") == "shell" and PUSH.search(str(byid[nid].get("command"))):
                 err("git push / gh pr create|merge must sit behind an approval node", nid)
         back = back_edges(g)
+        fwd = [(e.get("from"), e.get("to")) for i, e in enumerate(g["edges"]) if i not in back]
+        for nid, n in byid.items():  # a session to resume exists only when that agent ran earlier in this pass
+            if (rf := n.get("resume_from")) and not (isinstance(rf, str) and byid.get(rf, {}).get("type") == "agent"
+                                                     and rf != nid and nid in _reach(rf, fwd)):
+                err(f"resume_from {rf!r} must name an agent node that runs before {nid}", nid)
+            it = n.get("items")  # a field of a node before the foreach; body nodes reach it over back-edges only
+            if n.get("type") == "foreach" and not (isinstance(it, str) and "." in it and (root := it.split(".")[0]) in byid
+                                                   and root != nid and nid in _reach(root, fwd)):
+                err(f"items must be a field of a node that runs before {nid}", nid)
         for i in sorted(back):
             loop = f"{g['edges'][i].get('from')} -> {g['edges'][i].get('to')}"
             for nid in sorted(loop_body(g, i, back)):
                 t = byid.get(nid, {}).get("type")
                 if t in ("merge", "approval"):
                     err(f"no {t} node inside a loop ({loop})", nid)
-                elif t != "if" and sum(e.get("from") == nid for e in g["edges"]) > 1:
-                    err(f"only an IF may branch inside a loop ({loop})", nid)
+                elif t == "foreach" and g["edges"][i].get("to") != nid:  # its own body's way back is fine
+                    err(f"no foreach inside a loop ({loop})", nid)  # ponytail: nested for-each later (per-item state per level)
+                elif t not in ("if", "switch", "foreach") and len(hs := [_handle(e) == "error" for e in g["edges"] if e.get("from") == nid]) > 1 \
+                        and not (byid.get(nid, {}).get("on_error") == "error_output" and sorted(hs) == [False, True]):
+                    err(f"only an IF or Switch may branch inside a loop ({loop})", nid)  # error_output: one ok + one error
     return errs
+
+
+def _refs(n: dict) -> list[str]:
+    """A node's template refs: {{...}} in its prompt, command and message, plus its IF / switch condition paths and a
+    foreach's items path."""
+    t, cases = n.get("type"), n.get("cases") if isinstance(n.get("cases"), list) else []
+    conds = conditions(n) if t == "if" else [c for k in cases if isinstance(k, dict) and isinstance(
+        k.get("conditions"), list) for c in k["conditions"]] if t == "switch" else []
+    return TPL.findall(f"{n.get('prompt') or ''} {n.get('command') or ''} {n.get('message') or ''}") + [
+        c["path"] for c in (conds if isinstance(conds, list) else []) if isinstance(c, dict) and isinstance(c.get("path"), str)
+    ] + ([n["items"]] if t == "foreach" and isinstance(n.get("items"), str) and n["items"] else [])
+
+
+def warnings(g: dict) -> list[dict]:
+    """FR-034: [{message, node_id}] for template refs that would render empty: a node that cannot have run before the
+    referencing one (not its ancestor over any edge, back-edges included), a field its type never outputs (OUT_KEYS,
+    plus pinned and error_output fields), a run field outside RUN_KEYS, a vars name the file does not set. Never
+    raises and never blocks a save or a run; refs naming no node are validate()'s errors."""
+    out: list[dict] = []
+    try:
+        nodes = [(g.get("defaults") or {}) | n for n in g["nodes"]]
+        byid = {n.get("id"): n for n in nodes}
+        rev = [(e.get("to"), e.get("from")) for e in g["edges"]]
+        vs = g["vars"] if isinstance(g.get("vars"), dict) else {}
+        decl = [i.get("name") for n in nodes if n.get("type") == "trigger" for i in n.get("inputs") or []]
+        for n in nodes:
+            nid = n.get("id")
+            anc = set().union(*(_reach(a, rev) for b, a in rev if b == nid))  # nid itself only when it sits on a cycle
+            for ref in _refs(n):
+                root, _, rest = ref.partition(".")
+                field = rest.split(".")[0]  # ponytail: deeper paths and merge inputs are not checked
+                src = None if root in ROOTS else byid.get(root)
+                if root == "run" and field and field not in RUN_KEYS:
+                    msg = f"run has no field {field} ({', '.join(sorted(RUN_KEYS))})"
+                elif root == "vars" and field and field not in vs:
+                    msg = f"no vars entry {field}"
+                elif root == "input" and field and decl and field not in decl:  # free-text {{input}}: no names to check
+                    msg = f"no declared input {field} ({', '.join(map(str, decl))})"
+                elif src is None:  # input, now, a good run/vars ref, or a root that names no node
+                    continue
+                elif root not in anc:
+                    msg = f"{root} cannot run before {nid}"
+                elif field and (t := src.get("type")) in OUT_KEYS and field not in OUT_KEYS[t] | (
+                        set(src["pin"]["output"]) if isinstance(src.get("pin"), dict) and isinstance(src["pin"].get("output"), dict)
+                        else set()) | ({"error", "output_tail", "exit_code"} if src.get("on_error") == "error_output" else set()):
+                    msg = f"{'an' if t[0] in 'aeiou' else 'a'} {t} node has no field {field}"
+                else:
+                    continue
+                out.append({"message": f"{ref}: {msg}", "node_id": nid})
+    except (AttributeError, TypeError, KeyError):  # not the shape the walker reads: validate() says what is wrong
+        pass
+    return out
 
 
 def ready(g: dict, st: dict) -> list[str]:
     """Rules 2 and 4. Nodes that may run now; call when nothing is running. Starts a fresh state (`{}`) and, when
-    nothing is ready, turns deferred IF edges into skip tokens (quiescence; never on a back-edge). [] means the run is
+    nothing is ready, turns deferred IF/switch edges into skip tokens (quiescence; never on a back-edge). [] means the run is
     done. Mutates st."""
     if not st:
         trig = next(n["id"] for n in g["nodes"] if n["type"] == "trigger")
@@ -179,10 +459,10 @@ def ready(g: dict, st: dict) -> list[str]:
 
 
 def batch(g: dict, r: list[str]) -> list[str]:
-    """Rule 7: which of the ready nodes r run together: every readonly agent or shell node, else only the first by id
-    (a writer, IF, merge, approval or trigger runs alone)."""
+    """Rule 7: which of the ready nodes r run together: every readonly agent, else only the first by id (a writer,
+    shell, IF, merge, approval or trigger runs alone)."""
     byid = {n["id"]: n for n in g["nodes"]}
-    return sorted(n for n in r if byid[n]["type"] in ("agent", "shell") and byid[n].get("readonly")) or [min(r)]
+    return sorted(n for n in r if byid[n]["type"] == "agent" and byid[n].get("readonly")) or [min(r)]
 
 
 def merge_output(g: dict, st: dict, node_id: str, ctx: dict) -> dict:
@@ -193,19 +473,71 @@ def merge_output(g: dict, st: dict, node_id: str, ctx: dict) -> dict:
     return {"inputs": {n: ctx.get(n) for n in srcs}}
 
 
-def complete(g: dict, st: dict, node_id: str, output: dict | None) -> str | None:
-    """Record a finished node: data on every out-edge; an IF ({value}) sends data on the taken handle and defers
-    the rest (rule 3); a back-edge fires last (rule 5). Returns the run's error when a loop passes its cap. Mutates st."""
+def foreach_step(g: dict, st: dict, node: dict, ctx: dict) -> dict:
+    """A ready foreach's output; call it before complete() on every visit. The first visit reads its items (a list, or
+    a str holding a JSON array; ValueError otherwise) and keeps the first max_items; each later visit (a body pass came
+    back) adds the output of the body node whose back-edge fired. -> {item, index} for the next body pass, or, after
+    the last item, {items: [body outputs in order]} plus truncated_from when max_items cut the list. Mutates st."""
+    fid, each = node["id"], st.setdefault("each", {})
+    if fid not in each:
+        v = lookup(ctx, node["items"])
+        try:
+            v = json.loads(v) if isinstance(v, str) else v
+        except ValueError:
+            pass
+        if not isinstance(v, list):
+            raise ValueError(f"{fid}: items {node['items']} is not a JSON array")
+        k = node.get("max_items", MAX_ITEMS)
+        each[fid] = {"items": v[:k], "out": [], "truncated_from": len(v) if len(v) > k else None}
+    else:
+        each[fid]["out"].append(ctx.get(each[fid]["last"]))
+    if (i := len((e := each[fid])["out"])) < len(e["items"]):
+        return {"item": e["items"][i], "index": i}
+    del each[fid]
+    return {"items": e["out"]} | ({"truncated_from": e["truncated_from"]} if e["truncated_from"] else {})
+
+
+def current_item(g: dict, st: dict, node_id: str) -> dict:
+    """{item, index} of the running foreach whose body holds node_id (its {{item}} and {{index}}), else {}."""
+    for fid, e in (st.get("each") or {}).items():
+        if node_id in foreach_body(g, fid):
+            return {"item": e["items"][len(e["out"])], "index": len(e["out"])}
+    return {}
+
+
+def passthrough(g: dict, st: dict, node_id: str, ctx: dict):
+    """A ready disabled node's output: the output of the source of its first in-edge (edge order) holding data; when
+    its inbox is empty (a loop target readied by a back-edge), of its first forward in-edge's source in ctx, as
+    export.to_js does; else None. Call it before complete(), which clears the inbox.
+    ponytail: a disabled loop target passes on the loop entry's output on every pass, not the back-edge source's."""
+    box = st["inbox"].get(node_id, {})
+    back = back_edges(g)
+    srcs = [g["edges"][int(i)]["from"] for i in sorted(box, key=int) if box[i] == "data"] or [
+        e["from"] for i, e in enumerate(g["edges"]) if e["to"] == node_id and i not in back and e["from"] in ctx]
+    return ctx.get(srcs[0]) if srcs else None
+
+
+def complete(g: dict, st: dict, node_id: str, output: dict | None, failed: bool = False) -> str | None:
+    """Record a finished node: data on every out-edge; an IF ({value}: handle true/false), a switch ({case}: handle
+    = case name or default) or a foreach (body, or done once its output holds items) sends data on the taken handle
+    and defers the rest (rule 3); any other node sends data on
+    its `error` edges when failed (on_error: error_output) and on the others when not, deferring the rest the same way;
+    a back-edge fires last (rule 5). Returns the run's error when a loop passes its cap. Mutates st."""
     st["ready"].remove(node_id)
     st["inbox"].pop(node_id, None)
     st["visits"][node_id] = st["visits"].get(node_id, 0) + 1
     st["execs"] += 1
     back = back_edges(g)
-    is_if = next(n for n in g["nodes"] if n["id"] == node_id)["type"] == "if"
-    taken = str(bool((output or {}).get("value"))).lower()
+    t = next(n for n in g["nodes"] if n["id"] == node_id)["type"]
+    taken = (str(bool((output or {}).get("value"))).lower() if t == "if"
+             else str((output or {}).get("case")) if t == "switch"
+             else ("done" if "items" in (output or {}) else "body") if t == "foreach" else None)  # None: error edges iff failed
+    if taken == "body" and t == "foreach":  # the next item's pass: its body nodes' max_visits count from here
+        st.setdefault("base", {}).update({n: st["visits"].get(n, 0) for n in foreach_body(g, node_id)})
     outs = [i for i, e in enumerate(g["edges"]) if e["from"] == node_id]
     for i in sorted(outs, key=lambda i: i in back):  # defer before a fire, so the fire clears this pass's deferrals
-        if is_if and _handle(g["edges"][i]) != taken:
+        h = _handle(g["edges"][i])
+        if (h != taken) if taken is not None else ((h == "error") != failed):
             st["deferred"].append(i)
         elif i not in back:
             _send(g, st, i, "data", back)
@@ -216,11 +548,17 @@ def complete(g: dict, st: dict, node_id: str, output: dict | None) -> str | None
 
 def _fire(g: dict, st: dict, i: int, back: set[int]) -> str | None:
     """Rule 5: back-edge i carries data. Its loop body's inbox and deferred edges are cleared and its target is ready
-    for its next visit; an error when that visit passes the target's max_visits, or runs pass the backstop."""
+    for its next visit; an error when that visit passes the target's max_visits (counted per item inside a for-each
+    body; a foreach target is bounded by its items instead), or runs pass the backstop."""
     to = g["edges"][i]["to"]
-    if st["visits"].get(to, 0) >= max_visits(g, to):
+    fe = {n["id"]: n.get("max_items", MAX_ITEMS) for n in g["nodes"] if n.get("type") == "foreach"}
+    if to in fe:  # a body pass came back: the item list bounds it, not max_visits
+        st["each"][to]["last"] = g["edges"][i]["from"]
+    elif st["visits"].get(to, 0) - st.get("base", {}).get(to, 0) >= max_visits(g, to):  # per item inside a body
         return f"loop cap reached at {to}"
-    if st["execs"] >= sum(max_visits(g, n["id"]) for n in g["nodes"]) + len(g["nodes"]):
+    per = {n: k for f, k in fe.items() for n in foreach_body(g, f)}  # a body node's max_visits counts once per item
+    if st["execs"] >= sum(fe[n["id"]] + 1 if n["id"] in fe else max_visits(g, n["id"]) * per.get(n["id"], 1)
+                          for n in g["nodes"]) + len(g["nodes"]):
         return f"loop backstop reached at {to}: {st['execs']} node runs"
     body = loop_body(g, i, back)
     st["inbox"] = {n: box for n, box in st["inbox"].items() if n not in body}
@@ -251,7 +589,8 @@ def _send(g: dict, st: dict, i: int, tok: str, back: set[int]) -> None:
 
 
 def lookup(ctx: dict, path: str):
-    """Dotted lookup in ctx = {input, run: {branch}, <node_id>: output}; _MISSING when any part is absent."""
+    """Dotted lookup in ctx = {input, run: {branch, id, visit, trigger}, now, vars, <node_id>: output}; _MISSING when
+    any part is absent."""
     v = ctx
     for k in path.split("."):
         if isinstance(v, dict) and k in v:
@@ -268,28 +607,88 @@ def _text(v) -> str:
 
 
 def render(tpl: str, ctx: dict, shell: bool = False) -> str:
-    """Fill {{input}}, {{<node>.<dotted.path>}}, {{run.branch}}; missing or skipped -> "". shell=True quotes each value."""
+    """Fill {{input}}, {{<node>.<dotted.path>}}, {{run.<branch|id|visit|trigger>}}, {{now}}, {{vars.<name>}} (ctx as
+    lookup()); missing or skipped -> "". shell=True quotes each value."""
     def one(m):
         s = _text(lookup(ctx, m.group(1)))
         return shlex.quote(s) if shell else s
     return TPL.sub(one, tpl or "")
 
 
-def eval_if(node: dict, ctx: dict) -> bool:
-    """IF node {path, op, value}; eq/ne also match by rendered text (0 == "0", True == "true"). Missing path = False."""
-    v, want, op = lookup(ctx, str(node.get("path") or "")), node.get("value"), node.get("op")
+def rename_node(g: dict, old: str, new: str) -> dict:
+    """A copy of g with node `old` renamed to `new`: its edges, every {{old...}} template at any depth of any node
+    (spacing and tail kept) and every `path` / `resume_from` / `items` value naming old follow.
+    dashboard/src/Workflows.tsx renameRefs ports this: keep the two in sync. A taken `new` is left to validate()."""
+    def ref(s: str) -> str:
+        head, dot, tail = s.partition(".")
+        return new + dot + tail if head == old else s
+
+    def walk(v, key=None):
+        if isinstance(v, dict):
+            return {k: walk(x, k) for k, x in v.items()}
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        if isinstance(v, str):
+            v = TPL.sub(lambda m: m.group(0).replace(m.group(1), ref(m.group(1)), 1), v)
+            return ref(v) if key in ("path", "resume_from", "items") else v
+        return v
+
+    g2 = copy.deepcopy(g)
+    g2["nodes"] = [walk(n) | ({"id": new} if n.get("id") == old else {}) for n in g2["nodes"]]
+    g2["edges"] = [e | {k: new for k in ("from", "to") if e.get(k) == old} for e in g2["edges"]]
+    return g2
+
+
+def conditions(node: dict) -> list:
+    """An IF's conditions: node["conditions"] when set, else the old single {path, op, value} form."""
+    if node.get("conditions") is not None:
+        return node["conditions"]
+    return [{"path": node.get("path"), "op": node.get("op"), "value": node.get("value")}]
+
+
+def _num(v) -> float | None:
+    """A number, or a string that reads as one (" 3 ", "1e3"); None for anything else, booleans included."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    return float(v) if isinstance(v, str) and NUM.fullmatch(v) else None
+
+
+def _test(c: dict, ctx: dict) -> bool:
+    """One condition {path, op, value}; eq/ne also match by rendered text (0 == "0", True == "true"). Missing path =
+    False for every op."""
+    v, want, op = lookup(ctx, str(c.get("path") or "")), c.get("value"), c.get("op")
     if v is _MISSING:
         return False
     try:
         if op == "truthy":
             return bool(v)
+        if op == "exists":
+            return v is not None
         if op in ("eq", "ne"):
             return (v == want or _text(v) == _text(want)) == (op == "eq")
-        if op == "contains":
-            return want in v if isinstance(v, (list, dict)) else _text(want) in _text(v)
-    except TypeError:  # e.g. an unhashable value tested against a dict
+        if op in ("contains", "not_contains"):
+            return (want in v if isinstance(v, (list, dict)) else _text(want) in _text(v)) == (op == "contains")
+        if op in ("gt", "ge", "lt", "le"):
+            a, b = _num(v), _num(want)
+            return a is not None and b is not None and {"gt": a > b, "ge": a >= b, "lt": a < b, "le": a <= b}[op]
+        if op == "regex":
+            # ponytail: input cap is the catastrophic-regex guard; a time limit would need a thread
+            return re.search(str(want), _text(v)[:REGEX_MAX]) is not None
+    except (TypeError, re.error):  # e.g. an unhashable value tested against a dict
         pass
     return False
+
+
+def eval_if(node: dict, ctx: dict) -> bool:
+    """IF node: all of its conditions(), or any of them with combine: or."""
+    return (any if node.get("combine") == "or" else all)(_test(c, ctx) for c in conditions(node))
+
+
+def eval_switch(node: dict, ctx: dict) -> str:
+    """Switch node: the name of the first case whose conditions match (all, or any with combine: or), else "default"."""
+    return next((c["name"] for c in node["cases"] if eval_if(c, ctx)), "default")
 
 
 def derived_steps(g: dict) -> list[dict]:
@@ -389,7 +788,7 @@ if __name__ == "__main__":
     assert "no merge node inside a loop (join -> test)" in bad_ft(lambda x: x["edges"].append({"from": "join", "to": "test"}))
     assert "no approval node inside a loop" in bad_ft(lambda x: x["edges"][5].update(to="gate") or x["edges"].append(
         {"from": "gate", "to": "test"}))  # fix -> gate -> test: an approval in the loop body
-    assert "only an IF may branch inside a loop" in bad_ft(lambda x: x["edges"].append({"from": "fix", "to": "review-a"}))
+    assert "only an IF or Switch may branch inside a loop" in bad_ft(lambda x: x["edges"].append({"from": "fix", "to": "review-a"}))
     assert "max_visits" in bad_ft(lambda x: x["nodes"][1].update(max_visits="3"))
     assert "nobody.x names no node" in bad_ft(lambda x: x["nodes"][7].update(message="Push {{nobody.x}}?"))  # approval message
     root = Path(__file__).resolve().parents[3] / ".claude" / "ctc-workflows"
@@ -397,7 +796,7 @@ if __name__ == "__main__":
         assert validate(load(root / f"{name}.yaml")) == [], (name, validate(load(root / f"{name}.yaml")))
     ctx3, b3 = {"input": "", "run": {"branch": "ctc/three-1"}}, []
     ran, _, e = walk(load(root / "three-reviewers.yaml"), lambda _: 0, ctx3, b3)
-    assert e is None and b3 == [["start"], ["r1", "r2", "r3"], ["join"], ["merged"]], b3  # the 3 shells run together
+    assert e is None and b3 == [["start"], ["r1"], ["r2"], ["r3"], ["join"], ["merged"]], b3  # shells run one by one
     assert ctx3["join"] == {"inputs": {n: {"exit_code": 0, "stdout_tail": n} for n in ("r1", "r2", "r3")}}, ctx3["join"]
     assert "approval" in validate(load(root / "bad-push.yaml"))[0]["message"]
     checks = iter([1, 1, 0])  # loop-demo: the counter reaches 3 on its third visit
@@ -414,7 +813,7 @@ if __name__ == "__main__":
     assert "true and false" in bad(lambda x: x["edges"].pop(4))
     assert "approval" in bad(lambda x: x["nodes"][4].update(command="git push -u origin HEAD"))
     assert "approval" in bad(lambda x: x["nodes"][4].update(command="gh  pr create --draft"))
-    assert "only an IF may branch" in bad(lambda x: x["edges"].append({"from": "blame", "to": "test"}))
+    assert "only an IF or Switch may branch" in bad(lambda x: x["edges"].append({"from": "blame", "to": "test"}))
     # a merge after an IF: ready once both in-edges hold a token (the untaken side's skip arrives at quiescence), and
     # its output holds only the data inputs; with every input skipped it is skipped too
     gm = load(copy.deepcopy(good) | {"nodes": good["nodes"] + [{"id": "join", "type": "merge"}],

@@ -524,7 +524,7 @@ defaults: {model: sonnet, max_turns: 30, timeout_s: 1800, max_visits: 3}
 nodes:
   - {id: start, type: trigger, input: "", pos: [0, 160]}
   - {id: test, type: shell, command: "uv run pytest -x -q", timeout_s: 600, pos: [180, 160]}
-  - {id: green, type: if, path: test.exit_code, op: eq, value: 0, pos: [380, 160]}   # ops: eq|ne|contains|truthy; missing path = false
+  - {id: green, type: if, path: test.exit_code, op: eq, value: 0, pos: [380, 160]}   # or conditions + combine; missing path = false
   - {id: fix, type: agent, cap: "user:tdd-fix", prompt: "Tests fail:\n{{test.stdout_tail}}\nGoal: {{input}}",
      allowed_tools: [Read, Edit, Write, "Bash(uv run pytest:*)"], pos: [380, 320]}
   - {id: review-a, type: agent, readonly: true, prompt: "Review for bugs", json_schema: {type: object}, pos: [580, 80]}
@@ -547,14 +547,31 @@ steps: [{cap: "user:tdd-fix"}, {agent: security-reviewer}]   # derived on save, 
 ```
 - **Node fields:**
   - Agent: `prompt cap agent model effort permission_mode allowed_tools mcp_config json_schema resume_from max_turns timeout_s readonly on_error`. `cap` prefixes the prompt with `/<invoke>`.
-  - Shell: `command timeout_s readonly`.
-  - Every node: `max_visits`, `pos`.
-- **Templates:** `{{input}}`, `{{<node>.<dotted.path>}}`, `{{run.branch}}`. Filled by one regex plus a dotted lookup; missing or skipped values become `""`.
+  - Shell: `command timeout_s on_error idempotent retry`; no `readonly` (shells never batch).
+    - `retry: {max_tries 1..5, wait_s 0..300}` is for shells only and needs `idempotent: true`. The command re-runs in the same worktree, before its one commit, until it exits 0; a non-zero last try fails the step.
+  - `on_error` (agent and shell): `stop | continue | error_output`, default `stop` (the old `fail` = stop).
+    - `stop`: a shell's non-zero exit is data; an agent's failure fails the run.
+    - `continue`: the step fails, and the run walks on with its output.
+    - `error_output`: the failure's `{error, output_tail, exit_code}` goes down only the node's `error` edges (it needs one).
+  - IF: `path op value`, or `conditions [{path, op, value}]` with `combine: and | or` (default `and`). Ops: `eq ne gt ge lt le contains not_contains regex exists truthy`.
+  - Switch (`switch`): `cases [{name, conditions, combine}]`. The first matching case's handle is taken, else the implicit `default`. Case names are lowercase slugs.
+  - For-each (`foreach`): `items` (a field of an earlier node holding a list or a JSON array) and `max_items` (default 50). Handles: `body` (once per item, back to the foreach) and `done`.
+  - Stop (`stop`): `message`, a template. The run fails with it. A stop node has no out-edges.
+  - Trigger: free-text `input`, or typed `inputs [{name, type: string|number|bool|json, required, default, description}]`, checked and coerced on submit.
+  - Every node: `max_visits`, `pos`, `notes` (text).
+    - `disabled: true` (not on trigger, if, switch or foreach): the node is skipped and passes on its first live input's output.
+    - `pin: {output: {...}}` (agent and shell): a pinned run returns it instead of running the node.
+  - Workflow: `vars {name: value}`. Settings, besides `permission allow_extra_usage auto_resume max_run_tokens`: `max_run_minutes`, `approval_timeout_minutes`, `notify` (a shell command; `""` = off).
+- **Templates:** `{{input}}`, `{{input.<name>}}`, `{{<node>.<dotted.path>}}`, `{{run.id}}`, `{{run.visit}}`, `{{run.trigger}}`, `{{run.branch}}`, `{{now}}` (UTC, ISO seconds), `{{vars.<name>}}`, and `{{item}}` / `{{index}}` inside a for-each body. Filled by one regex plus a dotted lookup; missing or skipped values become `""`. `graph.warnings()` flags refs that would render empty, and never blocks a save or a run.
 - **Outputs:**
-  - agent `{result ≤64 KB, structured_output, is_error, subtype}`; `is_error` fails the run unless `on_error: continue`
-  - shell `{exit_code, stdout_tail 4 KB, stderr_tail 4 KB, duration_ms}`; a non-zero exit is data
-  - if `{value}`; merge `{inputs: {node: output}}`; approval `{approved, note}`; trigger `{input}`
-- **Runner settings** go in `config/server.yaml`: `runner: {claude_version: "2.1.306", idle_wait_min: 15, poll_s: 1.5}`.
+  - agent `{result ≤64 KB, structured_output, is_error, subtype}`; `is_error` fails the run unless `on_error` is `continue` or `error_output`
+  - shell `{exit_code, stdout_tail 4 KB, stderr_tail 4 KB, duration_ms}`; a non-zero exit is data (with the default `on_error: stop` and no `retry`)
+  - an error edge `{error, output_tail, exit_code}`
+  - if `{value}`; switch `{case}`; merge `{inputs: {node: output}}`; approval `{approved, note}`; trigger `{input}`; stop `{message}`
+  - foreach `{item, index}` on each body pass, then `{items: [body outputs], truncated_from?}` on `done`
+- **Runner settings** go in `config/server.yaml`: `runner: {claude_version: "2.1.306", idle_wait_min: 15, poll_s: 1.5, notify: "", shutdown_grace_s: 300}`.
+  - `notify`: a shell command run after each run status change to failed, waiting, quota or done, with a 10 s timeout and env `CTC_RUN_ID CTC_RUN_STATUS CTC_RUN_WORKFLOW CTC_RUN_URL CTC_RUN_ERROR`. Its output goes to `<runs dir>/<id>/notify.log`. A workflow's `settings.notify` overrides it.
+  - `shutdown_grace_s`: on a planned stop, the runner claims no new batch and waits up to this long (5 min) for the running batch to land, then re-queues the run with its walker state. A batch still running after that is killed and the run fails.
 
 ### Walker rules (`graph.py`)
 1. **Load.** There is exactly one `trigger`. A DFS from it marks an edge as a **back-edge** if it points to a node on the DFS stack; every other edge is forward.
@@ -577,7 +594,7 @@ steps: [{cap: "user:tdd-fix"}, {agent: security-reviewer}]   # derived on save, 
    - The push/PR gate rule holds.
    - Errors are `{message, node_id}`.
 7. **Batches (M3).**
-   - Ready `readonly` nodes run together under `asyncio.gather`; otherwise only the first ready writer runs.
+   - Ready `readonly` agent nodes run together under `asyncio.gather` (shells never batch); otherwise only the first ready writer runs.
    - Each node's commit and diff happen under one `asyncio.Lock`.
 
 ### Constraints
@@ -618,6 +635,9 @@ create table if not exists ctc.wf_runs (
   error text,
   quota_resets_at timestamptz, auto_resume boolean not null default true,   -- decision 2
   tokens bigint not null default 0,                      -- running total, for max_run_tokens
+  parent_run_id bigint references ctc.wf_runs on delete set null,   -- a retry / run-from / run-to of that run
+  from_node text, to_node text,
+  pinned boolean not null default false,                 -- pinned nodes returned their pin.output
   created_at timestamptz not null default now(), started_at timestamptz, ended_at timestamptz);
 create unique index if not exists wf_runs_one_running on ctc.wf_runs (owner) where status = 'running';
 create index if not exists wf_runs_owner on ctc.wf_runs (owner, id desc);
@@ -625,9 +645,11 @@ create index if not exists wf_runs_owner on ctc.wf_runs (owner, id desc);
 create table if not exists ctc.wf_steps (
   id bigint generated always as identity primary key,
   run_id bigint not null references ctc.wf_runs on delete cascade,
-  node_id text not null, visit int not null, kind text not null,   -- trigger|agent|shell|if|merge|approval
+  node_id text not null, visit int not null, kind text not null,   -- trigger|agent|shell|if|switch|merge|approval|stop|foreach
   status text not null check (status in ('running','waiting','done','failed','timeout','cancelled','quota','skipped')),
   input text, output jsonb, error text,
+  marker text check (marker in ('reused','pinned','disabled')),   -- completed without executing
+  tries int not null default 1,                                    -- shell retry-on-fail tries
   session_id text, num_turns int, usage jsonb, cost_usd real,      -- cost is notional
   permission_denials jsonb, overage boolean,
   pre_sha text, post_sha text, files jsonb, diff text,             -- diff ≤ 64 KB
@@ -646,14 +668,15 @@ create table if not exists ctc.wf_schedules (
 All endpoints are `_local_only` and scoped to the owner. Shapes go into `dashboard/src/types.ts` through `pnpm gen:types`.
 
 - `Run` = `{id, workflow, project, status, trigger, input, branch, worktree, pr_url, error, quota_resets_at, auto_resume, created_at, started_at, ended_at, tokens, nodes_done, nodes_total}`
-- `RunDetail` = `Run & {graph, file_sha, auth, steps: Step[]}`
-- `Step` = `{id, node_id, visit, kind, status, input, output, error, session_id, num_turns, tokens{…}, cost_usd, permission_denials, overage, files, started_at, ended_at}`
+- `RunDetail` = `Run & {graph, file_sha, auth, parent_run_id, from_node, to_node, steps: Step[]}`
+- `Step` = `{id, node_id, visit, kind, status, input, output, error, session_id, num_turns, tokens{…}, cost_usd, permission_denials, overage, files, started_at, ended_at, marker, tries}`
 
 | Method + path | Body / query | Returns |
 |---|---|---|
-| `GET /api/capabilities/{id}` (extended) | | adds `graph`, `settings`, `schedule {cron, input, enabled, next_at, last_fired_at}` |
-| `POST`/`PATCH /api/capabilities` (extended) | `graph` replaces `steps` for workflows | `Capability`; 422 `invalid_graph {message, node_id}` |
-| `POST /api/workflows/{cap_id}/runs` | `{input?, project?, trigger?}` | `202 {run_id}`; 422 `invalid_graph` / `project_required` |
+| `GET /api/capabilities/{id}` (extended) | | adds `graph`, `settings`, `schedule {cron, input, enabled, next_at, last_fired_at}`, `file_hash` |
+| `POST`/`PATCH /api/capabilities` (extended) | `graph` replaces `steps` for workflows; PATCH `base_hash?` (the `file_hash` the editor loaded) | `Capability & {warnings: [{message, node_id}]}` (PATCH adds `file_hash`); 422 `invalid_graph {message, node_id, warnings}`; 409 `changed_on_disk` when `base_hash` no longer matches |
+| `POST /api/workflows/{cap_id}/runs` | `{input?, inputs?, project?, trigger?, pinned?}` | `202 {run_id}`; 422 `invalid_graph` / `project_required` / `bad_input` / `pinned_not_allowed` (schedule, mcp) |
+| `POST /api/runs/{id}/retry` | `{from_node?, to_node?, trigger?}` | `202 {run_id}`: a new run linked to this one, from its failed step (or `from_node`, else the start), reusing the earlier outputs; `to_node` ends it `done` after that node; 422 `not_retryable` |
 | `GET /api/runs` | `workflow?`, `status?`, `trigger?`, `limit`, `before` | `Run[]` |
 | `GET /api/runs/{id}` | | `RunDetail` |
 | `GET /api/runs/{id}/steps/{sid}/log` | `offset` | `{text, offset, done}` |
@@ -664,9 +687,9 @@ All endpoints are `_local_only` and scoped to the owner. Shapes go into `dashboa
 | `POST /api/runs/{id}/approve` | `{approve, note?}` | `Run`; 409 `not_waiting` |
 | `POST /api/runs/{id}/continue` | `{when: now\|reset}` | `Run`; `quota` → `queued` now, or sets `auto_resume`; 409 `not_quota` |
 | `PUT` / `DELETE /api/workflows/{cap_id}/schedule` | `{cron, input?, enabled}` | schedule + `next_at`; 422 `bad_cron` |
-| `POST /api/workflows/{cap_id}/export` | | `{path}`; 422 `has_approval` (M6) |
-| `/mcp` | `run_workflow(workflow, input="")` → `{run_id}`; `workflow_status(run_id)` → `{status, error, quota_resets_at, steps[]}` | |
-| CLI | `ctc run <wf> [--input] [--project] [--wait]`, `ctc runs`, `ctc cancel <id>`, `ctc continue <id> [--now]`, `ctc runner upgrade` | |
+| `POST /api/workflows/{cap_id}/export` | | `{path}`; 422 `has_approval` (M6) / `not_exportable` (`<code>: …`, the refusals in `export.py`) |
+| `/mcp` | `run_workflow(workflow, input="", project?, inputs?)` → `{run_id}`; `list_workflows()` → `{workflows: [{id, name, scope, project, description, has_schedule, inputs}]}`; `workflow_status(run_id)` → `{run_id, workflow, status, error, branch, pr_url, tokens, quota_resets_at, steps[] (with marker)}`; `approve_run(run_id, note?)`, `reject_run(run_id, note?)`, `continue_run(run_id, when)`, `cancel_run(run_id)` | |
+| CLI | `ctc run <wf> [--input name=value …] [--project] [--wait] [--pinned]`, `ctc runs`, `ctc runs prune [--days 30] [--apply]`, `ctc cancel <id>`, `ctc continue <id> [--now]`, `ctc approve\|reject <id> [--note]`, `ctc retry <id> [--from <node>] [--to <node>]`, `ctc workflow validate <file>`, `ctc runner upgrade` | |
 
 ### Build order (m5)
 Tracks: WB = backend, WF = frontend, WH = owner. Each milestone branch is cut from the previous one and PRed into `main`.

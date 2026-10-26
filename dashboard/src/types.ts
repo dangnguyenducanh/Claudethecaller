@@ -42,7 +42,10 @@ export interface Activity {
 export interface Capability {
   id: string; kind: Kind; namespace: string; description: string
   override: Override | null; calls_30d: number; followed_30d: number; cluster_id: string | null
+  file_hash?: string | null // sha256 of the file; GET /capabilities/{id} and PATCH
 }
+export interface GraphIssue { message: string; node_id: string | null } // graph.validate / graph.warnings entry
+export interface SavedCapability extends Capability { warnings: GraphIssue[] } // POST / PATCH /capabilities
 export interface CapabilityDetail extends Capability {
   name: string; invoke: string; path: string; body: string; summary: string | null; triggers: string[]
   editable: boolean; vectors: number; cluster_members: string[]; recent_decisions: Decision[]
@@ -55,7 +58,10 @@ export interface NewCapability {
   kind: Kind; scope: 'user' | 'project'; project?: string; name: string; description: string; body?: string; steps?: WorkflowStep[]
   graph?: Graph; settings?: WorkflowSettings // workflows: `graph` replaces `steps`
 }
-export type CapabilityPatch = { description?: string; body?: string; steps?: WorkflowStep[]; graph?: Graph; settings?: WorkflowSettings }
+export type CapabilityPatch = {
+  description?: string; body?: string; steps?: WorkflowStep[]; graph?: Graph; settings?: WorkflowSettings
+  base_hash?: string // 409 changed_on_disk when the file changed since load
+}
 export interface DedupPair { id: number; a: string; b: string; similarity: number; status: 'open' | 'merged' | 'kept_apart' }
 
 export interface Session {
@@ -91,19 +97,40 @@ export interface ApiKey { id: number; name: string; created_at: string; revoked_
 export interface NewApiKey { name: string }
 
 // Workflow runner, PLAN.md "Workflow runner (m5)" → Workflow file and API.
-export type NodeType = 'trigger' | 'agent' | 'shell' | 'if' | 'approval' | 'merge' // merge has no fields of its own
+export type NodeType = 'trigger' | 'agent' | 'shell' | 'if' | 'switch' | 'approval' | 'merge' | 'stop' | 'foreach' // merge has no fields of its own
+export type Op = 'eq' | 'ne' | 'gt' | 'ge' | 'lt' | 'le' | 'contains' | 'not_contains' | 'regex' | 'exists' | 'truthy'
+export interface Condition { path: string; op: Op; value?: unknown }
+export interface SwitchCase { name: string; conditions: Condition[]; combine?: 'and' | 'or' }
+export interface RunInput { name: string; type?: 'string' | 'number' | 'bool' | 'json'; required?: boolean; default?: unknown; description?: string } // trigger inputs, as graph.validate checks them
 export interface WfNode {
   id: string; type: NodeType; pos: [number, number]; max_visits?: number
-  input?: string // trigger
-  prompt?: string; cap?: string; agent?: string; model?: string; effort?: string; permission_mode?: 'acceptEdits' | 'dontAsk' // agent
-  allowed_tools?: string[]; mcp_config?: unknown; json_schema?: unknown; resume_from?: string; max_turns?: number; on_error?: 'fail' | 'continue'
+  notes?: string // any node type, shown on hover
+  disabled?: boolean // any node but trigger, IF, Switch and For-each: runs pass straight through
+  input?: string // trigger: the free-text {{input}} default
+  inputs?: RunInput[] // trigger: typed run inputs, read as {{input.<name>}}; every run start checks and coerces them
+  prompt?: string; cap?: string; agent?: string; model?: string; effort?: string; permission_mode?: 'acceptEdits' | 'dontAsk' | 'plan' // agent
+  allowed_tools?: string[]; mcp_config?: unknown; json_schema?: unknown; resume_from?: string; max_turns?: number
+  readonly?: boolean // agent only: read tools + dontAsk; ready readonly agents batch in parallel
   command?: string // shell
-  timeout_s?: number; readonly?: boolean // agent and shell
-  path?: string; op?: 'eq' | 'ne' | 'contains' | 'truthy'; value?: unknown // if
-  message?: string // approval
+  idempotent?: boolean; retry?: { max_tries: number; wait_s?: number } // shell only: max_tries 1..5, wait_s 0..300
+  timeout_s?: number // agent and shell
+  on_error?: 'stop' | 'continue' | 'error_output' // agent and shell; error_output adds the red 'error' handle
+  pin?: { output: Record<string, unknown> } // agent and shell; used only by runs started with pinned
+  path?: string; op?: Op; value?: unknown // if, the old single-condition form
+  conditions?: Condition[]; combine?: 'and' | 'or' // if
+  cases?: SwitchCase[] // switch: out-edges use a case name or 'default' as handle
+  message?: string // approval, stop
+  items?: string; max_items?: number // foreach: body handle -> nodes -> back here per item; done handle -> {items}
 }
-export interface Graph { nodes: WfNode[]; edges: { from: string; to: string; handle?: 'true' | 'false' }[]; defaults?: { max_visits?: number } } // a run's snapshot carries `defaults`
-export interface WorkflowSettings { permission: 'worktree' | 'container'; allow_extra_usage: boolean; auto_resume: boolean; max_run_tokens: number | null }
+export interface Graph {
+  nodes: WfNode[]
+  edges: { from: string; to: string; handle?: string }[] // IF 'true' | 'false'; Switch case name | 'default'; agent/shell 'error'; foreach 'body' | 'done'
+  defaults?: { max_visits?: number } // a run's snapshot carries `defaults`
+}
+export interface WorkflowSettings {
+  permission: 'worktree' | 'container'; allow_extra_usage: boolean; auto_resume: boolean; max_run_tokens: number | null
+  max_run_minutes: number | null; approval_timeout_minutes: number | null // > 0; null = no limit
+}
 export interface Schedule { cron: string; input: string; enabled: boolean; next_at: string | null; last_fired_at: string | null } // cron in daemon local time
 
 export type RunStatus = 'queued' | 'running' | 'waiting' | 'done' | 'failed' | 'cancelled' | 'quota'
@@ -121,7 +148,12 @@ export interface Step {
   input: string | null; output: Record<string, unknown> | null; error: string | null
   session_id: string | null; num_turns: number | null; tokens: Record<string, number> | null; cost_usd: number | null // cost is notional
   permission_denials: unknown[] | null; overage: boolean | null; files: DiffFile[] | null; started_at: string; ended_at: string | null
+  marker: 'reused' | 'pinned' | 'disabled' | null // completed without executing
+  tries: number // shell retry-on-fail tries
 }
-export interface RunDetail extends Run { graph: Graph; file_sha: string; auth: { authMethod: string; email: string; claude_version: string } | null; steps: Step[] }
+export interface RunDetail extends Run {
+  graph: Graph; file_sha: string; auth: { authMethod: string; email: string; claude_version: string } | null; steps: Step[]
+  parent_run_id: number | null; from_node: string | null; to_node: string | null // a retry / run-from / run-to of that run
+}
 export interface StepLog { text: string; offset: number; done: boolean }
 export interface Diff { diff: string; files: DiffFile[]; truncated: boolean }

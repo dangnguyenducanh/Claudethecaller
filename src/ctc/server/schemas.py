@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -143,6 +143,8 @@ class WorkflowSettings(BaseModel):
     allow_extra_usage: bool = False
     auto_resume: bool = True
     max_run_tokens: int | None = Field(default=None, ge=1)
+    max_run_minutes: float | None = Field(default=None, gt=0)  # the run's wall clock; past it the run fails
+    approval_timeout_minutes: float | None = Field(default=None, gt=0)  # a waiting approval past it fails the run
 
 
 class ScheduleSet(BaseModel):  # PUT /api/workflows/{cap_id}/schedule
@@ -168,6 +170,16 @@ class Capability(BaseModel):
     calls_30d: int
     followed_30d: int
     cluster_id: str | None
+    file_hash: str | None = None  # sha256 of the file bytes: GET /capabilities/{id} and PATCH set it, null in lists
+
+
+class GraphIssue(BaseModel):  # ctc.runner.graph.validate / warnings entry
+    message: str
+    node_id: str | None = None
+
+
+class SavedCapability(Capability):  # POST / PATCH /capabilities: warnings = graph.warnings() of a saved workflow
+    warnings: list[GraphIssue] = []
 
 
 class CapabilityDetail(Capability):
@@ -205,6 +217,7 @@ class CapabilityPatch(BaseModel):
     steps: list[WorkflowStep] | None = None
     graph: Graph | None = None
     settings: WorkflowSettings | None = None
+    base_hash: str | None = None  # the file_hash the editor loaded: 409 changed_on_disk on a mismatch; omitted = overwrite
 
 
 class OverrideSet(BaseModel):
@@ -363,10 +376,20 @@ class RunStart(BaseModel):
     input: str = ""
     project: str | None = None  # a user or plugin workflow runs in this project (name); a project workflow in its own
     trigger: RunTrigger = "api"
+    # pinned nodes return their pin.output; editor and CLI only (422 pinned_not_allowed for schedule and mcp)
+    pinned: bool = False
+    # {name: value} for a workflow whose trigger declares inputs (checked and coerced, 422 bad_input)
+    inputs: dict[str, Any] | None = None
 
 
 class RunRef(BaseModel):
     run_id: int
+
+
+class RunRetry(BaseModel):  # POST /api/runs/{rid}/retry: a new run linked to this one, reusing its earlier outputs
+    from_node: str | None = None  # default: the parent's failed step when it failed, else the start
+    to_node: str | None = None  # stop with done after this node
+    trigger: RunTrigger = "api"
 
 
 class WorkflowExport(BaseModel):  # POST /api/workflows/{cap_id}/export
@@ -433,12 +456,17 @@ class RunStep(BaseModel):  # types.ts `Step` (that name is the router's bundle s
     files: list[DiffFile] | None
     started_at: datetime
     ended_at: datetime | None
+    marker: Literal["reused", "pinned", "disabled"] | None = None  # completed without executing
+    tries: int = 1  # shell retry-on-fail tries (US7)
 
 
 class RunDetail(Run):
     graph: Graph
     file_sha: str
     auth: dict | None  # {authMethod, email, claude_version}
+    parent_run_id: int | None = None  # a retry / run-from / run-to of that run
+    from_node: str | None = None
+    to_node: str | None = None
     steps: list[RunStep]
 
 

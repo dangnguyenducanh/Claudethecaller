@@ -1,0 +1,16 @@
+name: foreach-demo
+description: For-each demo - list three names, greet each, then report (no claude)
+settings: {permission: worktree, allow_extra_usage: false, auto_resume: true, max_run_tokens: null}
+nodes:
+  - {id: start, type: trigger, input: "", pos: [0, 160]}
+  - {id: names, type: shell, command: "printf '%s' '[\"ann\",\"bob\",\"cy\"]'", timeout_s: 30, pos: [200, 160]}
+  - {id: each, type: foreach, items: names.stdout_tail, max_items: 50, pos: [400, 160]}
+  - {id: greet, type: shell, command: "echo hello {{item}} {{index}}", timeout_s: 30, pos: [600, 320]}
+  - {id: report, type: shell, command: "echo {{each.items}}", timeout_s: 30, pos: [600, 160]}
+edges:
+  - {from: start, to: names}
+  - {from: names, to: each}
+  - {from: each, to: greet, handle: body}
+  - {from: greet, to: each}
+  - {from: each, to: report, handle: done}
+steps: []

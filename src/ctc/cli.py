@@ -18,12 +18,14 @@ import uuid
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 from urllib.parse import quote, urlsplit
 
 import httpx
 import numpy as np
 import psycopg
 import typer
+import yaml
 from rich import box
 from rich.columns import Columns
 from rich.console import Console, Group
@@ -36,7 +38,7 @@ from ctc.embedding.embedder import Embedder
 from ctc.ingestion import indexer
 from ctc.ingestion.scanner import default_roots, scan_library
 from ctc.retrieval.hybrid import close_ctx, open_ctx, result_json, search
-from ctc.runner import proc
+from ctc.runner import engine, graph, proc, prune
 from ctc.runner.engine import RUNS
 from ctc.storage.cache import Cache
 from ctc.storage.local import CACHE, LocalStore
@@ -383,11 +385,13 @@ def daemon_stop() -> None:
         out.print(f"{dot(FAINT)} daemon not running" + (f"  [{FAINT}]but something answers on {cfg()['socket']} (started by hand?)[/]" if _health() else ""))
         return
     os.kill(pid, signal.SIGTERM)
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline and _alive():
-        time.sleep(0.1)
+    grace = cfg()["runner"]["shutdown_grace_s"] + 60  # + stop()'s SIGINT -> SIGTERM -> SIGKILL (~20 s) and the sweep
+    deadline = time.monotonic() + grace
+    with out.status(f"[{MUTED}]stopping the daemon (a running batch may take up to {grace} s)…[/]", spinner_style=BLUE):
+        while time.monotonic() < deadline and _alive():
+            time.sleep(0.1)
     if _alive():
-        err.print(f"[{BAD}]●[/] pid {pid} still running after 15 s  [{FAINT}]kill -9 {pid}[/]")
+        err.print(f"[{BAD}]●[/] pid {pid} still running after {grace} s  [{FAINT}]kill -9 {pid}[/]")
         raise typer.Exit(1)
     pid_file.unlink(missing_ok=True)
     out.print(f"{dot(FAINT)} daemon stopped  [{FAINT}]pid {pid}[/]")
@@ -530,13 +534,28 @@ def _status(s: str) -> str:
 
 @app.command("run")
 def run_cmd(workflow: str = typer.Argument(..., help="Workflow id or name, e.g. smoke."),
-            text: str = typer.Option("", "--input", "-i", help="The run's {{input}}."),
+            inputs: Annotated[list[str] | None, typer.Option(
+                "--input", "-i", help="name=value for a declared input (repeat it); for a workflow without inputs, its "
+                "free-text {{input}}")] = None,
             project: str | None = typer.Option(None, "--project", "-p", help="Project name, for a user or plugin workflow."),
-            wait: bool = typer.Option(False, "--wait", "-w", help="Wait for the end and show every node.")) -> None:
+            wait: bool = typer.Option(False, "--wait", "-w", help="Wait for the end and show every node."),
+            pinned: bool = typer.Option(False, "--pinned", help="Pinned nodes return their pinned output: no agent runs, "
+                                        "no commit. For testing IF, loops and templates.")) -> None:
     """Queue a workflow run on the daemon: its own git worktree and branch, your claude login."""
-    cap_id = _workflow_id(workflow)
-    rid = _api("POST", f"/workflows/{quote(cap_id, safe=':@')}/runs", json={"input": text, "project": project, "trigger": "cli"})["run_id"]
-    out.print(f"{dot(BLUE)} run [bold]#{rid}[/] queued  [{FAINT}]{cap_id}[/]")
+    cap_id, inputs = _workflow_id(workflow), inputs or []
+    g = _api("GET", f"/capabilities/{quote(cap_id, safe=':@')}")["graph"] or {}
+    names = [i["name"] for n in g.get("nodes") or [] if n.get("type") == "trigger" for i in n.get("inputs") or []]
+    if names and any("=" not in x for x in inputs):
+        err.print(f"[{BAD}]●[/] use --input name=value; {cap_id} takes: {', '.join(names)}", soft_wrap=True)
+        raise typer.Exit(1)
+    if not names and len(inputs) > 1:
+        err.print(f"[{BAD}]●[/] {cap_id} declares no inputs: pass one --input text", soft_wrap=True)
+        raise typer.Exit(1)
+    # declared inputs go as strings: the daemon checks and coerces them (422 bad_input)
+    body = {"input": "", "inputs": dict(x.split("=", 1) for x in inputs)} if names else {"input": inputs[0] if inputs else ""}
+    rid = _api("POST", f"/workflows/{quote(cap_id, safe=':@')}/runs",
+               json=body | {"project": project, "trigger": "cli", "pinned": pinned})["run_id"]
+    out.print(f"{dot(BLUE)} run [bold]#{rid}[/] queued  [{FAINT}]{cap_id}{' · pinned' if pinned else ''}[/]")
     if not wait:
         return
     with out.status(f"[{MUTED}]running #{rid}…[/]", spinner_style=BLUE):
@@ -552,9 +571,39 @@ def run_cmd(workflow: str = typer.Argument(..., help="Workflow id or name, e.g. 
         raise typer.Exit(1)
 
 
-@app.command("runs")
-def runs_cmd(limit: int = typer.Option(20, "--limit", "-n")) -> None:
+workflow = typer.Typer(no_args_is_help=True, help="Workflow files.")
+app.add_typer(workflow, name="workflow")
+
+
+@workflow.command("validate")
+def workflow_validate(file: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="A workflow YAML file.")]) -> None:
+    """Check a workflow file here, without the daemon (saved or not): errors stop it from running, warnings flag
+    template refs that would render empty. Exits 1 on any error."""
+    try:
+        g = graph.load(file)
+        errs, warns = graph.validate(g), graph.warnings(g)
+    except (yaml.YAMLError, AttributeError, TypeError, KeyError) as e:
+        err.print(Text(f"● malformed workflow: {e}", style=BAD), soft_wrap=True)
+        raise typer.Exit(1) from None
+    for kind, color, rows in (("error", BAD, errs), ("warning", WARN, warns)):
+        for x in rows:
+            node = f"  node {x['node_id']}" if x["node_id"] else ""
+            out.print(Text.assemble(("● ", color), f"{kind}: {x['message']}", (node, FAINT)), soft_wrap=True)
+    n, m = len(errs), len(warns)
+    out.print("valid" if not n + m else f"{n} error{'s' * (n != 1)}, {m} warning{'s' * (m != 1)}")
+    if errs:
+        raise typer.Exit(1)
+
+
+runs = typer.Typer(help="Recent workflow runs; `ctc runs prune` removes old ones.")
+app.add_typer(runs, name="runs")
+
+
+@runs.callback(invoke_without_command=True)
+def runs_cmd(ctx: typer.Context, limit: int = typer.Option(20, "--limit", "-n")) -> None:
     """Recent workflow runs of this claude login."""
+    if ctx.invoked_subcommand is not None:
+        return
     rows = _api("GET", "/runs", params={"limit": limit})
     t = grid(("run", "r:6"), ("workflow", "l:*3"), ("status", "l:12"), ("trigger", "l:9"), ("nodes", "r:7"), ("tokens", "r:10"),
              ("created", "l:16"))
@@ -562,6 +611,35 @@ def runs_cmd(limit: int = typer.Option(20, "--limit", "-n")) -> None:
         t.add_row(f"#{r['id']}", f"[{TEXT}]{r['workflow']}[/]", _status(r["status"]), f"[{MUTED}]{r['trigger']}[/]",
                   f"{r['nodes_done']}/{r['nodes_total']}", f"{r['tokens']:,}", f"[{FAINT}]{r['created_at'][:16].replace('T', ' ')}[/]")
     out.print(card(t, "Runs", f"{len(rows)} shown"))
+
+
+@runs.command("prune")
+def runs_prune(days: int = typer.Option(30, "--days", min=1, help="Prune runs that ended more than this many days ago."),
+               apply: bool = typer.Option(False, "--apply", help="Delete; without it this is a dry run.")) -> None:
+    """List runs older than --days that are done, failed or cancelled with no PR URL, and what would be removed
+    (worktree, ctc/* branch, gz logs, rows). Deletes only with --apply."""
+    async def go() -> tuple[list[dict], dict | None]:
+        if not (o := await engine.owner()):
+            err.print(f"[{BAD}]●[/] claude auth status shows no login")
+            raise typer.Exit(1)
+        st = await Store.open(cfg()["database_url"], pool_max=1)
+        try:
+            items = await prune.candidates(st, o, days)
+            return items, await prune.apply(st, o, items) if apply and items else None
+        finally:
+            await st.close()
+
+    items, totals = _run(go())
+    if not items:
+        out.print(f"{dot(FAINT)} nothing to prune (older than {days} days)")
+        return
+    t = grid(("run", "r:6"), ("workflow", "l:*3"), ("age", "r:6"), ("branch", "l:*3"), ("size", "r:9"))
+    for i in items:
+        t.add_row(f"#{i['id']}", f"[{TEXT}]{i['workflow']}[/]", f"{i['age_days']}d", f"[{MUTED}]{i['branch'] or ''}[/]",
+                  f"{i['size'] / 1e6:.1f} MB")
+    sub = (f"pruned {totals['runs']} runs · {totals['worktrees']} worktrees · {totals['branches']} branches · "
+           f"{totals['bytes'] / 1e6:.1f} MB freed" if totals else "dry run · nothing deleted · pass --apply")
+    out.print(card(t, "Prune runs", sub))
 
 
 @app.command("cancel")
@@ -579,6 +657,35 @@ def continue_cmd(run_id: int = typer.Argument(..., help="Run id, from ctc runs."
     when = (f" · goes on at {datetime.fromisoformat(r['quota_resets_at']).astimezone():%Y-%m-%d %H:%M}"  # local, like "resets 3pm"
             if r["status"] == "quota" and r["quota_resets_at"] else "")
     out.print(f"{_status(r['status'])}  [{FAINT}]run #{r['id']} · {r['workflow']}{when}[/]")
+
+
+def _approve(run_id: int, ok: bool, note: str | None) -> None:
+    r = _api("POST", f"/runs/{run_id}/approve", json={"approve": ok, "note": note})  # not waiting: 409 not_waiting
+    out.print(f"{_status(r['status'])}  [{FAINT}]run #{r['id']} · {r['workflow']}[/]")
+
+
+@app.command("approve")
+def approve_cmd(run_id: int = typer.Argument(..., help="Run id, from ctc runs."),
+                note: str | None = typer.Option(None, "--note", "-m", help="Saved on the approval step.")) -> None:
+    """Approve a run waiting at an approval node: it walks on."""
+    _approve(run_id, True, note)
+
+
+@app.command("reject")
+def reject_cmd(run_id: int = typer.Argument(..., help="Run id, from ctc runs."),
+               note: str | None = typer.Option(None, "--note", "-m", help="Saved on the approval step.")) -> None:
+    """Reject a run waiting at an approval node: it ends cancelled."""
+    _approve(run_id, False, note)
+
+
+@app.command("retry")
+def retry_cmd(run_id: int = typer.Argument(..., help="Run id, from ctc runs."),
+              from_node: str | None = typer.Option(None, "--from", help="Start at this node, reusing the earlier nodes' outputs (default: the failed step, else the start)."),
+              to_node: str | None = typer.Option(None, "--to", help="Stop with done after this node.")) -> None:
+    """Start a new run from an earlier run, on a worktree reset to the start node's commit."""
+    r = _api("POST", f"/runs/{run_id}/retry", json={"from_node": from_node, "to_node": to_node, "trigger": "cli"})
+    where = (f" from {from_node}" if from_node else "") + (f" to {to_node}" if to_node else "")
+    out.print(f"{dot(BLUE)} run [bold]#{r['run_id']}[/] queued  [{FAINT}]retry of #{run_id}{where}[/]")
 
 
 runner = typer.Typer(no_args_is_help=True, help="The workflow runner's pinned claude CLI.")

@@ -2,7 +2,8 @@ import { handle } from './mock'
 import type {
   Activity, ApiKey, Capability, CapabilityDetail, CapabilityPatch, Decision, DedupPair, Diff, Health, HistoryFile, HistoryStatus,
   Job, Kind, Kpis, Memory, MemoryDetail, MemoryKind, MemoryPatch, MemoryWrite, Metric, NewCapability, NewMemory, Ok, Override,
-  Project, ProjectDetail, Range, Run, RunDetail, RunStatus, RunTrigger, Schedule, Session, SessionDetail, Source, StepLog, Timeline,
+  Project, ProjectDetail, Range, Run, RunDetail, RunStatus, RunTrigger, SavedCapability, Schedule, Session, SessionDetail, Source,
+  StepLog, Timeline,
 } from './types'
 
 export class ApiError extends Error {
@@ -114,8 +115,9 @@ export const api = {
   capabilities: (o: { project: string | null; q?: string; kind?: Kind; namespace?: string; override?: Override; limit?: number }) =>
     req<Capability[]>('GET', '/capabilities' + qs({ limit: CAP_MAX, ...o })),
   capability: (id: string, project: string | null) => req<CapabilityDetail>('GET', `/capabilities/${seg(id)}` + qs({ project })),
-  createCapability: (body: NewCapability) => req<Capability>('POST', '/capabilities', body),
-  updateCapability: (id: string, patch: CapabilityPatch) => req<Capability>('PATCH', `/capabilities/${seg(id)}`, patch),
+  // the mock (mock.ts) answers without `warnings`: read `warnings ?? []`
+  createCapability: (body: NewCapability) => req<SavedCapability>('POST', '/capabilities', body),
+  updateCapability: (id: string, patch: CapabilityPatch) => req<SavedCapability>('PATCH', `/capabilities/${seg(id)}`, patch),
   deleteCapability: (id: string) => req<Ok>('DELETE', `/capabilities/${seg(id)}`),
   enrich: (id: string) => req<{ job_id: string }>('POST', `/capabilities/${seg(id)}/enrich`), // A1: summary + triggers from the LLM
   setOverride: (id: string, project: string | null, action: Override | null) =>
@@ -157,7 +159,7 @@ export const api = {
   importHistory: (o: { process?: boolean; projects?: string[] } = {}) => req<{ job_id: string }>('POST', '/history/import', o),
   historyFiles: (status?: string) => req<HistoryFile[]>('GET', '/history/files' + qs({ status })),
   // Workflow runs (PLAN.md "Workflow runner (m5)" → API; M1 + M2 endpoints). The daemon only: the mock has no runs.
-  startRun: (capId: string, body: { input?: string; project?: string; trigger?: RunTrigger }) => req<{ run_id: number }>('POST', `/workflows/${seg(capId)}/runs`, body),
+  startRun: (capId: string, body: { input?: string; project?: string; trigger?: RunTrigger; pinned?: boolean; inputs?: Record<string, unknown> }) => req<{ run_id: number }>('POST', `/workflows/${seg(capId)}/runs`, body), // 422 pinned_not_allowed, 422 bad_input
   exportWorkflow: (capId: string) => req<{ path: string }>('POST', `/workflows/${seg(capId)}/export`), // M6: 422 has_approval, 409 a different file exists
   runs: (o: { workflow?: string; status?: RunStatus; trigger?: RunTrigger } & Page = {}) => req<Run[]>('GET', '/runs' + qs(o)),
   run: (id: number) => req<RunDetail>('GET', `/runs/${id}`),
@@ -167,6 +169,7 @@ export const api = {
   cancelRun: (id: number) => req<Run>('POST', `/runs/${id}/cancel`),
   approveRun: (id: number, body: { approve: boolean; note?: string }) => req<Run>('POST', `/runs/${id}/approve`, body), // 409 not_waiting
   continueRun: (id: number, when: 'now' | 'reset') => req<Run>('POST', `/runs/${id}/continue`, { when }), // 409 not_quota
+  retryRun: (id: number, body: { from_node?: string; to_node?: string; trigger?: RunTrigger }) => req<{ run_id: number }>('POST', `/runs/${id}/retry`, body), // 422 not_retryable
   compareRuns: (a: number, b: number, node?: string) => req<Diff>('GET', '/runs/compare' + qs({ a, b, node })), // 422 unless same owner + repo
   setSchedule: (capId: string, body: { cron: string; input?: string; enabled: boolean }) => req<Schedule>('PUT', `/workflows/${seg(capId)}/schedule`, body), // 422 bad_cron
   deleteSchedule: (capId: string) => req<Ok>('DELETE', `/workflows/${seg(capId)}/schedule`),
