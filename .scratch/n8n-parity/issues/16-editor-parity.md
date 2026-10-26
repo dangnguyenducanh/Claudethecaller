@@ -1,6 +1,6 @@
 # 16 — editor-parity
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: none
 Spec: `.scratch/n8n-parity/spec.md` (read it first; this ticket implements part of it)
 Touches: dashboard/src/Workflows.tsx, dashboard/src/Runs.tsx, dashboard/src/types.ts, src/ctc/server/library.py (save conflict), src/ctc/runner/graph.py (rename helper only), tests/test_library_save.py
@@ -21,3 +21,5 @@ Editor: undo/redo (keyboard + buttons, in-memory history of the graph), copy/pas
 API test for save conflict, graph test for rename, browser QC for the rest.
 
 ## Comments
+
+2026-10-26 — resolved on branch `n8n-16-editor-parity`, merged into `m5-n8n-parity` (tasks T135–T146, T148; T147 browser QC deferred to the final QC pass). Editor: undo/redo (keys + buttons, in-memory history), copy/paste of nodes with internal edges as YAML (ids de-duplicated), node `notes` (validated as text), rename rewrites `{{old.*}}`, `path` and `resume_from` refs and edges (`graph.rename_node` + `renameRefs`), save-conflict prompt (reload/overwrite). Server: GET/PATCH capability return `file_hash`; PATCH with a stale `base_hash` returns 409 `changed_on_disk` (a deleted file counts). Run page: step list (node, visit, status, duration, tokens, error). Tests: tests/test_graph_editor.py, tests/test_library_save.py. Note for 13: a new node-id field under another key (foreach `items`) must be added to `rename_node` and `renameRefs`.

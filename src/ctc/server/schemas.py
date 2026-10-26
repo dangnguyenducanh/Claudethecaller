@@ -168,6 +168,7 @@ class Capability(BaseModel):
     calls_30d: int
     followed_30d: int
     cluster_id: str | None
+    file_hash: str | None = None  # sha256 of the file bytes: GET /capabilities/{id} and PATCH set it, null in lists
 
 
 class CapabilityDetail(Capability):
@@ -205,6 +206,7 @@ class CapabilityPatch(BaseModel):
     steps: list[WorkflowStep] | None = None
     graph: Graph | None = None
     settings: WorkflowSettings | None = None
+    base_hash: str | None = None  # the file_hash the editor loaded: 409 changed_on_disk on a mismatch; omitted = overwrite
 
 
 class OverrideSet(BaseModel):
