@@ -9,6 +9,7 @@ invalid_graph) and `settings`, plus the `steps:` the router reads, derived from 
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import os
@@ -19,7 +20,7 @@ from pathlib import Path
 
 import httpx
 import yaml
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg.types.json import Jsonb
 
 from ctc.decision.bundle import _workflow_steps
@@ -29,6 +30,7 @@ from ctc.ingestion.scanner import (
     _split_frontmatter,
     project_namespace,
 )
+from ctc.memory import observations as obs
 from ctc.memory.longterm import Memory as MemoryRow
 from ctc.memory.longterm import _unit, write_memory
 from ctc.runner import schedule
@@ -52,6 +54,8 @@ from ctc.server.schemas import (
     CapabilityPatch,
     DedupPair,
     DedupResolve,
+    FeedCounts,
+    FeedItem,
     Graph,
     ImportRequest,
     JobRef,
@@ -63,10 +67,13 @@ from ctc.server.schemas import (
     MemoryWrite,
     NewCapability,
     NewMemory,
+    Observation,
     Ok,
     Override,
     OverrideSet,
+    Range,
     Scope,
+    Summary,
     WorkflowSettings,
     to_decision,
     to_memory,
@@ -356,6 +363,57 @@ async def memories(request: Request, project: str | None = None, q: str | None =
     return [to_memory(r) for r in rows]
 
 
+@contextlib.contextmanager
+def _bad():
+    """The observations module raises ValueError on a bad cursor, anchor, type or range: answer 400."""
+    try:
+        yield
+    except ValueError as e:
+        fail(400, "bad_request", str(e))
+
+
+async def _pids(st, u: str, project: str | None) -> list[str]:
+    """The named project's id, or every project of the user."""
+    if project:
+        return [await project_id(st, u, project)]
+    return [r["id"] for r in await st.store.fetch("select id from projects where user_id = %s", (u,))]
+
+
+# static paths first: /memories/{mid} would take them as ids
+@router.get("/memories/feed", response_model=list[FeedItem])
+async def memory_feed(request: Request, project: str | None = None, session_id: str | None = None, types: str | None = None,
+                      q: str | None = None, range: Range | None = None, before: str | None = None, after: str | None = None,
+                      limit: int = Query(50, ge=1, le=200)):
+    st, u = ctx(request)
+    with _bad():
+        return await obs.feed(st, u, await _pids(st, u, project), session_id=session_id, types=types, q=q, range_=range,
+                              before=before, after=after, limit=limit)
+
+
+@router.get("/memories/feed/counts", response_model=FeedCounts)
+async def memory_feed_counts(request: Request, project: str | None = None, session_id: str | None = None,
+                             range: Range | None = None, q: str | None = None):
+    st, u = ctx(request)
+    with _bad():
+        return await obs.feed_counts(st, u, await _pids(st, u, project), session_id=session_id, range_=range, q=q)
+
+
+@router.get("/memories/timeline")  # no response_model: FeedItem would drop each item's `anchor` flag
+async def memory_timeline(request: Request, anchor: str | None = None, depth_before: int = 3, depth_after: int = 3,
+                          project: str | None = None):
+    st, u = ctx(request)
+    with _bad():
+        return await obs.timeline(st, u, await _pids(st, u, project), anchor=anchor, depth_before=depth_before, depth_after=depth_after)
+
+
+@router.get("/memories/context", response_model=dict[str, str])
+async def memory_context(request: Request, project: str | None = None):
+    st, u = ctx(request)
+    if not project:
+        fail(400, "bad_request", "project is required")
+    return {"text": await obs.context_text(st, u, await project_id(st, u, project), project)}
+
+
 @router.get("/memories/{mid}", response_model=MemoryDetail)
 async def memory(mid: str, request: Request):
     st, u = ctx(request)
@@ -412,6 +470,41 @@ async def restore_memory(mid: str, request: Request):
     await _mem(st, u, mid)
     await st.store.execute("update memories set deleted_at = null where id = %s and user_id = %s", (mid, u))
     return to_memory(await _mem(st, u, mid))
+
+
+@router.get("/observations/{oid}", response_model=Observation)
+async def observation(oid: int, request: Request):
+    st, u = ctx(request)
+    got = await obs.get_many(st, u, await _pids(st, u, None), [oid])
+    return got["observations"][0] if got["observations"] else fail(404, "not_found", f"no observation {oid}")
+
+
+@router.delete("/observations/{oid}", response_model=Ok)
+async def delete_observation(oid: int, request: Request):
+    st, u = ctx(request)
+    if not await obs.soft_delete(st, u, "observations", oid):
+        fail(404, "not_found", f"no observation {oid}")
+    return Ok()
+
+
+@router.post("/observations/{oid}/restore", response_model=Observation)
+async def restore_observation(oid: int, request: Request):
+    st, u = ctx(request)
+    return await obs.soft_delete(st, u, "observations", oid, restore=True) or fail(404, "not_found", f"no observation {oid}")
+
+
+@router.delete("/summaries/{sid}", response_model=Ok)
+async def delete_summary(sid: int, request: Request):
+    st, u = ctx(request)
+    if not await obs.soft_delete(st, u, "session_summaries", sid):
+        fail(404, "not_found", f"no summary {sid}")
+    return Ok()
+
+
+@router.post("/summaries/{sid}/restore", response_model=Summary)
+async def restore_summary(sid: int, request: Request):
+    st, u = ctx(request)
+    return await obs.soft_delete(st, u, "session_summaries", sid, restore=True) or fail(404, "not_found", f"no summary {sid}")
 
 
 @router.post("/memories/import", response_model=JobRef)
