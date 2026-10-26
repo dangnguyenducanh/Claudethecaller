@@ -97,14 +97,14 @@ export interface ApiKey { id: number; name: string; created_at: string; revoked_
 export interface NewApiKey { name: string }
 
 // Workflow runner, PLAN.md "Workflow runner (m5)" → Workflow file and API.
-export type NodeType = 'trigger' | 'agent' | 'shell' | 'if' | 'switch' | 'approval' | 'merge' | 'stop' // merge has no fields of its own
+export type NodeType = 'trigger' | 'agent' | 'shell' | 'if' | 'switch' | 'approval' | 'merge' | 'stop' | 'foreach' // merge has no fields of its own
 export type Op = 'eq' | 'ne' | 'gt' | 'ge' | 'lt' | 'le' | 'contains' | 'not_contains' | 'regex' | 'exists' | 'truthy'
 export interface Condition { path: string; op: Op; value?: unknown }
 export interface SwitchCase { name: string; conditions: Condition[]; combine?: 'and' | 'or' }
 export interface WfNode {
   id: string; type: NodeType; pos: [number, number]; max_visits?: number
   notes?: string // any node type, shown on hover
-  disabled?: boolean // any node but trigger, IF and Switch: runs pass straight through
+  disabled?: boolean // any node but trigger, IF, Switch and For-each: runs pass straight through
   input?: string // trigger
   prompt?: string; cap?: string; agent?: string; model?: string; effort?: string; permission_mode?: 'acceptEdits' | 'dontAsk' | 'plan' // agent
   allowed_tools?: string[]; mcp_config?: unknown; json_schema?: unknown; resume_from?: string; max_turns?: number
@@ -118,10 +118,11 @@ export interface WfNode {
   conditions?: Condition[]; combine?: 'and' | 'or' // if
   cases?: SwitchCase[] // switch: out-edges use a case name or 'default' as handle
   message?: string // approval, stop
+  items?: string; max_items?: number // foreach: body handle -> nodes -> back here per item; done handle -> {items}
 }
 export interface Graph {
   nodes: WfNode[]
-  edges: { from: string; to: string; handle?: string }[] // IF 'true' | 'false'; Switch case name | 'default'; agent/shell 'error'
+  edges: { from: string; to: string; handle?: string }[] // IF 'true' | 'false'; Switch case name | 'default'; agent/shell 'error'; foreach 'body' | 'done'
   defaults?: { max_visits?: number } // a run's snapshot carries `defaults`
 }
 export interface WorkflowSettings {

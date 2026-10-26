@@ -13,10 +13,14 @@ upstream output (passthrough()). A shell with `idempotent: true` may carry `retr
 the engine re-runs it while it exits non-zero or times out (agents never auto-retry). An agent or shell picks `on_error:
 stop|continue|error_output` (default stop; legacy `fail` = stop): with error_output its out-edges with handle `error`
 carry its failure ({error, output_tail, exit_code}, complete(failed=True)) and the others its success.
+A foreach (`items`: path to a JSON array, `max_items` default 50) is a loop head: its `body` edge enters nodes that
+all lead back to it, run once per item in order with {{item}} and {{index}} (current_item()); its output is
+foreach_step(): {item, index} per pass, then {items: [body outputs]} on its `done` edge. max_visits count per item.
 State (wf_runs.state, `{}` = not started): {inbox: {node: {"<edge#>": "data"|"skip"}}, deferred: [edge#], ready: [node],
-visits: {node: n}, execs: n, skipped: [node]}; edge# is the edge's index in graph["edges"]. visits counts runs and skips.
+visits: {node: n}, execs: n, skipped: [node], each: {foreach: {items, out, truncated_from, last}}, base: {node:
+visits at its item's start}}; edge# is the edge's index in graph["edges"]. visits counts runs and skips.
 Engine loop: `while (r := ready(g, st)): run batch(g, r) together (visit = visits.get(id, 0) + 1; a merge's output is
-merge_output() before its complete()), then complete(g, st, id, output) for each`;
+merge_output() and a foreach's foreach_step() before its complete()), then complete(g, st, id, output) for each`;
 complete() returns the run's error when a loop passes its cap; a node that lands in `skipped` gets a skipped step row
 (visit = visits[id]).
 """
@@ -31,7 +35,7 @@ from pathlib import Path
 
 import yaml
 
-TYPES = {"trigger", "agent", "shell", "if", "switch", "approval", "merge", "stop"}
+TYPES = {"trigger", "agent", "shell", "if", "switch", "approval", "merge", "stop", "foreach"}
 OPS = {"eq", "ne", "gt", "ge", "lt", "le", "contains", "not_contains", "regex", "exists", "truthy"}
 NUM = re.compile(r"\s*-?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][-+]?[0-9]+)?\s*")  # [0-9], not \d: export.py reuses it in JS
 REGEX_MAX = 10_000  # chars of a value a regex condition searches
@@ -40,12 +44,13 @@ PUSH = re.compile(r"\b(git\s+push|gh\s+pr\s+(create|merge))\b")
 SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 CASE = re.compile(r"[a-z0-9][a-z0-9_-]*")  # switch case names: lowercase, so they compare to _handle() as-is
 TPL = re.compile(r"\{\{\s*([\w.-]+)\s*\}\}")
-ROOTS = {"input", "run", "now", "vars"}  # template roots that are not node ids, so not allowed as ids
+ROOTS = {"input", "run", "now", "vars", "item", "index"}  # template roots that are not node ids, so not allowed as ids
 RUN_KEYS = {"branch", "id", "visit", "trigger"}
+MAX_ITEMS = 50  # a foreach's default max_items
 # a node type's output fields, as proc.run_agent / run_shell and the engine write them (warnings() checks refs against them)
 OUT_KEYS = {"trigger": {"input"}, "agent": {"result", "structured_output", "is_error", "subtype"},
             "shell": {"exit_code", "stdout_tail", "stderr_tail", "duration_ms"}, "if": {"value"}, "switch": {"case"},
-            "approval": {"approved", "note"}, "merge": {"inputs"}}
+            "approval": {"approved", "note"}, "merge": {"inputs"}, "foreach": {"items", "item", "index", "truncated_from"}}
 _MISSING = object()
 
 
@@ -98,6 +103,13 @@ def loop_body(g: dict, i: int, back: set[int]) -> set[str]:
     fwd = [(e.get("from"), e.get("to")) for j, e in enumerate(g["edges"]) if j not in back]
     e = g["edges"][i]
     return _reach(e.get("to"), fwd) & _reach(e.get("from"), [(b, a) for a, b in fwd])
+
+
+def foreach_body(g: dict, fid: str) -> set[str]:
+    """FR-032: a foreach's body, the nodes reachable from its `body` edges' targets without walking past it."""
+    edges = [(e.get("from"), e.get("to")) for e in g["edges"]]
+    starts = [e.get("to") for e in g["edges"] if e.get("from") == fid and _handle(e) == "body"]
+    return set().union(*(_reach(s, edges, {fid}) for s in starts)) - {fid}
 
 
 def max_visits(g: dict, node_id: str) -> int:
@@ -186,7 +198,7 @@ def validate(g: dict) -> list[dict]:
             err("notes must be text", nid)
         if (v := n.get("disabled")) is not None and type(v) is not bool:
             err("disabled must be true or false", nid)
-        elif v and t in ("trigger", "if", "switch"):  # FR-016: a branching node has no one handle to pass through on
+        elif v and t in ("trigger", "if", "switch", "foreach"):  # FR-016: a branching node has no one handle to pass through on
             err(f"a {t} node cannot be disabled: delete it or rewire its branches", nid)
         if (v := n.get("idempotent")) is not None and type(v) is not bool:
             err("idempotent must be true or false", nid)
@@ -249,6 +261,24 @@ def validate(g: dict) -> list[dict]:
                     err(f"case {name}: {m}", nid)
             for h in sorted({_handle(e) for e in g["edges"] if e.get("from") == nid} - {*map(str, names), "default"}):
                 err(f"switch edge handle {h} is not a case name or default", nid)
+        if t == "foreach":  # FR-032; items is checked below, with the forward edges
+            if (v := n.get("max_items")) is not None and not (type(v) is int and v >= 1):
+                err("max_items must be a whole number >= 1", nid)
+            hs = [_handle(e) for e in g["edges"] if e.get("from") == nid]
+            for h in sorted(set(hs) - {"body", "done"}):
+                err(f"foreach edge handle {h} must be body or done", nid)
+            body = foreach_body(g, nid) if hs.count("body") == 1 else set()
+            if hs.count("body") != 1:
+                err("a foreach node needs exactly one body edge", nid)
+            elif not body:
+                err("a foreach body needs at least one node", nid)
+            all_edges = [(e.get("from"), e.get("to")) for e in g["edges"]]
+            for x in sorted(body):
+                if nid not in _reach(x, all_edges):  # an edge out of the body makes its target body, so this says it
+                    err(f"{x} never returns to {nid}", x)
+            for e in g["edges"]:
+                if e.get("to") in body and e.get("from") not in body and not (e.get("from") == nid and _handle(e) == "body"):
+                    err(f"{e.get('from')} -> {e.get('to')} enters the body of {nid} from outside", e.get("to"))
         for ref in _refs(n):
             if ref.split(".")[0] not in known | ROOTS:
                 err(f"{ref} names no node", nid)
@@ -259,6 +289,10 @@ def validate(g: dict) -> list[dict]:
         src = byid.get(e.get("from")) or {}
         if src and _handle(e) == "error" and src.get("type") not in ("if", "switch") and src.get("on_error") != "error_output":
             err(f"edge {e['from']} -> {e.get('to')}: an error edge needs on_error: error_output on {e['from']}", e["from"])
+    bodies = set().union(*(foreach_body(g, x) for x, n in byid.items() if n.get("type") == "foreach"))
+    for nid, n in byid.items():
+        for root in sorted({ref.split(".")[0] for ref in _refs(n)} & {"item", "index"} if nid not in bodies else ()):
+            err(f"{{{{{root}}}}} is only set inside a for-each body", nid)
     if len(triggers) == 1:
         gates = {nid for nid, n in byid.items() if n.get("type") == "approval" and not n.get("disabled")}  # disabled: passes
         ungated = _reach(triggers[0], [(e.get("from"), e.get("to")) for e in g["edges"]], gates)
@@ -271,25 +305,33 @@ def validate(g: dict) -> list[dict]:
             if (rf := n.get("resume_from")) and not (isinstance(rf, str) and byid.get(rf, {}).get("type") == "agent"
                                                      and rf != nid and nid in _reach(rf, fwd)):
                 err(f"resume_from {rf!r} must name an agent node that runs before {nid}", nid)
+            it = n.get("items")  # a field of a node before the foreach; body nodes reach it over back-edges only
+            if n.get("type") == "foreach" and not (isinstance(it, str) and "." in it and (root := it.split(".")[0]) in byid
+                                                   and root != nid and nid in _reach(root, fwd)):
+                err(f"items must be a field of a node that runs before {nid}", nid)
         for i in sorted(back):
             loop = f"{g['edges'][i].get('from')} -> {g['edges'][i].get('to')}"
             for nid in sorted(loop_body(g, i, back)):
                 t = byid.get(nid, {}).get("type")
                 if t in ("merge", "approval"):
                     err(f"no {t} node inside a loop ({loop})", nid)
-                elif t not in ("if", "switch") and len(hs := [_handle(e) == "error" for e in g["edges"] if e.get("from") == nid]) > 1 \
+                elif t == "foreach" and g["edges"][i].get("to") != nid:  # its own body's way back is fine
+                    err(f"no foreach inside a loop ({loop})", nid)  # ponytail: nested for-each later (per-item state per level)
+                elif t not in ("if", "switch", "foreach") and len(hs := [_handle(e) == "error" for e in g["edges"] if e.get("from") == nid]) > 1 \
                         and not (byid.get(nid, {}).get("on_error") == "error_output" and sorted(hs) == [False, True]):
                     err(f"only an IF or Switch may branch inside a loop ({loop})", nid)  # error_output: one ok + one error
     return errs
 
 
 def _refs(n: dict) -> list[str]:
-    """A node's template refs: {{...}} in its prompt, command and message, plus its IF / switch condition paths."""
+    """A node's template refs: {{...}} in its prompt, command and message, plus its IF / switch condition paths and a
+    foreach's items path."""
     t, cases = n.get("type"), n.get("cases") if isinstance(n.get("cases"), list) else []
     conds = conditions(n) if t == "if" else [c for k in cases if isinstance(k, dict) and isinstance(
         k.get("conditions"), list) for c in k["conditions"]] if t == "switch" else []
     return TPL.findall(f"{n.get('prompt') or ''} {n.get('command') or ''} {n.get('message') or ''}") + [
-        c["path"] for c in (conds if isinstance(conds, list) else []) if isinstance(c, dict) and isinstance(c.get("path"), str)]
+        c["path"] for c in (conds if isinstance(conds, list) else []) if isinstance(c, dict) and isinstance(c.get("path"), str)
+    ] + ([n["items"]] if t == "foreach" and isinstance(n.get("items"), str) and n["items"] else [])
 
 
 def warnings(g: dict) -> list[dict]:
@@ -361,6 +403,38 @@ def merge_output(g: dict, st: dict, node_id: str, ctx: dict) -> dict:
     return {"inputs": {n: ctx.get(n) for n in srcs}}
 
 
+def foreach_step(g: dict, st: dict, node: dict, ctx: dict) -> dict:
+    """A ready foreach's output; call it before complete() on every visit. The first visit reads its items (a list, or
+    a str holding a JSON array; ValueError otherwise) and keeps the first max_items; each later visit (a body pass came
+    back) adds the output of the body node whose back-edge fired. -> {item, index} for the next body pass, or, after
+    the last item, {items: [body outputs in order]} plus truncated_from when max_items cut the list. Mutates st."""
+    fid, each = node["id"], st.setdefault("each", {})
+    if fid not in each:
+        v = lookup(ctx, node["items"])
+        try:
+            v = json.loads(v) if isinstance(v, str) else v
+        except ValueError:
+            pass
+        if not isinstance(v, list):
+            raise ValueError(f"{fid}: items {node['items']} is not a JSON array")
+        k = node.get("max_items", MAX_ITEMS)
+        each[fid] = {"items": v[:k], "out": [], "truncated_from": len(v) if len(v) > k else None}
+    else:
+        each[fid]["out"].append(ctx.get(each[fid]["last"]))
+    if (i := len((e := each[fid])["out"])) < len(e["items"]):
+        return {"item": e["items"][i], "index": i}
+    del each[fid]
+    return {"items": e["out"]} | ({"truncated_from": e["truncated_from"]} if e["truncated_from"] else {})
+
+
+def current_item(g: dict, st: dict, node_id: str) -> dict:
+    """{item, index} of the running foreach whose body holds node_id (its {{item}} and {{index}}), else {}."""
+    for fid, e in (st.get("each") or {}).items():
+        if node_id in foreach_body(g, fid):
+            return {"item": e["items"][len(e["out"])], "index": len(e["out"])}
+    return {}
+
+
 def passthrough(g: dict, st: dict, node_id: str, ctx: dict):
     """A ready disabled node's output: the output of the source of its first in-edge (edge order) holding data; when
     its inbox is empty (a loop target readied by a back-edge), of its first forward in-edge's source in ctx, as
@@ -374,8 +448,9 @@ def passthrough(g: dict, st: dict, node_id: str, ctx: dict):
 
 
 def complete(g: dict, st: dict, node_id: str, output: dict | None, failed: bool = False) -> str | None:
-    """Record a finished node: data on every out-edge; an IF ({value}: handle true/false) or a switch ({case}: handle
-    = case name or default) sends data on the taken handle and defers the rest (rule 3); any other node sends data on
+    """Record a finished node: data on every out-edge; an IF ({value}: handle true/false), a switch ({case}: handle
+    = case name or default) or a foreach (body, or done once its output holds items) sends data on the taken handle
+    and defers the rest (rule 3); any other node sends data on
     its `error` edges when failed (on_error: error_output) and on the others when not, deferring the rest the same way;
     a back-edge fires last (rule 5). Returns the run's error when a loop passes its cap. Mutates st."""
     st["ready"].remove(node_id)
@@ -385,7 +460,10 @@ def complete(g: dict, st: dict, node_id: str, output: dict | None, failed: bool 
     back = back_edges(g)
     t = next(n for n in g["nodes"] if n["id"] == node_id)["type"]
     taken = (str(bool((output or {}).get("value"))).lower() if t == "if"
-             else str((output or {}).get("case")) if t == "switch" else None)  # None: error edges iff failed
+             else str((output or {}).get("case")) if t == "switch"
+             else ("done" if "items" in (output or {}) else "body") if t == "foreach" else None)  # None: error edges iff failed
+    if taken == "body" and t == "foreach":  # the next item's pass: its body nodes' max_visits count from here
+        st.setdefault("base", {}).update({n: st["visits"].get(n, 0) for n in foreach_body(g, node_id)})
     outs = [i for i, e in enumerate(g["edges"]) if e["from"] == node_id]
     for i in sorted(outs, key=lambda i: i in back):  # defer before a fire, so the fire clears this pass's deferrals
         h = _handle(g["edges"][i])
@@ -400,11 +478,17 @@ def complete(g: dict, st: dict, node_id: str, output: dict | None, failed: bool 
 
 def _fire(g: dict, st: dict, i: int, back: set[int]) -> str | None:
     """Rule 5: back-edge i carries data. Its loop body's inbox and deferred edges are cleared and its target is ready
-    for its next visit; an error when that visit passes the target's max_visits, or runs pass the backstop."""
+    for its next visit; an error when that visit passes the target's max_visits (counted per item inside a for-each
+    body; a foreach target is bounded by its items instead), or runs pass the backstop."""
     to = g["edges"][i]["to"]
-    if st["visits"].get(to, 0) >= max_visits(g, to):
+    fe = {n["id"]: n.get("max_items", MAX_ITEMS) for n in g["nodes"] if n.get("type") == "foreach"}
+    if to in fe:  # a body pass came back: the item list bounds it, not max_visits
+        st["each"][to]["last"] = g["edges"][i]["from"]
+    elif st["visits"].get(to, 0) - st.get("base", {}).get(to, 0) >= max_visits(g, to):  # per item inside a body
         return f"loop cap reached at {to}"
-    if st["execs"] >= sum(max_visits(g, n["id"]) for n in g["nodes"]) + len(g["nodes"]):
+    per = {n: k for f, k in fe.items() for n in foreach_body(g, f)}  # a body node's max_visits counts once per item
+    if st["execs"] >= sum(fe[n["id"]] + 1 if n["id"] in fe else max_visits(g, n["id"]) * per.get(n["id"], 1)
+                          for n in g["nodes"]) + len(g["nodes"]):
         return f"loop backstop reached at {to}: {st['execs']} node runs"
     body = loop_body(g, i, back)
     st["inbox"] = {n: box for n, box in st["inbox"].items() if n not in body}
@@ -463,8 +547,8 @@ def render(tpl: str, ctx: dict, shell: bool = False) -> str:
 
 def rename_node(g: dict, old: str, new: str) -> dict:
     """A copy of g with node `old` renamed to `new`: its edges, every {{old...}} template at any depth of any node
-    (spacing and tail kept) and every `path` / `resume_from` value naming old follow. dashboard/src/Workflows.tsx
-    renameRefs ports this: keep the two in sync. A taken `new` is left to validate() (duplicate id)."""
+    (spacing and tail kept) and every `path` / `resume_from` / `items` value naming old follow.
+    dashboard/src/Workflows.tsx renameRefs ports this: keep the two in sync. A taken `new` is left to validate()."""
     def ref(s: str) -> str:
         head, dot, tail = s.partition(".")
         return new + dot + tail if head == old else s
@@ -476,7 +560,7 @@ def rename_node(g: dict, old: str, new: str) -> dict:
             return [walk(x) for x in v]
         if isinstance(v, str):
             v = TPL.sub(lambda m: m.group(0).replace(m.group(1), ref(m.group(1)), 1), v)
-            return ref(v) if key in ("path", "resume_from") else v
+            return ref(v) if key in ("path", "resume_from", "items") else v
         return v
 
     g2 = copy.deepcopy(g)
