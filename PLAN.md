@@ -13,6 +13,7 @@
 - **Users:** coders with large skill libraries. Portfolio project, so built from scratch (ratel, MCPGateway, metamcp are references only).
 - **Success:** after install, the Skill/Agent share of tool calls rises well above 0.5%; Recall@5 ≥ 0.90; latency targets hold.
 - **In scope (Claude Code only):** index, hybrid search + rerank, decider, prefetch, cache, long-term memory, MCP tool + suggest-only hook, CLI, dashboard, benchmark; local mode and self-hosted shared mode (API keys, rate limits) for coders anywhere; workflow runner (m5): run saved workflows locally, one at a time, on each user's own Claude login; context + coding graph (m6): specs, tasks and decisions linked to graphify's code graph and pushed into the session.
+- **In scope, added by m7:** claude-mem-style memory: per-turn observation capture (`observe` job) and a session-start memory index, shown on the Memories page (see "claude-mem memory (m7)").
 - **Out of scope:** other agents, blocking the agent, billing / sign-up SaaS, marketplace, training models from scratch; running workflows on someone else's subscription or as a hosted service (Anthropic terms).
 
 ## Stack
@@ -41,8 +42,10 @@
 - Local models ≤ 3B; our GPU use ≤ 7 GB (shared host): sum of `nvidia-smi --query-compute-apps` over this project's `docker compose top` PIDs.
 - Hook adds ≤ 150 ms and fails open (daemon down → empty output, exit 0).
 - Routing p95 ≤ 10 ms on L1 hit (daemon RAM), ≤ 15 ms on L2 hit (Redis), ≤ 150 ms cold (one SQL round trip to Singapore is ~65 ms).
+- m7 exception to the hook budget: `SessionStart` (`/v1/hook/start`) may take 1 s (`curl -m 1`, still fail-open) because it runs once per session; every other hook stays ≤ 150 ms.
 - Redis is a cache, never a source of truth: every key has a TTL or is rebuildable from Supabase; every Redis call has a 20 ms timeout and fails open (Redis down → L1 + DB, writes go straight to the DB).
 - Models run locally; capabilities, decisions and memories live in Supabase; benchmark data in `data/` stays local; `Llm.json` strips secrets from every LLM call; the DB password lives only in `.env`.
+- m7 exception to "Models run locally": observation capture sends the turn's text to Anthropic through `claude -p --model haiku` on the owner's own login, after `<private>` stripping and secret redaction (local mode only). Only derived observations and summaries are stored.
 - IDs are namespaced: `plugin:name`, `user:name`, `project@<sha8>:name`. Claude-facing names use `invoke` (`name` for user/project, else the id).
 - Any prompt language.
 - Rules while building: stay in the step's scope; no secrets, `.env`, `data/` or weights in commits; never write the real `~/.claude/` until H3 (use a temp `HOME`), except m5 runner child processes, which use the real login; if only the owner can unblock it, say so and stop.
@@ -431,6 +434,7 @@ All JSON uses `orjson`. Errors: `{"error": {"code": "not_found", "message": "…
 | `import_memory` | `POST /api/memories/import`, daemon start | B8 `import_claude_memory` | no |
 
 - LLM provider: `cfg()["llm"]` (local llama-server; `anthropic:<model>` when `ANTHROPIC_API_KEY` is set). Every prompt goes through `Llm.json`, which redacts secrets; transcripts never leave the machine with the local default.
+- m7 exception: the `observe` job's haiku call is the one place transcript text leaves the machine (see "claude-mem memory (m7)" → Amendments).
 - `extract` reads `transcript_path` from the Stop hook (local mode only; shared mode skips it: the daemon can't read client files).
 
 ## History import design (used by B9)
@@ -852,3 +856,59 @@ Design (intent, goals, anti-goals, data model, eval): `specs/002-context-coding-
   - Improvement round 2026-10-26 (dev tickets 02–08 only, rule fixed before running: best dev R@3 full, then strict, then MRR; FT ≤ 10%; ties keep current): 6 pointer variants (task expansion, multi-candidate voting) × 5 floors and 20 by-meaning link settings (floor 0.35–0.55 × k 1–8). None beat the current code; dev is saturated (7 tickets, R@3 1.000), so it cannot tell variants apart. No code change; test scored once afterwards: 0.750, unchanged. Next lever is more dev data (e.g. m6's own tickets once their commits carry a tag), not more tuning.
 
 Order: G1, G2 → G3 → G5, G6; G4 alongside G3; G7 last.
+
+
+## claude-mem memory (m7)
+
+Spec, plan, contracts and tasks: `specs/003-claude-mem-memory/`. The port inventory (data model, pipeline, prompts, owner decisions D1–D23) is `.scratch/claude-mem-port/inventory.md`.
+
+- **Goal:** the Memories feature gains claude-mem's loop: after each finished turn a small model writes observations and a turn summary, the next session starts with an index of them, and the agent can search, window and fetch them with three MCP tools.
+- **Capture:** the `observe` job (queued by Stop and SessionEnd) re-reads the turn from the transcript on disk, strips `<private>`, redacts secrets, and makes one `claude -p --model haiku` call with claude-mem's observer prompts. Observations and turn summaries go to `ctc.observations` and `ctc.session_summaries` (tsvector + pgvector); `sessions.observed_bytes` and `observed_prompts` make a re-run create nothing. Raw prompts and tool output are never stored.
+- **Read side:** `ctc.memory.observations` serves hybrid (RRF) search, timeline, ordered fetch, the feed with counts, and the session-start renderer (10K-char budget, body cached in Redis as `ctx:{user}:{project_id}`, re-rendered by `observe`).
+- **Surfaces:** `POST /v1/hook/start` (SessionStart `additionalContext`), MCP `memory_search` / `memory_timeline` / `memory_get`, `/api/memories/{feed,feed/counts,timeline,context}` and `/api/observations/*`, `/api/summaries/*`, and a Timeline tab on the Memories page (today's page becomes its Long-term tab; trusted `ctc.memories` is unchanged).
+- **Go-live switch:** `memory.enabled` in `config/server.yaml` is `false` by default. While off, no `observe` job is queued, `/v1/hook/start` answers empty and the `memory_*` tools say memory is off.
+- **Source:** claude-mem 15.2.1 (Apache-2.0) is a source of translated text and logic, never a dependency; attribution in `third_party/claude-mem/` and file headers.
+
+### Build order (m7, branch `m7-memory`)
+Waves: 1 = O1 ∥ O7, 2 = O2 ∥ O3, 3 = O4 ∥ O5 ∥ O6, 4 = O8. One commit per step on `m7-memory`; PR into `staging` after m6's PR merges. Scratch DB and Redis only until the owner-gated tail below.
+- [x] **O1 — schema, tag stripping, redaction, config, mode file, attribution** (`f2d8551`). Done when: `uv run pytest -q tests/test_memory_tags.py` passes with the scratch URL and `uv run python -m ctc.memory.tags` exits 0.
+- [x] **O2 — capture job** (`fe5102d`). Done when: `uv run pytest -q tests/test_memory_observe.py` passes and `uv run python -m ctc.memory.observe` exits 0.
+- [x] **O3 — read side: search, timeline, feed, session-start render** (`1e297d8`). Done when: `uv run pytest -q tests/test_memory_observations.py` passes and `uv run python -m ctc.memory.observations` exits 0.
+- [x] **O4 — SessionStart hook + install** (`8c86699`). Done when: `uv run pytest -q tests/test_memory_hook_start.py` passes and `CTC_CLAUDE_HOME=$(mktemp -d) uv run ctc install --dry-run` lists SessionStart with matcher `startup|clear|compact` and `-m 1`.
+- [x] **O5 — MCP tools** (`965e9de`). Done when: `uv run pytest -q tests/test_memory_mcp.py` passes.
+- [x] **O6 — API routes** (`033d925`). Done when: `uv run pytest -q tests/test_memory_api.py` and `uv run pytest -q tests` pass.
+- [x] **O7 — Memories Timeline tab, cards, session drawer** (`f2a26bf`). Done when: `pnpm -C dashboard build` (no `VITE_MOCK`) succeeds with no type errors.
+- [x] **O8 — docs and eval script.** Done when: `uv run ruff check evaluation` is clean, `uv run python evaluation/observation_eval.py --self-check` exits 0, `evaluation/memory_eval.py` is unchanged, and the PLAN/CLAUDE diffs are additive.
+  - Result: O1–O7 committed and green (ruff clean, 136 tests pass, 2026-10-27). This section, the CLAUDE.md Decisions and `evaluation/observation_eval.py` (SC-007 hit@5 over the owner's questions file) are O8.
+
+Order: O1 ∥ O7 → O2 ∥ O3 → O4 ∥ O5 ∥ O6 → O8.
+
+### Amendments to the rest of this plan (D21)
+- **(a) Models run locally / transcripts stay on the machine:** one exception, observation capture through `claude -p --model haiku` after `<private>` stripping and redaction, local mode only, on the owner's login (D3). `A3`/`B9` extraction still uses the local model.
+- **(b) Hook budget:** SessionStart is allowed 1 s (`curl -m 1`, fail-open) because it runs once per session; the `observe` job keeps the Redis body warm so a normal start is a cache hit. Every other hook stays ≤ 150 ms (D16).
+- **(c) API conventions, three deviations for the memory feed:**
+  - the cursor is the composite `before=<iso>,<id>`, because the feed merges three id spaces (observations, summaries, decisions) and a bare id cannot order it;
+  - `q` is hybrid search (keyword + vector, RRF), not a substring match;
+  - the date filter is `range=7d|30d|90d|all`, the dashboard's global Range.
+- **(d) In scope:** observation capture and the session-start memory index (also added to Product).
+
+### Out of scope (m7)
+Cloud sync, telemetry, other IDEs and agents, Endless mode, language and other modes, the "my work" UI, work-state lists and tools, knowledge corpora, smart file tools, near-duplicate dedup, reinforcement ranking, per-prompt semantic injection, file-context injection before reads, folder memory-file generation, a save-memory MCP tool, push streaming (SSE), subagent capture, the claude-mem database import, and repointing the m6 reader.
+
+### Open: lead and owner steps (not part of the build)
+- [ ] **Lead, T056:** quickstart §1–7 on the scratch stack (isolated daemon `:18311`, fake observer), Memories page screenshots, and the SC-003 cold-start, SC-008 first-page and paging, and SC-004 size measurements.
+- [ ] **Owner-gated, T057, each asked at the time, in this order** (claude-mem's PreToolUse bridge fires on `memory_search`, and a restart with O2 code would otherwise start capturing every repo's turns):
+  1. apply the schema on live Supabase;
+  2. restart the daemon (`scripts/deploy_local.sh`); `memory.enabled` is still false, so memory is inert;
+  3. the owner turns off the claude-mem plugin's hooks (D8);
+  4. the owner sets `memory.enabled: true` (and `history.skip_projects` for repos that must never be captured, D23) and restarts;
+  5. real `uv run ctc install` (adds SessionStart), then a fresh-session check that the index appears;
+  6. one real haiku capture;
+  7. measure SC-001 (≥ 95% of tool turns visible within 2 minutes) and SC-005 (≥ 10× fewer model calls than one per tool use).
+- [ ] **H5, owner:** write or check 20 questions in `data/processed/memory-questions.jsonl`, then `uv run python evaluation/observation_eval.py data/processed/memory-questions.jsonl --project claudethecaller`; pass = hit@5 ≥ 16/20 (SC-007).
+
+### Follow-ups (not scheduled)
+- **D7:** repoint the m6 claude-mem reader (`graph/claudemem.py`) to `ctc.observations` as one change: new origin `ctc` with its own `graph_sources` watermark, drop the old origin's nodes, revisit `claudemem.TYPES`.
+- **D9:** one-shot read-only import of `~/.claude-mem/claude-mem.db` (observations and summaries only, re-embedded, never prompts or tool I/O).
+- **D18:** the existing cache gap: memory routes never publish `ctc:inval` and `router_version()` ignores memory state, so cached bundles can show deleted memories.
+- **Jobs.tsx** lists only `observe` among the new kinds; the m6 graph job kinds are still missing from its filter.

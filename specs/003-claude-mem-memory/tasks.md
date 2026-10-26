@@ -507,7 +507,7 @@ description: "Task list for m7 claude-mem memory in the Memories feature"
 
 **Owns (O8)**: `PLAN.md`, `CLAUDE.md`, `evaluation/observation_eval.py` (new). **Do not touch `evaluation/memory_eval.py`**: it is the committed K4/H4 memory-lift eval.
 
-- [ ] T050 [P] In `PLAN.md`, add a "claude-mem memory (m7)" section in the style of the m6 section:
+- [x] T050 [P] In `PLAN.md`, add a "claude-mem memory (m7)" section in the style of the m6 section:
   - steps O1–O8, each with a Done-when command;
   - the branch `m7-memory`;
   - **amendments (D21):**
@@ -517,19 +517,19 @@ description: "Task list for m7 claude-mem memory in the Memories feature"
     - (d) "In scope" names observation capture and the memory index;
   - **Out of scope:** the spec's Out of Scope list;
   - **Follow-ups:** D7 reader repoint, D9 import, D18 cache gap, the Jobs.tsx graph kinds.
-- [ ] T051 [P] In `CLAUDE.md` **Decisions**, append dated 2026-10-26 entries:
+- [x] T051 [P] In `CLAUDE.md` **Decisions**, append dated 2026-10-26 entries:
   - claude-mem 15.2.1 is an Apache-2.0 *source of translated text and logic*, never a runtime dependency (attribution in `third_party/claude-mem/` and headers; no claude-mem name or logo in our UI) (D22);
   - observation capture uses `claude -p --model haiku` as an exception to the on-machine default (D3);
   - SessionStart is the one hook allowed 1 s (D16).
 
   Keep each entry to 1–3 lines, like the existing ones.
-- [ ] T052 [P] Create `evaluation/observation_eval.py` (a new file; `evaluation/memory_eval.py` already exists and stays untouched):
+- [x] T052 [P] Create `evaluation/observation_eval.py` (a new file; `evaluation/memory_eval.py` already exists and stays untouched):
   - **Input:** a jsonl of `{"q": str, "expect": [id or "S<n>"]}` plus `--project`.
   - **Run:** `observations.search` with `limit=5` through `Store.open` + `cfg()` (no daemon).
   - **Output:** `hit@5 k/n` and the misses.
   - **Self-check:** a `--self-check` flag that seeds nothing and only validates the parser on an inline 2-line sample.
   - **Questions file:** `data/processed/memory-questions.jsonl` is written by the owner (H5) and is not created here.
-- [ ] T053 Done-when (builder H): `uv run ruff check evaluation` is clean, `uv run python evaluation/observation_eval.py --self-check` exits 0, `git diff --stat evaluation/memory_eval.py` is empty, and `PLAN.md`/`CLAUDE.md` diffs are additive only. Do not commit.
+- [x] T053 Done-when (builder H): `uv run ruff check evaluation` is clean, `uv run python evaluation/observation_eval.py --self-check` exits 0, `git diff --stat evaluation/memory_eval.py` is empty, and `PLAN.md`/`CLAUDE.md` diffs are additive only. Do not commit.
 - [ ] T054 (lead) Commit `docs(m7): PLAN m7 section, decisions and memory eval script (m7 O8)`. Tick O1–O7 in the PLAN m7 section with a one-line result each.
 - [ ] T055 (lead) Run one reviewer agent over `git diff m6-graph...m7-memory`. Critical/high defects only:
   - raw data reaching Supabase;
