@@ -369,6 +369,12 @@ class RunRef(BaseModel):
     run_id: int
 
 
+class RunRetry(BaseModel):  # POST /api/runs/{rid}/retry: a new run linked to this one, reusing its earlier outputs
+    from_node: str | None = None  # default: the parent's failed step when it failed, else the start
+    to_node: str | None = None  # stop with done after this node
+    trigger: RunTrigger = "api"
+
+
 class WorkflowExport(BaseModel):  # POST /api/workflows/{cap_id}/export
     path: str  # the written <root>/.claude/workflows/<name>.js
 
@@ -433,12 +439,16 @@ class RunStep(BaseModel):  # types.ts `Step` (that name is the router's bundle s
     files: list[DiffFile] | None
     started_at: datetime
     ended_at: datetime | None
+    marker: Literal["reused", "pinned", "disabled"] | None = None  # completed without executing
 
 
 class RunDetail(Run):
     graph: Graph
     file_sha: str
     auth: dict | None  # {authMethod, email, claude_version}
+    parent_run_id: int | None = None  # a retry / run-from / run-to of that run
+    from_node: str | None = None
+    to_node: str | None = None
     steps: list[RunStep]
 
 

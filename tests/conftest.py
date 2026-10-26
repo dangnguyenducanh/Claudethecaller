@@ -2,6 +2,8 @@
 step rows come out. A throwaway schema on the scratch Postgres in CTC_DATABASE_URL (DB cases skip when it is unset or
 Supabase), scripts/fake_claude.sh as the claude binary, and run_yaml()/walk_run()/in_store() driving ctc.runner.engine
 in this process. Runs, worktrees and logs go to tmp_path: nothing touches the real ~/.claudethecaller.
+run_yaml(yaml_text, input, claude_script, **submit_kw) passes submit_kw on to engine.submit as keyword args
+(e.g. pinned=True).
 """
 
 import asyncio
@@ -107,8 +109,9 @@ def walk_run(in_store):
 
 @pytest.fixture
 def run_yaml(seam, in_store, walk_run, monkeypatch):
-    """run(yaml_text, input="", claude_script=None) -> (run, steps): submit, claim and walk one run of the workflow."""
-    def run(yaml_text, input="", claude_script=None):
+    """run(yaml_text, input="", claude_script=None, **submit_kw) -> (run, steps): submit (submit_kw -> engine.submit),
+    claim and walk one run of the workflow."""
+    def run(yaml_text, input="", claude_script=None, **submit_kw):
         g = graph.load(yaml.safe_load(yaml_text))
         assert graph.validate(g) == [], graph.validate(g)
         # a str is another fake binary, repo-relative (e.g. scripts/fake_claude_quota.sh)
@@ -123,6 +126,7 @@ def run_yaml(seam, in_store, walk_run, monkeypatch):
 
         async def go(st):
             return await engine.submit(st, await engine.owner(), f"test:{g.get('name') or 'wf'}", g,
-                                       hashlib.sha256(yaml_text.encode()).hexdigest(), str(seam.repo), None, "cli", input)
+                                       hashlib.sha256(yaml_text.encode()).hexdigest(), str(seam.repo), None, "cli", input,
+                                       **submit_kw)
         return walk_run(in_store(go))
     return run

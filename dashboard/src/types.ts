@@ -130,7 +130,11 @@ export interface Step {
   input: string | null; output: Record<string, unknown> | null; error: string | null
   session_id: string | null; num_turns: number | null; tokens: Record<string, number> | null; cost_usd: number | null // cost is notional
   permission_denials: unknown[] | null; overage: boolean | null; files: DiffFile[] | null; started_at: string; ended_at: string | null
+  marker: 'reused' | 'pinned' | 'disabled' | null // completed without executing
 }
-export interface RunDetail extends Run { graph: Graph; file_sha: string; auth: { authMethod: string; email: string; claude_version: string } | null; steps: Step[] }
+export interface RunDetail extends Run {
+  graph: Graph; file_sha: string; auth: { authMethod: string; email: string; claude_version: string } | null; steps: Step[]
+  parent_run_id: number | null; from_node: string | null; to_node: string | null // a retry / run-from / run-to of that run
+}
 export interface StepLog { text: string; offset: number; done: boolean }
 export interface Diff { diff: string; files: DiffFile[]; truncated: boolean }
