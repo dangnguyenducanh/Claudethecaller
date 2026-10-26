@@ -118,12 +118,13 @@ def _cut(v):
 async def workflow_status(run_id: int, ctx: Context | None = None) -> dict[str, Any]:
     """A workflow run (GET /runs/{id}): {run_id, workflow, status (queued, running, waiting, done, failed, cancelled,
     quota), error, branch, pr_url, tokens, quota_resets_at, steps: [{node_id, visit, kind, status, error, output (cut),
-    tokens, input (a waiting approval's message), marker}]}."""
+    tokens, input (a waiting approval's message), marker, tries (a retried shell's, when > 1)}]}."""
     with _api_errors():
         r = await runs.detail(*(await runs.scope(state, _user(ctx))), run_id)
     steps = [{"node_id": s["node_id"], "visit": s["visit"], "kind": s["kind"], "status": s["status"], "error": _cut(s["error"]),
               "output": _cut(s["output"]), "tokens": s["tokens"]}
              | ({"input": s["input"]} if s["status"] == "waiting" else {}) | ({"marker": s["marker"]} if s["marker"] else {})
+             | ({"tries": s["tries"]} if s["tries"] > 1 else {})
              for s in r["steps"]]
     return {"run_id": r["id"], "workflow": r["workflow"], "status": r["status"], "error": r["error"], "branch": r["branch"],
             "pr_url": r["pr_url"], "tokens": r["tokens"],

@@ -157,3 +157,78 @@ def test_retry_api(run_yaml, in_store, seam):
     assert (d["parent_run_id"], d["from_node"], d["to_node"]) == (parent["id"], "d", None), d
     assert [(s["node_id"], s["marker"]) for s in d["steps"]] == [("start", "reused"), ("a", "reused"), ("b", "reused"),
                                                                 ("c", "reused")]
+
+
+# t fails (after 2 tries) down its error edge to h, which times out: the run fails at h
+ROUTED = """
+name: routed
+nodes:
+- {id: start, type: trigger}
+- {id: t, type: shell, command: 'echo red; exit 1', on_error: error_output, idempotent: true, retry: {max_tries: 2}}
+- {id: ok, type: shell, command: 'echo ok'}
+- {id: h, type: shell, command: 'sleep 5', timeout_s: 1}
+edges:
+- {from: start, to: t}
+- {from: t, to: ok}
+- {from: t, to: h, handle: error}
+"""
+
+
+def test_retry_replays_a_routed_failure_down_its_error_edge(run_yaml, in_store, walk_run):
+    parent, psteps = run_yaml(ROUTED)
+    assert parent["status"] == "failed" and by_node(psteps)["t"]["status"] == "failed"
+    fixed = ROUTED.replace("'sleep 5'", "'echo handled'")
+    child, csteps = walk_run(in_store(lambda st: engine.retry(st, parent["owner"], parent["id"], g_of(fixed), "sha")))
+    c = by_node(csteps)
+    assert child["status"] == "done", child["error"]
+    assert (c["t"]["marker"], c["t"]["status"], c["t"]["tries"]) == ("reused", "failed", 2)
+    assert (c["h"]["marker"], c["h"]["status"]) == (None, "done")
+    assert c["ok"]["status"] == "skipped"  # the child takes the parent's edge, not the normal one
+
+
+PAR = """
+name: par
+nodes:
+- {id: start, type: trigger}
+- {id: ra, type: agent, readonly: true, prompt: a}
+- {id: rb, type: agent, readonly: true, prompt: b}
+edges:
+- {from: start, to: ra}
+- {from: start, to: rb}
+"""
+
+
+def test_retry_reruns_a_failed_sibling_that_stopped_the_run(run_yaml, in_store, walk_run, seam, monkeypatch):
+    parent, psteps = run_yaml(PAR, claude_script={"is_error": True, "result": "boom"})
+    assert parent["status"] == "failed" and [s["status"] for s in psteps[1:]] == ["failed", "failed"]
+    ok = seam.tmp / "ok.jsonl"
+    ok.write_text('{"type": "result", "subtype": "success", "is_error": false, "num_turns": 1, "result": "fine"}\n')
+    monkeypatch.setenv("CTC_FAKE_CLAUDE_SCRIPT", str(ok))
+    child, csteps = walk_run(in_store(lambda st: engine.retry(st, parent["owner"], parent["id"], g_of(PAR), "sha")))
+    c = by_node(csteps)
+    assert child["status"] == "done", child["error"]
+    for n in ("ra", "rb"):  # ra failed with on_error stop: it runs again, never replayed as a pass
+        assert (c[n]["marker"], c[n]["status"], c[n]["output"]["result"]) == (None, "done", "fine"), n
+
+
+RESUMED = """
+name: resumed
+nodes:
+- {id: start, type: trigger}
+- {id: a, type: agent, prompt: plan}
+- {id: c, type: shell, command: 'sleep 5', timeout_s: 1}
+- {id: b, type: agent, prompt: go on, resume_from: a}
+edges:
+- {from: start, to: a}
+- {from: a, to: c}
+- {from: c, to: b}
+"""
+
+
+def test_retry_refuses_to_resume_a_reused_agents_session(run_yaml, in_store):
+    parent, _ = run_yaml(RESUMED)
+    assert parent["status"] == "failed"
+    with pytest.raises(ValueError, match="b resumes a's session"):
+        in_store(lambda st: engine.retry(st, parent["owner"], parent["id"], g_of(RESUMED), "sha"))
+    # from a (or earlier) a runs again in the child, so b resumes the child's own session
+    assert in_store(lambda st: engine.retry(st, parent["owner"], parent["id"], g_of(RESUMED), "sha", from_node="a"))

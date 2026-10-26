@@ -58,6 +58,27 @@ def test_fake_claude_passes_preflight(monkeypatch):
     assert pre["claude_version"] == cfg()["runner"]["claude_version"] == "2.1.306"
 
 
+def test_a_cancelled_helper_command_is_reaped():
+    """The max_run_minutes killer is cancelled when the batch lands: its `docker ps` (proc._stdout) must not be left
+    running for a closed loop's transport to collect (the PytestUnraisableExceptionWarning)."""
+    async def go():
+        t = asyncio.create_task(proc._stdout("sleep", "7.3125"))
+        await asyncio.sleep(0.3)
+        t.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await t
+    asyncio.run(go())
+    alive = [p for p in Path("/proc").glob("[0-9]*/cmdline") if _read(p) == b"sleep\x007.3125\x00"]
+    assert alive == []
+
+
+def _read(p: Path) -> bytes:
+    try:
+        return p.read_bytes()
+    except OSError:
+        return b""
+
+
 @pytest.mark.parametrize(("text", "taken", "skipped"), [("0", "yes", "no"), ("1", "no", "yes")])
 def test_shell_if_chain_runs_to_done(run_yaml, seam, text, taken, skipped):
     run, steps = run_yaml(SHELL_IF, input=text)

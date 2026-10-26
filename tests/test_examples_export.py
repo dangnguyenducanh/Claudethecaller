@@ -22,11 +22,13 @@ REASON = re.compile(r"^[a-z_]+: ")
 needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 
 
-def run_js(js: str, codes: dict | None = None, args=None, throws=()) -> dict:
+def run_js(js: str, codes: dict | None = None, args=None, throws=(), nulls=()) -> dict:
     """node --check, then the script under a stub agent() wrapped as export.py's __main__ run() does: shells answer
-    exit codes from codes[label] (else 0) and stdout_tail = label, agents 'ok', agents labelled in `throws` throw."""
-    stub = (f"const calls = [], codes = {json.dumps(codes or {})}, throws = {json.dumps(list(throws))}\n"
+    exit codes from codes[label] (else 0) and stdout_tail = label, agents 'ok', agents labelled in `throws` throw,
+    in `nulls` return null (the runtime's failed subagent)."""
+    stub = (f"const calls = [], codes = {json.dumps(codes or {})}, throws = {json.dumps(list(throws))}, nulls = {json.dumps(list(nulls))}\n"
             "const agent = async (p, o) => { calls.push([o.label, p]); if (throws.includes(o.label)) throw new Error('boom ' + o.label)\n"
+            "  if (nulls.includes(o.label)) return null\n"
             "  return o.schema ? {exit_code: (codes[o.label] || []).shift() ?? 0, stdout_tail: o.label} : 'ok' }\n"
             "const parallel = ts => Promise.all(ts.map(t => t()))\n")
     src = (stub + "async function workflow(args) {\n" + js.replace("export const meta", "const meta", 1) + "}\n"
@@ -115,6 +117,7 @@ MATRIX = {  # name -> (graph, the reason code when refused, else None)
     "stop": (chain({"id": "a", **SH}, {"id": "halt", "type": "stop", "message": "halted: {{a.stdout_tail}}"}), None),
     "vars": (chain({"id": "a", "type": "shell", "command": "echo {{vars.x}}"}, vars={"x": "hi"}), None),
     "run_id": (chain({"id": "a", "type": "shell", "command": "echo {{run.id}}"}), "uses_run_root"),
+    "now": (chain({"id": "a", "type": "shell", "command": "echo {{now}}"}), "uses_now"),
     "inputs": (chain({"id": "a", "type": "shell", "command": "echo {{input.name}}"}) | {"nodes": [
         {"id": "start", "type": "trigger", "inputs": [{"name": "name", "type": "string", "default": "x"}]},
         {"id": "a", "type": "shell", "command": "echo {{input.name}}"}]}, None),
@@ -168,6 +171,16 @@ def test_on_error_continue_walks_on_after_a_failure():
     assert r["out"]["flaky"]["exit_code"] == 1 and r["out"]["ag"]["is_error"] is True, r
     r = run_js(to_js(chain({"id": "ag", "type": "agent", "prompt": "x"}, {"id": "b", **SH}), "stop"), throws=["ag"])
     assert r["error"] == "boom ag" and [c[0] for c in r["calls"]] == ["ag"], r  # default stop: the run fails
+
+
+@needs_node
+def test_a_null_agent_result_fails_like_a_failed_node():
+    stop = chain({"id": "ag", "type": "agent", "prompt": "x"}, {"id": "b", **SH})
+    r = run_js(to_js(stop, "stop"), nulls=["ag"])
+    assert "ag returned no result" in r.get("error", "") and [c[0] for c in r["calls"]] == ["ag"], r
+    cont = chain({"id": "ag", "type": "agent", "prompt": "x", "on_error": "continue"}, {"id": "b", **SH})
+    r = run_js(to_js(cont, "cont"), nulls=["ag"])
+    assert "error" not in r and r["out"]["ag"]["is_error"] is True and [c[0] for c in r["calls"]] == ["ag", "b"], r
 
 
 # the walker's condition semantics, Python -> JS: (path under input, value at that path, op, condition value)

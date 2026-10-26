@@ -12,14 +12,15 @@ tested by the nodes after them; merge -> {inputs}; a loop (the back-edges into o
 node's max_visits; readonly nodes side by side -> await parallel([...]); a disabled node -> a pass-through of its first
 live input's output (graph.passthrough); stop -> throw new Error(<its message>); pin and notes -> ignored (a native run
 is never a pinned run). Templates fill at run time: {{input}} is the
-workflow's `args` (else the trigger's input), {{vars.x}} the file's vars:, {{now}} the time, {{node.x}} that node's
+workflow's `args` (else the trigger's input), {{vars.x}} the file's vars:, {{node.x}} that node's
 output, shell values single-quoted like shlex.quote. With declared trigger `inputs`, `args` (an object or its JSON
 text) fills {{input.<name>}} over the declared defaults, and a missing required input throws; values are not coerced.
 Every string from the graph is embedded with json.dumps, so no
 prompt or command can break out into code.
 Refused, each as ValueError("<code>: <node ids or field>...") (the API's 422 not_exportable): approval nodes (has_approval:
 a native run can't pause for a sign-off), for-each nodes (has_foreach: no native equivalent yet), {{run.id}},
-{{run.visit}} and {{run.trigger}} (uses_run_root: no native run record), settings.max_run_minutes (has_run_timeout: no
+{{run.visit}} and {{run.trigger}} (uses_run_root: no native run record), {{now}} (uses_now: the runtime forbids an
+argless new Date()), settings.max_run_minutes (has_run_timeout: no
 native wall clock), error edges (error_edge: on_error: error_output; a native agent's failure is not a branch), regex
 conditions (regex_condition: Python re and JS RegExp differ, so a script could branch where the walker would not) and
 a loop whose nodes can't form one block (loop_not_one_block).
@@ -65,7 +66,9 @@ const test = (v, op, want) => v !== undefined && (op === 'truthy' ? Boolean(v) &
     ? !(obj(v) && !Array.isArray(v) && obj(want)) && has(v, want) === (op === 'contains')
   : ['gt', 'ge', 'lt', 'le'].includes(op) ? cmp(num(v), op, num(want))
   : (peq(v, want) || txt(v) === txt(want)) === (op === 'eq'))
-const ag = async (prompt, opts) => { const r = await agent(prompt, opts); return typeof r === 'string' ? {result: r} : {result: txt(r), structured_output: r} }
+const ag = async (prompt, opts) => { const r = await agent(prompt, opts)  // null: the subagent failed, so the node fails
+  if (r == null) throw new Error(`${opts.label} returned no result`)
+  return typeof r === 'string' ? {result: r} : {result: txt(r), structured_output: r} }
 const sh = (id, cmd) => agent('Run exactly this shell command in the repo and report the exit code and the last lines of output: ' + cmd, {label: id, schema: SHELL})
 const retry = async (id, cmd, n, wait, cont) => {  // as engine._spawn: until exit 0 or n tries; then a non-zero exit fails the run
   for (let k = 1; ; k++) {
@@ -78,13 +81,14 @@ const retry = async (id, cmd, n, wait, cont) => {  // as engine._spawn: until ex
 
 
 def _ref(path: str) -> str:
-    """A template path -> the JS lookup: {{input...}} reads `input`, {{vars.x}} `vars`, {{now}} the time (the engine's
-    isoformat(timespec='seconds') in UTC), {{node.x}} out[node].x. ValueError for run.id / run.visit / run.trigger."""
+    """A template path -> the JS lookup: {{input...}} reads `input`, {{vars.x}} `vars`, {{node.x}} out[node].x.
+    ValueError for run.id / run.visit / run.trigger and now."""
     root, *rest = path.split(".")
     if root == "run" and rest[:1] and rest[0] in ("id", "visit", "trigger"):
         raise ValueError(f"uses_run_root: {{{{{path}}}}} has no native equivalent; remove it to export")
-    if root == "now" and not rest:
-        return r"new Date().toISOString().replace(/\.\d{3}Z$/, '+00:00')"
+    if root == "now" and not rest:  # the workflow runtime throws on an argless new Date() (scripts must be replayable)
+        raise ValueError("uses_now: {{now}} has no native equivalent (the runtime forbids reading the clock); pass the"
+                         " time in the run's input instead")
     return f"get({root}, {J(rest)})" if root in ("input", "vars") else f"get(out, {J([root, *rest])})"
 
 

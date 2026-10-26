@@ -56,6 +56,20 @@ def test_save_after_an_on_disk_edit_is_refused(api):
     assert wf.read_bytes() == edited
 
 
+def test_an_edit_landing_mid_save_is_refused_not_overwritten(api, monkeypatch):
+    client, wf = api
+    h0, meta = sha(wf), library._wf_meta
+
+    def edit_then_meta(*a):  # an editor writes between the hash check and the daemon's write
+        wf.write_text(wf.read_text() + "# mid-save edit\n")
+        return meta(*a)
+    monkeypatch.setattr(library, "_wf_meta", edit_then_meta)
+    r = patch(client, {"graph": GRAPH, "base_hash": h0})
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "changed_on_disk", r.text
+    assert wf.read_text().endswith("# mid-save edit\n")
+    assert [p.name for p in wf.parent.iterdir()] == ["demo.yaml"]  # no temp file left behind
+
+
 def test_save_after_the_file_was_deleted_is_refused(api):
     client, wf = api
     h0 = sha(wf)

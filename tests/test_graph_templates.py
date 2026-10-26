@@ -203,14 +203,19 @@ def chain(cmd: str, **extra) -> dict:
 
 
 @needs_node
-def test_export_vars_now_and_stop():
-    g = chain("echo {{vars.greeting}} {{now}} {{run.branch}}", vars={"greeting": "it's"})
+def test_export_vars_and_stop():
+    g = chain("echo {{vars.greeting}} {{run.branch}}", vars={"greeting": "it's"})
     assert validate(g) == [] and warnings(g) == []
     r = run_js(to_js(g, "x"))
     assert r["error"] == "halted: a", r  # the stop node threw its rendered message
     cmd = r["calls"][0][1]
-    # vars filled and shell-quoted, now an ISO string in the engine's format, run.branch empty as before
-    assert re.fullmatch(r"Run exactly .*: echo 'it'\\''s' '\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+00:00' ''", cmd), cmd
+    # vars filled and shell-quoted, run.branch empty as before
+    assert re.fullmatch(r"Run exactly .*: echo 'it'\\''s' ''", cmd), cmd
+
+
+def test_export_refuses_now():  # the workflow runtime throws on an argless new Date()
+    with pytest.raises(ValueError, match=r"^uses_now: "):
+        to_js(chain("echo {{now}}"), "x")
 
 
 @pytest.mark.parametrize("ref", ["run.id", "run.visit", "run.trigger"])

@@ -68,6 +68,13 @@ def test_items_not_a_json_array_fail_the_run(run_yaml):
     assert each["status"] == "failed" and "JSON array" in each["error"]
 
 
+def test_a_list_cut_by_the_stdout_tail_says_so(run_yaml):
+    run, steps = run_yaml(wf(names=json.dumps([f"item-{i:05d}" for i in range(600)])))  # ~8 KB > the 4 KB tail
+    assert run["status"] == "failed"
+    err = last_each(steps)["error"]
+    assert "cut to its last 4096 chars" in err and "write the list to a file" in err, err
+
+
 def test_failed_body_item_stops_the_run_by_default(run_yaml):
     run, steps = run_yaml(wf(), claude_script=[{"result": "r1"}, {"is_error": True, "result": "boom"}, {"result": "r3"}])
     assert run["status"] == "failed"

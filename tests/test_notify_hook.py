@@ -7,6 +7,8 @@ Run: `CTC_DATABASE_URL=<scratch> uv run pytest -q tests/test_notify_hook.py`.
 """
 
 import json
+import subprocess
+import sys
 import time
 from types import SimpleNamespace
 
@@ -89,6 +91,17 @@ def test_hanging_command_is_killed_at_the_timeout(hook, monkeypatch):
     assert "timeout after 0.5 s" in (hook / "runs" / "7" / "notify.log").read_text()
     time.sleep(3)
     assert not late.exists()  # the whole process group was killed, not just bash
+
+
+def test_hanging_command_is_killed_after_the_daemon_exits(hook):
+    late = hook / "late"
+    daemon = ("import os, sys, pathlib\nfrom ctc.runner import notify\nnotify.TIMEOUT_S, notify.RUNS = 0.5, pathlib.Path(sys.argv[1])\n"
+              "notify.fire({'id': 7, 'workflow': 'p:wf', 'graph': {'settings': {'notify': sys.argv[2]}}}, 'done', None)\n"
+              "import time; time.sleep(0.2); os._exit(0)\n")  # the daemon dies before the timeout
+    subprocess.run([sys.executable, "-c", daemon, str(hook / "runs"), f"sleep 2; echo late >> {late}"], check=True)
+    time.sleep(3)
+    assert not late.exists()  # the timeout does not depend on the daemon's thread
+    assert "timeout after 0.5 s" in (hook / "runs" / "7" / "notify.log").read_text()
 
 
 # ---- engine seam: one call per committed transition ----------------------------------------------------------------

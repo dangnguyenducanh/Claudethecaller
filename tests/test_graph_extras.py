@@ -99,3 +99,16 @@ def test_approval_timeout_fails_a_waiting_run(run_yaml, in_store):
     assert run["status"] == "failed" and "approval_timeout_minutes" in run["error"], run["error"]
     assert s["gate"]["status"] == "failed" and s["gate"]["error"] == run["error"] and "after" not in s
     assert in_store(lambda st: rows(st, plain["id"]))[0]["status"] == "waiting"
+
+
+def test_max_run_minutes_counts_only_running_time(run_yaml, in_store, walk_run):
+    run, _ = run_yaml(GATED.replace("SETTINGS", "settings: {max_run_minutes: 0.5}"))
+    assert run["status"] == "waiting"
+
+    async def wait_long_then_approve(st):  # an hour-long approval wait: the run was claimed an hour ago
+        await st.store.execute("update wf_runs set started_at = now() - interval '1 hour' where id = %s", (run["id"],))
+        return await engine.approve(st, run["id"], run["owner"], True, None)
+    assert in_store(wait_long_then_approve)
+    run, steps = walk_run(run["id"])
+    assert run["status"] == "done", run["error"]
+    assert by_node(steps)["after"]["status"] == "done" and 0 < run["active_s"] < 30

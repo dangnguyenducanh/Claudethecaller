@@ -94,8 +94,10 @@ async def _stdout(*argv: str) -> str:
     p = await asyncio.create_subprocess_exec(*argv, stdin=DEVNULL, stdout=PIPE, stderr=DEVNULL, env=child_env())
     try:
         return (await asyncio.wait_for(p.communicate(), 30))[0].decode()
-    except TimeoutError:
-        p.kill()
+    except BaseException:  # a timeout, or a cancel (execute()'s max_run_minutes killer): never leave it running
+        with contextlib.suppress(ProcessLookupError):
+            p.kill()
+        await p.wait()
         raise
 
 

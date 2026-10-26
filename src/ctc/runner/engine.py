@@ -42,6 +42,7 @@ from ctc.runner.graph import (
     eval_if,
     eval_switch,
     foreach_step,
+    lookup,
     merge_output,
     passthrough,
     ready,
@@ -98,7 +99,8 @@ DONE_SQL = """update wf_steps set status = %(status)s, output = %(output)s, erro
 where id = %(sid)s"""
 SKIP_SQL = """insert into wf_steps (run_id, node_id, visit, kind, status, ended_at) values (%s, %s, %s, %s, 'skipped', now())
 on conflict do nothing"""
-RUN_SQL = """update wf_runs set state = %(state)s, tokens = tokens + %(tokens)s, status = coalesce(%(end)s, status),
+RUN_SQL = """update wf_runs set state = %(state)s, tokens = tokens + %(tokens)s, active_s = active_s + %(active)s,
+  status = coalesce(%(end)s, status),
   error = coalesce(%(err)s, error), quota_resets_at = coalesce(%(resets)s::timestamptz, quota_resets_at),
   pr_url = coalesce(%(pr)s, pr_url), ended_at = case when %(end)s::text in ('done', 'failed') then now() end
 where id = %(rid)s and status = 'running' returning id"""
@@ -216,7 +218,8 @@ async def retry(st, owner: str, parent_id: int, g: dict, file_sha: str, from_nod
                 to_node: str | None = None, trigger: str = "api") -> int:
     """Queue a new run of g (the workflow as saved now) linked to run parent_id, from its failed step (retry, the
     default when it failed), from_node, or the start; to_node stops it with done after that node. The parent's steps
-    before the from step are copied as `reused` (execute() completes them with their outputs: no process, 0 tokens) and
+    before the from step (done, or failed with on_error continue / error_output: they replay as failed) are copied as
+    `reused` (execute() completes them with their outputs: no process, 0 tokens) and
     the child's worktree starts at the from step's pre_sha. ValueError with a user-facing message on every refusal."""
     p = await st.store.fetchrow("select * from wf_runs where id = %s and owner = %s", (parent_id, owner))
     if not p:
@@ -238,7 +241,17 @@ async def retry(st, owner: str, parent_id: int, g: dict, file_sha: str, from_nod
     from_node = frm["node_id"] if frm else trig
     if to_node and to_node not in _reach(from_node, [(e["from"], e["to"]) for e in g["edges"]]):
         raise ValueError(f"{to_node} does not come after {from_node}")
-    reused = [s for s in steps if frm and s["id"] < frm["id"] and s["status"] in ("done", "failed") and s["output"] is not None]
+    # a failed step is reused only when g routes it on (on_error continue / error_output): it replays as failed, so the
+    # child takes the parent's edge; one that stopped the run (a batch sibling of frm) runs again
+    nodes = {n["id"]: (g.get("defaults") or {}) | n for n in g["nodes"]}
+    reused = [s for s in steps if frm and s["id"] < frm["id"] and s["output"] is not None and (s["status"] == "done" or (
+        s["status"] in ("failed", "timeout") and (nodes.get(s["node_id"]) or {}).get("on_error") in ("continue", "error_output")))]
+    # ponytail: a node with only some visits reused in a loop is not checked; its resume would fail in claude
+    rn = {s["node_id"] for s in reused}
+    for n in nodes.values():
+        if n.get("resume_from") in rn and n["id"] not in rn:  # claude finds a session by its cwd: the parent's worktree
+            raise ValueError(f"{n['id']} resumes {n['resume_from']}'s session, which this retry would reuse from run"
+                             f" {parent_id}: run from {n['resume_from']} or earlier")
     sha = ((frm or {}).get("pre_sha") or next((s["post_sha"] for s in reversed(reused) if s["post_sha"]), None)
            or p["base_sha"])
     if not sha:
@@ -258,9 +271,9 @@ async def retry(st, owner: str, parent_id: int, g: dict, file_sha: str, from_nod
             # usage and cost_usd stay null: reused nodes cost 0 tokens
             await conn.execute(
                 "insert into wf_steps (run_id, node_id, visit, kind, status, input, output, error, session_id, num_turns,"
-                " pre_sha, post_sha, files, diff, log_path, started_at, ended_at, marker)"
-                " select %s, node_id, visit, kind, 'done', input, output, error, session_id, num_turns, pre_sha, post_sha,"
-                " files, diff, log_path, started_at, ended_at, 'reused' from wf_steps where id = any(%s)",
+                " pre_sha, post_sha, files, diff, log_path, started_at, ended_at, marker, tries)"
+                " select %s, node_id, visit, kind, status, input, output, error, session_id, num_turns, pre_sha, post_sha,"
+                " files, diff, log_path, started_at, ended_at, 'reused', tries from wf_steps where id = any(%s)",
                 (rid, [s["id"] for s in reused]))
             return rid
     rid = await st.store._run(go)
@@ -439,10 +452,16 @@ async def execute(st, run: dict) -> None:
             inp = json.loads(run["input"] or "{}")
     ctx = {"input": inp, "run": {"branch": run["branch"], "id": rid, "trigger": run["trigger"]}, "vars": g.get("vars") or {}}
     env, sessions, total, seen = child_env() | {"CTC_RUN": str(rid)}, {}, run["tokens"], len(wst.get("skipped", []))
-    # FR-035 wall clock from the first claim. ponytail: killed steps keep the status their process returned; quota and
-    # approval waits count toward the wall clock
-    mins = s["max_run_minutes"]
-    deadline = run["started_at"] + timedelta(minutes=mins) if mins else None
+    # FR-035: running time only. Each claim's deadline is now + what wf_runs.active_s (every _save adds the time since the
+    # last one) left; quota and approval waits and a planned stop's downtime do not count. ponytail: killed steps keep
+    # the status their process returned; the time from the last save to a planned stop's re-queue is not counted
+    mins, mark = s["max_run_minutes"], datetime.now(UTC)
+    deadline = mark + timedelta(minutes=mins, seconds=-run["active_s"]) if mins else None
+
+    def active() -> float:  # seconds since the last save, for RUN_SQL's active_s
+        nonlocal mark
+        t, mark = mark, datetime.now(UTC)
+        return (mark - t).total_seconds()
 
     def skips() -> list[tuple]:  # nodes the walker skipped since the last save -> their step rows
         nonlocal seen
@@ -455,7 +474,13 @@ async def execute(st, run: dict) -> None:
             try:
                 out = foreach_step(g, wst, node, ctx)
             except ValueError as e:  # items is not a JSON array: the run fails
-                return {"status": "failed", "error": str(e)}
+                # ponytail: a shell keeps only its last TAIL chars of output (rows stay small), so a longer list arrives
+                # cut; say so rather than carry full stdout for items
+                v = lookup(ctx, node["items"])
+                cut = isinstance(v, str) and len(v) >= TAIL and node["items"].endswith(("stdout_tail", "stderr_tail"))
+                return {"status": "failed", "error": str(e) + (
+                    f" (the shell's output was cut to its last {TAIL} chars: write the list to a file and print a"
+                    " short list of names or paths, one JSON array under 4 KB, for the foreach)" if cut else "")}
             return canned or {"status": "done", "output": out}
         if canned:  # completed without executing: no process, no commit, no pre/post sha
             return canned
@@ -472,10 +497,11 @@ async def execute(st, run: dict) -> None:
             ctx[row["node_id"]], sessions[row["node_id"]] = row["output"], row["session_id"]
         # a retry child's steps copied from its parent (retry()): the walker completes them with the parent's outputs
         reused = {(r["node_id"], r["visit"]): r for r in await st.store.fetch(
-            "select id, node_id, visit, output, session_id from wf_steps where run_id = %s and marker = 'reused'", (rid,))}
+            "select id, node_id, visit, status, output, session_id from wf_steps where run_id = %s and marker = 'reused'",
+            (rid,))}
         if not (r := ready(g, wst)):  # approved with nothing left to run: what quiescence skipped, then done
             if await _save(st, [], skips(), {"rid": rid, "state": Jsonb(wst), "tokens": 0, "end": "done", "err": None,
-                                             "resets": None, "pr": None}):
+                                             "resets": None, "pr": None, "active": active()}):
                 notify.fire(run, "done", None)
             return
         while r:
@@ -496,7 +522,7 @@ async def execute(st, run: dict) -> None:
                 nctx = ctx | {"run": ctx["run"] | {"visit": node["visit"]}, "now": datetime.now(UTC).isoformat(timespec="seconds")
                               } | current_item(g, wst, nid)
                 if row := reused.get((nid, node["visit"])):  # its copied row is final: no input, no insert, no log
-                    jobs.append((row["id"], node, None, None, None, {"status": "done", "output": row["output"],
+                    jobs.append((row["id"], node, None, None, None, {"status": row["status"], "output": row["output"],
                                                                       "session_id": row["session_id"], "marker": "reused"}, nctx))
                     continue
                 # a pinned run completes a pinned node with its pin: its input is kept, no argv, log, process or commit
@@ -522,8 +548,10 @@ async def execute(st, run: dict) -> None:
             try:
                 ress = await asyncio.gather(*(spawn(*j[1:]) for j in jobs), return_exceptions=True)
             finally:
-                if killer:
-                    killer.cancel()
+                if killer:  # still asleep: cancel it; past the deadline it is killing: let it finish (containers too)
+                    if datetime.now(UTC) < deadline:
+                        killer.cancel()
+                    await asyncio.gather(killer, return_exceptions=True)
             if exc := next((x for x in ress if isinstance(x, BaseException)), None):
                 raise exc  # after every sibling ended, so none is left running past the run's failure
             steps, tok, end, err, resets, pr, stops, done = [], 0, None, None, None, None, [], []
@@ -531,7 +559,8 @@ async def execute(st, run: dict) -> None:
                 nid, out = node["id"], res.get("output")
                 tok += fresh_tokens(res.get("usage"))
                 failed = res["status"] in ("failed", "timeout")
-                if routed := failed and node.get("on_error") == "error_output":  # FR-014: this goes down the error edge
+                routed = failed and node.get("on_error") == "error_output"  # FR-014: this goes down the error edge
+                if routed and res.get("marker") != "reused":  # a reused row's output is already the routed one
                     o, shell = out or {}, node["type"] == "shell"
                     out = {"error": res.get("error") or res["status"],
                            "output_tail": ((o["stdout_tail"] + o["stderr_tail"]) if shell else o.get("result") or "")[-TAIL:],
@@ -572,7 +601,7 @@ async def execute(st, run: dict) -> None:
                 r = ready(g, wst)
                 end = None if r else "done"
             saved = await _save(st, steps, skips(), {"rid": rid, "state": Jsonb(wst), "tokens": tok, "end": end,
-                                                     "err": err, "resets": resets, "pr": pr})
+                                                     "err": err, "resets": resets, "pr": pr, "active": active()})
             if saved and end:  # committed: failed, quota, waiting or done
                 notify.fire(run, end, err)
             for *_, log_path, _, _ in jobs:
