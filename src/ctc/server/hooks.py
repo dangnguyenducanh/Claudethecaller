@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import re
 import time
 from pathlib import Path
 
@@ -21,7 +22,9 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel
 
+from ctc.config import cfg
 from ctc.decision.bundle import Bundle, decide, followed, stage_rows, suggestion_line
+from ctc.graph.extract import SOURCE, prose
 from ctc.ingestion.scanner import project_id
 from ctc.memory.longterm import recall
 from ctc.memory.session import blend, project_vector, session_vector
@@ -123,8 +126,10 @@ async def route(st: State, prompt: str, session_id: str, cwd: str, user_id: str 
 
 
 def _in_run(body: dict) -> bool:
-    """A workflow run's own claude (engine.in_runs: any home's runs dir): no suggestion, rows, or extract jobs (PLAN.md m5)."""
-    return in_runs(str(body.get("cwd") or ""))
+    """A workflow run's own claude (engine.in_runs: any home's runs dir) or the graph extractor's (cwd under
+    graph_extract.dir): no suggestion, rows, or extract / graph jobs (PLAN.md m5, m6 FR-011)."""
+    cwd = str(body.get("cwd") or "")
+    return in_runs(cwd) or f"{cwd}/".startswith(f"{Path(cfg()['graph_extract']['dir']).expanduser()}/")
 
 
 async def _body(request: Request) -> dict:
@@ -174,15 +179,58 @@ async def hook_prompt(request: Request) -> PlainTextResponse:
     return PlainTextResponse(line)
 
 
+EDIT_TOOLS = ("Write", "Edit", "MultiEdit")
+TICK = re.compile(r"^\s*- \[([ xX])\] (T\d{3})\b", re.MULTILINE)
+# one queued job per kind and file is enough: it parses / extracts the file as it is when it runs
+QUEUED_SQL = ("select 1 from jobs where user_id = %s and kind = %s and status = 'queued' and payload->>'cwd' = %s"
+              " and payload->'files' ? %s limit 1")
+
+
+def _ticks(tool: str, tin: dict) -> list[str]:
+    """T### boxes an edit ticks: `- [x]` in a new_string where its old_string had `- [ ]` (a Write compares against nothing)."""
+    edits = tin.get("edits") if tool == "MultiEdit" else [tin] if tool == "Edit" else []
+    out: list[str] = []
+    for e in edits if isinstance(edits, list) else []:
+        e = e if isinstance(e, dict) else {}
+        was = {t for box, t in TICK.findall(str(e.get("old_string") or "")) if box == " "}
+        out += [t for box, t in TICK.findall(str(e.get("new_string") or "")) if box != " " and t in was and t not in out]
+    return out
+
+
+async def _graph_jobs(st: State, user_id: str, cwd: str, rel: str, tick: dict | None) -> None:
+    """After the 204 (m6 FR-012, FR-020): a saved context source queues graph_build + graph_extract for that file, unless
+    one is already queued; ticked tasks.md boxes queue a graph_build that confirms the session's edited files."""
+    try:
+        if SOURCE.fullmatch(rel):
+            # extract first: the worker runs jobs in order, so the build embeds and links the extractor's new nodes
+            for kind in ("graph_extract", "graph_build") if prose(rel) else ("graph_build",):
+                if await st.store.fetchval(QUEUED_SQL, (user_id, kind, cwd, rel)) is None:
+                    await submit(st, kind, {"cwd": cwd, "files": [rel]}, user_id)
+        if tick:
+            await submit(st, "graph_build", {"cwd": cwd, "tick": tick}, user_id)
+    except Exception:
+        log.exception("hook/tool: graph jobs failed")
+
+
 @router.post("/v1/hook/tool", status_code=204)
-async def hook_tool(request: Request) -> Response:
+async def hook_tool(request: Request, tasks: BackgroundTasks) -> Response:
     try:
         st, user_id, body = _st(request), _user(request), await _body(request)
         sid, tool, tin = str(body.get("session_id") or ""), str(body.get("tool_name") or ""), body.get("tool_input")
-        tin = tin if isinstance(tin, dict) else {}
+        tin, cwd = tin if isinstance(tin, dict) else {}, str(body.get("cwd") or "")
         if sid and tool and not _in_run(body):
             name = tin.get("skill") or tin.get("subagent_type")
-            await write(st, "event", {"session_id": sid, "type": "tool", "payload": {"tool": tool, **({"name": name} if name else {})}})
+            rel = str(tin.get("file_path") or "") if tool in EDIT_TOOLS else ""
+            if rel and cwd and Path(rel).is_relative_to(cwd):
+                rel = Path(rel).relative_to(cwd).as_posix()
+            await write(st, "event", {"session_id": sid, "type": "tool", "payload": {
+                "tool": tool, **({"name": name} if name else {}), **({"file_path": rel} if rel else {})}})
+            # shared mode: cwd names a path on the client's disk, which the jobs cannot read
+            if rel and cwd and st.cfg["mode"] == "local":
+                ticks = _ticks(tool, tin) if rel.endswith("tasks.md") else []
+                if SOURCE.fullmatch(rel) or ticks:
+                    tasks.add_task(_graph_jobs, st, user_id, cwd, rel,
+                                   {"session_id": sid, "file": rel, "tasks": ticks} if ticks else None)
             last = await st.cache.get_json(f"sess:{_scoped(st, user_id, sid)}:last")
             if last and followed(last, tool, tin):
                 await write(st, "followed", {"session_id": sid, "ref": last["ref"]})

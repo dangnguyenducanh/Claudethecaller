@@ -18,3 +18,5 @@ rate_limit_per_min: 600
 history: {skip_projects: [], max_prompt_chars: 300, chunk: 30, on_start: true}   # B9: skip_projects = project names or folder basenames
 db_pool: {min: 3, max: 5}   # a route runs up to 3 queries at once; a cold Supabase connection costs ~450 ms (TLS + pooler)
 runner: {claude_version: "2.1.306", idle_wait_min: 15, poll_s: 1.5}   # workflow runner (PLAN.md m5); runs refuse any other `claude --version`
+# m6 background extractor (graph/extract.py): claude -p cwd + log (`~` expanded there), haiku calls per job, seconds per call
+graph_extract: {dir: ~/.claudethecaller/extract, max_chunks_per_run: 40, timeout_s: 120}

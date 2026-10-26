@@ -645,6 +645,34 @@ def graph_confirm(src: str = typer.Argument(..., help="Context node id, e.g. ctx
     out.print(f"{dot(GREEN if verdict == 'keep' else FAINT)} {'kept' if verdict == 'keep' else 'dropped'}")
 
 
+@graph.command("extract")
+def graph_extract(file: str | None = typer.Option(None, "--file", help="Only this repo-relative doc.")) -> None:
+    """The Claude pass (claude -p, haiku) over doc sections that changed since the last pass; unchanged ones cost nothing.
+    Run `ctc graph build` after it so the new nodes get embedded and linked."""
+    from types import SimpleNamespace
+
+    from ctc.graph import extract as gx
+
+    async def go() -> dict:
+        s = await Store.open(cfg()["database_url"], pool_max=1)
+        try:  # the job's state needs only store, cfg and the RAM cache it invalidates
+            return await gx.run_job(SimpleNamespace(store=s, cfg=cfg(), graphs={}), {"cwd": str(Path.cwd()), "files": [file] if file else None},
+                                    lambda _f: asyncio.sleep(0))
+        finally:
+            await s.close()
+
+    with out.status(f"[{MUTED}]extracting changed doc sections with claude -p…[/]", spinner_style=BLUE):
+        r = _run(go())
+    if r.get("error"):
+        err.print(f"[{BAD}]●[/] {r['error']}")
+        raise typer.Exit(1)
+    tok = " / ".join(f"{k.replace('_tokens', '')} {v}" for k, v in r["tokens"].items()) or "0"
+    out.print(f"{dot(GREEN)} chunks: [bold]{r['chunks'] - r['skipped']}[/] changed, [bold]{r['sent']}[/] sent, "
+              f"{r['skipped']} skipped, {r['remaining']} left for the next run, {r['failed']} failed  [{FAINT}]tokens {tok}[/]")
+    if r.get("quota_until"):
+        out.print(f"{dot(WARN)} quota until [bold]{r['quota_until']}[/]: the rest waits for the reset")
+
+
 # ---- workflow runs (PLAN.md m5) -----------------------------------------------
 
 STATUS = {"done": GREEN, "skipped": FAINT, "cancelled": FAINT, "failed": BAD, "timeout": BAD, "quota": WARN,
