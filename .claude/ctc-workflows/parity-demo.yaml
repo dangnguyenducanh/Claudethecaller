@@ -1,0 +1,57 @@
+name: parity-demo
+description: n8n-parity showcase - typed input, notes, a retried idempotent shell, a disabled node, IF conditions with a stop, a switch, a for-each and vars (no claude)
+settings: {permission: worktree, allow_extra_usage: false, auto_resume: true, max_run_tokens: null}
+vars: {greeting: hi}
+nodes:
+  - id: start
+    type: trigger
+    pos: [0, 160]
+    inputs:
+      - {name: names, type: json, default: '["a","b","c"]', description: Names to greet (a JSON list)}
+  - {id: say, type: shell, command: "echo {{input.names}}", notes: "Echoes the typed input; empty when submitted without inputs", timeout_s: 30, pos: [200, 160]}
+  - id: flaky
+    type: shell
+    command: 'n=$(cat .tries 2>/dev/null || echo 0); echo $((n+1)) > .tries; [ "$n" -ge 1 ]'
+    idempotent: true
+    retry: {max_tries: 3, wait_s: 0}
+    timeout_s: 30
+    pos: [400, 160]
+  - {id: skipped, type: shell, command: "echo never runs", disabled: true, timeout_s: 30, pos: [600, 160]}
+  - {id: check, type: shell, command: "echo ready", timeout_s: 30, pos: [800, 160]}
+  - id: ready
+    type: if
+    combine: and
+    conditions:
+      - {path: check.exit_code, op: eq, value: 0}
+      - {path: check.stdout_tail, op: contains, value: ready}
+    pos: [1000, 160]
+  - {id: halt, type: stop, message: "not ready: {{check.stdout_tail}}", pos: [1200, 320]}
+  - id: route
+    type: switch
+    cases:
+      - name: go
+        conditions: [{path: check.stdout_tail, op: contains, value: ready}]
+      - name: empty
+        conditions: [{path: check.stdout_tail, op: eq, value: ""}]
+    pos: [1200, 80]
+  - {id: other, type: shell, command: "echo nothing to do", timeout_s: 30, pos: [1400, 0]}
+  - {id: list, type: shell, command: "printf '%s' '[\"a\",\"b\",\"c\"]'", timeout_s: 30, pos: [1400, 160]}
+  - {id: each, type: foreach, items: list.stdout_tail, max_items: 50, pos: [1600, 160]}
+  - {id: greet, type: shell, command: "echo {{item}} {{index}}", timeout_s: 30, pos: [1800, 320]}
+  - {id: bye, type: shell, command: "echo {{vars.greeting}} {{run.id}}", timeout_s: 30, pos: [1800, 160]}
+edges:
+  - {from: start, to: say}
+  - {from: say, to: flaky}
+  - {from: flaky, to: skipped}
+  - {from: skipped, to: check}
+  - {from: check, to: ready}
+  - {from: ready, to: route, handle: "true"}
+  - {from: ready, to: halt, handle: "false"}
+  - {from: route, to: list, handle: go}
+  - {from: route, to: other, handle: empty}
+  - {from: route, to: other, handle: default}
+  - {from: list, to: each}
+  - {from: each, to: greet, handle: body}
+  - {from: greet, to: each}
+  - {from: each, to: bye, handle: done}
+steps: []

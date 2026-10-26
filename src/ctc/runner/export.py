@@ -3,22 +3,29 @@
 
 Each node is one guarded statement, in topological order: it runs when one of its in-edges is live (its source ran
 and, for an IF or switch, took that handle), which is walker rules 2-4 as plain `if`s. agent -> agent(prompt, {label,
-...}); shell -> an agent told to run exactly that command, answering {exit_code, stdout_tail}; IF -> {value} over its
-conditions (every/some for combine and/or), switch -> {case} via a chain of ?: over its cases, both tested by the nodes
-after them; merge -> {inputs}; a loop (the back-edges into one node) -> a `while` capped at that node's max_visits;
-readonly nodes side by side -> await parallel([...]); a disabled node -> a pass-through of its first live input's
-output (graph.passthrough); stop -> throw new Error(<its message>). Templates fill at run time: {{input}} is the
+...}); shell -> an agent told to run exactly that command, answering {exit_code, stdout_tail}; a shell with retry ->
+up to max_tries such runs until exit 0 (`sleep <wait_s>; ` before each later one), the last non-zero exit failing the
+script as it fails the run; on_error: continue -> a shell's exit stays data (as by default), an agent's thrown error
+becomes {result, is_error: true}; IF -> {value} over its conditions (every/some for combine and/or; the JS test()
+mirrors graph._test: Python ==, `in` and json.dumps text), switch -> {case} via a chain of ?: over its cases, both
+tested by the nodes after them; merge -> {inputs}; a loop (the back-edges into one node) -> a `while` capped at that
+node's max_visits; readonly nodes side by side -> await parallel([...]); a disabled node -> a pass-through of its first
+live input's output (graph.passthrough); stop -> throw new Error(<its message>); pin and notes -> ignored (a native run
+is never a pinned run). Templates fill at run time: {{input}} is the
 workflow's `args` (else the trigger's input), {{vars.x}} the file's vars:, {{now}} the time, {{node.x}} that node's
 output, shell values single-quoted like shlex.quote. With declared trigger `inputs`, `args` (an object or its JSON
 text) fills {{input.<name>}} over the declared defaults, and a missing required input throws; values are not coerced.
 Every string from the graph is embedded with json.dumps, so no
 prompt or command can break out into code.
-Not exported: approval nodes (a native run can't pause for a sign-off: the caller refuses them), for-each nodes
-(has_foreach: no native equivalent yet), {{run.id}},
-{{run.visit}} and {{run.trigger}} (no native run record), settings.max_run_minutes (no native wall clock), error edges
-(on_error: error_output; a native agent's failure is not a branch, so they are refused), regex conditions
-(Python re and JS RegExp differ, so a script could branch where the walker would not), and per-node
-permissions, tools, MCP, max_turns and timeouts: the session's own permission rules apply.
+Refused, each as ValueError("<code>: <node ids or field>...") (the API's 422 not_exportable): approval nodes (has_approval:
+a native run can't pause for a sign-off), for-each nodes (has_foreach: no native equivalent yet), {{run.id}},
+{{run.visit}} and {{run.trigger}} (uses_run_root: no native run record), settings.max_run_minutes (has_run_timeout: no
+native wall clock), error edges (error_edge: on_error: error_output; a native agent's failure is not a branch), regex
+conditions (regex_condition: Python re and JS RegExp differ, so a script could branch where the walker would not) and
+a loop whose nodes can't form one block (loop_not_one_block).
+Not exported (ignored): settings.notify (the session shows a workflow's end itself), settings.approval_timeout_minutes
+(approval nodes are refused), and per-node permissions, tools, MCP, max_turns and timeouts: the session's own
+permission rules apply.
 """
 
 from __future__ import annotations
@@ -31,22 +38,42 @@ from ctc.runner.proc import _name
 J = json.dumps
 PRELUDE = r"""const SHELL = {type: 'object', properties: {exit_code: {type: 'number'}, stdout_tail: {type: 'string'}}, required: ['exit_code', 'stdout_tail']}
 const out = {}, ran = new Set(), visits = {}
-const get = (v, path) => path.reduce((x, k) => x == null ? undefined : x[k], v)
-const txt = v => v == null ? '' : typeof v === 'string' ? v : JSON.stringify(v)
+const obj = v => v !== null && typeof v === 'object'
+const get = (v, path) => path.reduce((x, k) => Array.isArray(x) ? (/^\d+$/.test(k) && +k < x.length ? x[+k] : undefined)
+  : obj(x) && Object.hasOwn(x, k) ? x[k] : undefined, v)  // as graph.lookup: own keys and list indexes only
+// as graph._text: Python's json.dumps ("[1, 2]", non-ASCII as \uXXXX). ponytail: 1.0 prints as 1 and integer-like keys
+// come first in JS, so a text compare can still differ there
+const dumps = v => Array.isArray(v) ? '[' + v.map(dumps).join(', ') + ']'
+  : obj(v) ? '{' + Object.entries(v).map(([k, x]) => JSON.stringify(k) + ': ' + dumps(x)).join(', ') + '}' : JSON.stringify(v)
+const txt = v => v == null ? '' : typeof v === 'string' ? v
+  : dumps(v).replace(/[\u007f-\uffff]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))
 const q = s => "'" + s.replaceAll("'", "'\\''") + "'"
 const on = (id, handle) => ran.has(id) && (handle === undefined || (out[id].case ?? out[id].value) === handle)
 const set = (id, v) => { out[id] = v; ran.add(id); visits[id] = (visits[id] || 0) + 1 }
 const NUM = new RegExp(NUM_PATTERN)
 const num = v => typeof v === 'number' ? v : typeof v === 'string' && NUM.test(v) ? Number(v) : NaN  // booleans: NaN, as graph._num
 const cmp = (a, op, b) => !isNaN(a) && !isNaN(b) && (op === 'gt' ? a > b : op === 'ge' ? a >= b : op === 'lt' ? a < b : a <= b)
-const has = (v, want) => Array.isArray(v) ? v.includes(want) : txt(v).includes(txt(want))
+const nb = v => typeof v === 'number' || typeof v === 'boolean'
+const peq = (a, b) => obj(a) && obj(b) ? Array.isArray(a) === Array.isArray(b) && Object.keys(a).length === Object.keys(b).length
+    && Object.keys(a).every(k => Object.hasOwn(b, k) && peq(a[k], b[k]))
+  : nb(a) && nb(b) ? Number(a) === Number(b) : a === b  // Python ==: structural, True == 1
+const has = (v, want) => Array.isArray(v) ? v.some(x => peq(x, want)) : obj(v) ? typeof want === 'string' && Object.hasOwn(v, want)
+  : txt(v).includes(txt(want))  // Python `in`: a list's items, a dict's keys, else text
 const test = (v, op, want) => v !== undefined && (op === 'truthy' ? Boolean(v) && (typeof v !== 'object' || Object.keys(v).length > 0)
   : op === 'exists' ? v !== null
-  : op === 'contains' ? has(v, want) : op === 'not_contains' ? !has(v, want)
+  : op === 'contains' || op === 'not_contains'  // a dict tested for a list or dict: Python's TypeError, false for both
+    ? !(obj(v) && !Array.isArray(v) && obj(want)) && has(v, want) === (op === 'contains')
   : ['gt', 'ge', 'lt', 'le'].includes(op) ? cmp(num(v), op, num(want))
-  : (v === want || txt(v) === txt(want)) === (op === 'eq'))
+  : (peq(v, want) || txt(v) === txt(want)) === (op === 'eq'))
 const ag = async (prompt, opts) => { const r = await agent(prompt, opts); return typeof r === 'string' ? {result: r} : {result: txt(r), structured_output: r} }
 const sh = (id, cmd) => agent('Run exactly this shell command in the repo and report the exit code and the last lines of output: ' + cmd, {label: id, schema: SHELL})
+const retry = async (id, cmd, n, wait, cont) => {  // as engine._spawn: until exit 0 or n tries; then a non-zero exit fails the run
+  for (let k = 1; ; k++) {
+    const r = await sh(id, k > 1 && wait ? `sleep ${wait}; ` + cmd : cmd)
+    if (r.exit_code === 0 || (k === n && cont)) return r
+    if (k === n) throw new Error(`exit ${r.exit_code} on try ${k}/${n}: ${r.stdout_tail}`)
+  }
+}
 """.replace("NUM_PATTERN", J(f"^(?:{NUM.pattern})$"))
 
 
@@ -72,8 +99,7 @@ def _tpl(s: str, shell: bool = False) -> str:
 
 
 def to_js(g: dict, name: str, description: str = "") -> str:
-    """A validated graph -> the workflow script. ValueError for an approval node, a regex condition or a loop the
-    script can't nest, a {{run.id|visit|trigger}} ref or settings.max_run_minutes."""
+    """A validated graph -> the workflow script. ValueError("<code>: ...") for a refused feature (module docstring)."""
     if (g.get("settings") or {}).get("max_run_minutes") is not None:
         raise ValueError("has_run_timeout: settings.max_run_minutes has no native equivalent; remove it to export")
     nodes = {n["id"]: (g.get("defaults") or {}) | n for n in g["nodes"]}
@@ -119,7 +145,12 @@ def to_js(g: dict, name: str, description: str = "") -> str:
                                     if n.get(f)}, **({"agentType": _name(n["agent"])} if n.get("agent") else {})}
             prompt = (f"/{_name(n['cap'])} " if n.get("cap") else "") + (n.get("prompt") or "")
             v = f"await ag({_tpl(prompt)}, {J(opts)})"
-        elif t == "shell":
+            if n.get("on_error") == "continue":  # its error becomes its output and the run walks on
+                v += ".catch(e => ({result: String(e?.message ?? e), is_error: true}))"
+        elif t == "shell" and (rt := n.get("retry")):  # graph.validate: idempotent shells only
+            v = (f"await retry({J(nid)}, {_tpl(n['command'], shell=True)}, {rt['max_tries']}, {J(rt.get('wait_s', 0))}, "
+                 f"{J(n.get('on_error') == 'continue')})")
+        elif t == "shell":  # on_error continue alike: a non-zero exit is data, the run walks on
             v = f"await sh({J(nid)}, {_tpl(n['command'], shell=True)})"
         elif t == "if":
             v = f"{{value: {tests(n)}}}"
@@ -148,7 +179,7 @@ def to_js(g: dict, name: str, description: str = "") -> str:
         nid = min(todo, key=lambda n: (-sum(n in b for _, b, _ in stack), not nodes[n].get("readonly"), idx[n]))
         todo.remove(nid)
         if any(nid not in b for _, b, _ in stack):
-            raise ValueError(f"the loop at {stack[-1][0]} can't be one block: {nid} sits between its nodes")
+            raise ValueError(f"loop_not_one_block: {stack[-1][0]}: {nid} sits between its nodes, so the loop can't be one block")
         ro = nodes[nid]["type"] in ("agent", "shell") and nodes[nid].get("readonly") and nid not in loops
         if not (ro and batch and not {e["from"] for e in fwd if e["to"] == nid} & set(batch)):
             flush()
@@ -190,6 +221,7 @@ def to_js(g: dict, name: str, description: str = "") -> str:
 
 if __name__ == "__main__":
     import copy
+    import itertools
     import subprocess
     import tempfile
     from pathlib import Path
@@ -260,4 +292,32 @@ if __name__ == "__main__":
     assert [c[0] for c in r["calls"]] == ["test", "fix", "test", "review-a", "review-b"], r["calls"]
     assert r["calls"][1][1] == "/tdd-fix Tests fail:\ntest\nGoal: make it green" and r["calls"][3][1] == evil, r["calls"]
     assert r["calls"][4][1] == "ok" and set(r["out"]["join"]["inputs"]) == {"review-a", "review-b"}, r
+
+    # every refusal is "<code>: ...", one graph per code (the API's 422 not_exportable)
+    def line(*mid: dict, edges=None, **extra) -> dict:
+        ns = [{"id": "start", "type": "trigger"}, *mid]
+        return {"nodes": ns, "edges": edges or [{"from": a["id"], "to": b["id"]} for a, b in itertools.pairwise(ns)]} | extra
+    sh = {"type": "shell", "command": "true"}
+    refused = {
+        "has_approval": line({"id": "gate", "type": "approval", "message": "ok?"}),
+        "has_foreach": line({"id": "ls", "type": "shell", "command": "echo []"}, {"id": "each", "type": "foreach", "items": "ls.stdout_tail"},
+                            {"id": "body", **sh}, edges=[{"from": "start", "to": "ls"}, {"from": "ls", "to": "each"},
+                                                         {"from": "each", "to": "body", "handle": "body"}, {"from": "body", "to": "each"}]),
+        "error_edge": line({"id": "a", **sh, "on_error": "error_output"}, {"id": "b", **sh},
+                           edges=[{"from": "start", "to": "a"}, {"from": "a", "to": "b", "handle": "error"}]),
+        "regex_condition": line({"id": "a", **sh}, {"id": "ok", "type": "if", "conditions": [{"path": "a.stdout_tail", "op": "regex", "value": "x"}]},
+                                {"id": "y", **sh}, edges=[{"from": "start", "to": "a"}, {"from": "a", "to": "ok"},
+                                                          {"from": "ok", "to": "y", "handle": "true"}, {"from": "ok", "to": "y", "handle": "false"}]),
+        "uses_run_root": line({"id": "a", "type": "shell", "command": "echo {{run.id}}"}),
+        "has_run_timeout": line({"id": "a", **sh}, settings={"max_run_minutes": 5}),
+        "loop_not_one_block": line({"id": "a", **sh}, {"id": "x", **sh}, {"id": "b", **sh}, edges=[
+            {"from": "start", "to": "a"}, {"from": "start", "to": "x"}, {"from": "a", "to": "b"}, {"from": "x", "to": "b"}, {"from": "b", "to": "a"}]),
+    }
+    for code, g in refused.items():
+        assert validate(g) == [], (code, validate(g))
+        try:
+            to_js(g, code)
+            raise AssertionError(f"{code}: exported")
+        except ValueError as e:
+            assert str(e).startswith(code + ": "), e
     print("export ok")
