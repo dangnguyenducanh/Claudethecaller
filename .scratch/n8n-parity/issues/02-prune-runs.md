@@ -1,6 +1,6 @@
 # 02 — prune-runs
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: none
 Spec: `.scratch/n8n-parity/spec.md` (read it first; this ticket implements part of it)
 Touches: src/ctc/runner/prune.py (new), src/ctc/cli.py (new `runs prune` command), tests/test_prune.py
@@ -22,3 +22,5 @@ Touches: src/ctc/runner/prune.py (new), src/ctc/cli.py (new `runs prune` command
 Pure selection logic unit-tested with fake rows; one test with a real tmp git repo + worktree + scratch DB (skip without DB).
 
 ## Comments
+
+2026-10-26 — resolved on branch `n8n-02-prune-runs`, merged into `m5-n8n-parity` (tasks T047–T050). New `src/ctc/runner/prune.py` (`eligible`, `candidates`, `apply`) and `ctc runs prune [--days 30] [--apply]` (`runs` is now a Typer group; plain `ctc runs` still lists). Guards: only done/failed/cancelled runs without a PR URL; a worktree is removed only when it sits under that run's own `RUNS/<id>`; only `ctc/` branches. Tests: tests/test_prune.py (selection unit tests + one tmp-repo/scratch-DB case on its own schema). Note for US1: `wf_runs.parent_run_id` must be `on delete set null` so pruning a parent never fails.

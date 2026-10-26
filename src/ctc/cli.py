@@ -36,7 +36,7 @@ from ctc.embedding.embedder import Embedder
 from ctc.ingestion import indexer
 from ctc.ingestion.scanner import default_roots, scan_library
 from ctc.retrieval.hybrid import close_ctx, open_ctx, result_json, search
-from ctc.runner import proc
+from ctc.runner import engine, proc, prune
 from ctc.runner.engine import RUNS
 from ctc.storage.cache import Cache
 from ctc.storage.local import CACHE, LocalStore
@@ -552,9 +552,15 @@ def run_cmd(workflow: str = typer.Argument(..., help="Workflow id or name, e.g. 
         raise typer.Exit(1)
 
 
-@app.command("runs")
-def runs_cmd(limit: int = typer.Option(20, "--limit", "-n")) -> None:
+runs = typer.Typer(help="Recent workflow runs; `ctc runs prune` removes old ones.")
+app.add_typer(runs, name="runs")
+
+
+@runs.callback(invoke_without_command=True)
+def runs_cmd(ctx: typer.Context, limit: int = typer.Option(20, "--limit", "-n")) -> None:
     """Recent workflow runs of this claude login."""
+    if ctx.invoked_subcommand is not None:
+        return
     rows = _api("GET", "/runs", params={"limit": limit})
     t = grid(("run", "r:6"), ("workflow", "l:*3"), ("status", "l:12"), ("trigger", "l:9"), ("nodes", "r:7"), ("tokens", "r:10"),
              ("created", "l:16"))
@@ -562,6 +568,35 @@ def runs_cmd(limit: int = typer.Option(20, "--limit", "-n")) -> None:
         t.add_row(f"#{r['id']}", f"[{TEXT}]{r['workflow']}[/]", _status(r["status"]), f"[{MUTED}]{r['trigger']}[/]",
                   f"{r['nodes_done']}/{r['nodes_total']}", f"{r['tokens']:,}", f"[{FAINT}]{r['created_at'][:16].replace('T', ' ')}[/]")
     out.print(card(t, "Runs", f"{len(rows)} shown"))
+
+
+@runs.command("prune")
+def runs_prune(days: int = typer.Option(30, "--days", min=1, help="Prune runs that ended more than this many days ago."),
+               apply: bool = typer.Option(False, "--apply", help="Delete; without it this is a dry run.")) -> None:
+    """List runs older than --days that are done, failed or cancelled with no PR URL, and what would be removed
+    (worktree, ctc/* branch, gz logs, rows). Deletes only with --apply."""
+    async def go() -> tuple[list[dict], dict | None]:
+        if not (o := await engine.owner()):
+            err.print(f"[{BAD}]●[/] claude auth status shows no login")
+            raise typer.Exit(1)
+        st = await Store.open(cfg()["database_url"], pool_max=1)
+        try:
+            items = await prune.candidates(st, o, days)
+            return items, await prune.apply(st, o, items) if apply and items else None
+        finally:
+            await st.close()
+
+    items, totals = _run(go())
+    if not items:
+        out.print(f"{dot(FAINT)} nothing to prune (older than {days} days)")
+        return
+    t = grid(("run", "r:6"), ("workflow", "l:*3"), ("age", "r:6"), ("branch", "l:*3"), ("size", "r:9"))
+    for i in items:
+        t.add_row(f"#{i['id']}", f"[{TEXT}]{i['workflow']}[/]", f"{i['age_days']}d", f"[{MUTED}]{i['branch'] or ''}[/]",
+                  f"{i['size'] / 1e6:.1f} MB")
+    sub = (f"pruned {totals['runs']} runs · {totals['worktrees']} worktrees · {totals['branches']} branches · "
+           f"{totals['bytes'] / 1e6:.1f} MB freed" if totals else "dry run · nothing deleted · pass --apply")
+    out.print(card(t, "Prune runs", sub))
 
 
 @app.command("cancel")
