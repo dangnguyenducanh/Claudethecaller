@@ -145,9 +145,9 @@ def test_list_workflows_names_scope_project_and_schedule(seam, in_store, tool):
     pw = in_store(go)
     got = {w["id"]: w for w in tool("list_workflows")["workflows"]}
     assert got["user:uw"] == {"id": "user:uw", "name": "uw", "scope": "user", "project": None, "description": "uw desc",
-                              "has_schedule": False}
+                              "has_schedule": False, "inputs": []}
     assert got[pw] == {"id": pw, "name": "pw", "scope": "project", "project": "repo", "description": "pw desc",
-                       "has_schedule": True}
+                       "has_schedule": True, "inputs": []}
     assert (got["plug:gw"]["scope"], got["plug:gw"]["project"], got["plug:gw"]["has_schedule"]) == ("plugin", None, False)
 
 

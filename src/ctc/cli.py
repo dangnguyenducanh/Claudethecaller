@@ -18,12 +18,14 @@ import uuid
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 from urllib.parse import quote, urlsplit
 
 import httpx
 import numpy as np
 import psycopg
 import typer
+import yaml
 from rich import box
 from rich.columns import Columns
 from rich.console import Console, Group
@@ -36,7 +38,7 @@ from ctc.embedding.embedder import Embedder
 from ctc.ingestion import indexer
 from ctc.ingestion.scanner import default_roots, scan_library
 from ctc.retrieval.hybrid import close_ctx, open_ctx, result_json, search
-from ctc.runner import engine, proc, prune
+from ctc.runner import engine, graph, proc, prune
 from ctc.runner.engine import RUNS
 from ctc.storage.cache import Cache
 from ctc.storage.local import CACHE, LocalStore
@@ -532,15 +534,27 @@ def _status(s: str) -> str:
 
 @app.command("run")
 def run_cmd(workflow: str = typer.Argument(..., help="Workflow id or name, e.g. smoke."),
-            text: str = typer.Option("", "--input", "-i", help="The run's {{input}}."),
+            inputs: Annotated[list[str] | None, typer.Option(
+                "--input", "-i", help="name=value for a declared input (repeat it); for a workflow without inputs, its "
+                "free-text {{input}}")] = None,
             project: str | None = typer.Option(None, "--project", "-p", help="Project name, for a user or plugin workflow."),
             wait: bool = typer.Option(False, "--wait", "-w", help="Wait for the end and show every node."),
             pinned: bool = typer.Option(False, "--pinned", help="Pinned nodes return their pinned output: no agent runs, "
                                         "no commit. For testing IF, loops and templates.")) -> None:
     """Queue a workflow run on the daemon: its own git worktree and branch, your claude login."""
-    cap_id = _workflow_id(workflow)
+    cap_id, inputs = _workflow_id(workflow), inputs or []
+    g = _api("GET", f"/capabilities/{quote(cap_id, safe=':@')}")["graph"] or {}
+    names = [i["name"] for n in g.get("nodes") or [] if n.get("type") == "trigger" for i in n.get("inputs") or []]
+    if names and any("=" not in x for x in inputs):
+        err.print(f"[{BAD}]●[/] use --input name=value; {cap_id} takes: {', '.join(names)}", soft_wrap=True)
+        raise typer.Exit(1)
+    if not names and len(inputs) > 1:
+        err.print(f"[{BAD}]●[/] {cap_id} declares no inputs: pass one --input text", soft_wrap=True)
+        raise typer.Exit(1)
+    # declared inputs go as strings: the daemon checks and coerces them (422 bad_input)
+    body = {"input": "", "inputs": dict(x.split("=", 1) for x in inputs)} if names else {"input": inputs[0] if inputs else ""}
     rid = _api("POST", f"/workflows/{quote(cap_id, safe=':@')}/runs",
-               json={"input": text, "project": project, "trigger": "cli", "pinned": pinned})["run_id"]
+               json=body | {"project": project, "trigger": "cli", "pinned": pinned})["run_id"]
     out.print(f"{dot(BLUE)} run [bold]#{rid}[/] queued  [{FAINT}]{cap_id}{' · pinned' if pinned else ''}[/]")
     if not wait:
         return
@@ -554,6 +568,30 @@ def run_cmd(workflow: str = typer.Argument(..., help="Workflow id or name, e.g. 
     out.print(card(t, f"Run #{rid} · {r['workflow']}", " · ".join(x for x in (r["branch"], f"{r['tokens']:,} tokens") if x)))
     out.print(_status(r["status"]) + (f"  [{FAINT}]{_flat(r['error'])}[/]" if r["error"] else ""))
     if r["status"] != "done":
+        raise typer.Exit(1)
+
+
+workflow = typer.Typer(no_args_is_help=True, help="Workflow files.")
+app.add_typer(workflow, name="workflow")
+
+
+@workflow.command("validate")
+def workflow_validate(file: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="A workflow YAML file.")]) -> None:
+    """Check a workflow file here, without the daemon (saved or not): errors stop it from running, warnings flag
+    template refs that would render empty. Exits 1 on any error."""
+    try:
+        g = graph.load(file)
+        errs, warns = graph.validate(g), graph.warnings(g)
+    except (yaml.YAMLError, AttributeError, TypeError, KeyError) as e:
+        err.print(Text(f"● malformed workflow: {e}", style=BAD), soft_wrap=True)
+        raise typer.Exit(1) from None
+    for kind, color, rows in (("error", BAD, errs), ("warning", WARN, warns)):
+        for x in rows:
+            node = f"  node {x['node_id']}" if x["node_id"] else ""
+            out.print(Text.assemble(("● ", color), f"{kind}: {x['message']}", (node, FAINT)), soft_wrap=True)
+    n, m = len(errs), len(warns)
+    out.print("valid" if not n + m else f"{n} error{'s' * (n != 1)}, {m} warning{'s' * (m != 1)}")
+    if errs:
         raise typer.Exit(1)
 
 

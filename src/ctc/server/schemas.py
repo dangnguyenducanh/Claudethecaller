@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -378,6 +378,8 @@ class RunStart(BaseModel):
     trigger: RunTrigger = "api"
     # pinned nodes return their pin.output; editor and CLI only (422 pinned_not_allowed for schedule and mcp)
     pinned: bool = False
+    # {name: value} for a workflow whose trigger declares inputs (checked and coerced, 422 bad_input)
+    inputs: dict[str, Any] | None = None
 
 
 class RunRef(BaseModel):

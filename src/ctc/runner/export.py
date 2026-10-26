@@ -9,7 +9,9 @@ after them; merge -> {inputs}; a loop (the back-edges into one node) -> a `while
 readonly nodes side by side -> await parallel([...]); a disabled node -> a pass-through of its first live input's
 output (graph.passthrough); stop -> throw new Error(<its message>). Templates fill at run time: {{input}} is the
 workflow's `args` (else the trigger's input), {{vars.x}} the file's vars:, {{now}} the time, {{node.x}} that node's
-output, shell values single-quoted like shlex.quote. Every string from the graph is embedded with json.dumps, so no
+output, shell values single-quoted like shlex.quote. With declared trigger `inputs`, `args` (an object or its JSON
+text) fills {{input.<name>}} over the declared defaults, and a missing required input throws; values are not coerced.
+Every string from the graph is embedded with json.dumps, so no
 prompt or command can break out into code.
 Not exported: approval nodes (a native run can't pause for a sign-off: the caller refuses them), for-each nodes
 (has_foreach: no native equivalent yet), {{run.id}},
@@ -174,9 +176,15 @@ def to_js(g: dict, name: str, description: str = "") -> str:
             lines.append(pad() + "}")
     flush()
     trig = next((n for n in nodes.values() if n["type"] == "trigger"), {})
+    head = f"const input = args ?? {J(trig.get('input') or '')}\n"
+    if decl := trig.get("inputs"):  # ponytail: no type coercion in the native script
+        head = (f"const input = Object.assign({J({i['name']: i['default'] for i in decl if i.get('default') is not None})}, "
+                "typeof args === 'string' ? JSON.parse(args || '{}') : (args ?? {}))\n"
+                + "".join(f"if (input[{J(i['name'])}] === undefined) throw new Error({J('missing input ' + i['name'])})\n"
+                          for i in decl if i.get("required")))
     return (f"export const meta = {{ name: {J(name)}, description: {J(description)} }}\n\n"
             f"// Exported by claudethecaller (ctc) from its canvas workflow {J(name)}; export again after editing it there.\n"
-            f"{PRELUDE}const input = args ?? {J(trig.get('input') or '')}\nconst vars = {J(g.get('vars') or {})}\n\n"
+            f"{PRELUDE}{head}const vars = {J(g.get('vars') or {})}\n\n"
             + "\n".join(lines) + "\nreturn out\n")
 
 

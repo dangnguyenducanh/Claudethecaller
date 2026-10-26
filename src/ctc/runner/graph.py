@@ -1,6 +1,8 @@
 """Workflow walker (PLAN.md m5 "Walker rules"): pure functions over a graph dict and a JSON-able state dict, no I/O.
 
-Graph = {nodes: [{id, type, pos, ...}], edges: [{from, to, handle?}], vars?: {name: value}, settings?}. Types:
+Graph = {nodes: [{id, type, pos, ...}], edges: [{from, to, handle?}], vars?: {name: value}, settings?}; the trigger
+may declare `inputs: [{name, type: string|number|bool|json, required, default, description}]`, which every run start
+checks and coerces (coerce_inputs()) into {{input.<name>}}; without them {{input}} is the run's free text. Types:
 trigger|agent|shell|if|switch|approval|merge|stop (fails the run with its rendered message; no out-edges), loops
 (back-edges, rule 5), ready readonly agents in one batch (rule 7). Templates (render()) read input, run.*, now,
 vars.* and node outputs; warnings() flags refs that would render empty. An IF tests `conditions: [{path, op,
@@ -47,6 +49,8 @@ TPL = re.compile(r"\{\{\s*([\w.-]+)\s*\}\}")
 ROOTS = {"input", "run", "now", "vars", "item", "index"}  # template roots that are not node ids, so not allowed as ids
 RUN_KEYS = {"branch", "id", "visit", "trigger"}
 MAX_ITEMS = 50  # a foreach's default max_items
+INPUT_TYPES = ("string", "number", "bool", "json")  # a trigger input's type (coerce_inputs)
+BOOLS = {"true": True, "1": True, "yes": True, "on": True, "false": False, "0": False, "no": False, "off": False}
 # a node type's output fields, as proc.run_agent / run_shell and the engine write them (warnings() checks refs against them)
 OUT_KEYS = {"trigger": {"input"}, "agent": {"result", "structured_output", "is_error", "subtype"},
             "shell": {"exit_code", "stdout_tail", "stderr_tail", "duration_ms"}, "if": {"value"}, "switch": {"case"},
@@ -59,6 +63,45 @@ def load(src) -> dict:
     workflow: legacy `workflows/*.yaml|md` files are frontmatter plus a body."""
     g = (next(yaml.safe_load_all(Path(src).read_text()), None) if isinstance(src, (str, Path)) else dict(src)) or {}
     return g | {"nodes": g.get("nodes") or [], "edges": g.get("edges") or []}
+
+
+def coerce_inputs(trigger: dict, given: dict) -> dict:
+    """A run's typed inputs: given {name: value} checked against the trigger's `inputs` and coerced (a number from
+    "3" or "2.5", a bool from true/1/yes/on or false/0/no/off, json from its text); an absent, None or "" value takes
+    the default, else is "<name> is required" when required, else is left out. ValueError with every problem, '; '-joined."""
+    decl = trigger.get("inputs") or []
+    names = [i["name"] for i in decl]
+    errs = [f"unknown input {x}; declared: {', '.join(names)}" for x in given if x not in names]
+    out = {}
+    for i in decl:
+        name, t, v = i["name"], i.get("type") or "string", given.get(i["name"])
+        if v is None or v == "":
+            if i.get("default") is None:
+                errs += [f"{name} is required"] if i.get("required") else []
+                continue
+            v = i["default"]
+        if t == "string" and isinstance(v, (str, int, float)) and not isinstance(v, bool):
+            out[name] = str(v)
+        elif t == "number" and isinstance(v, (int, float)) and not isinstance(v, bool):
+            out[name] = v
+        elif t == "number" and isinstance(v, str) and NUM.fullmatch(v):
+            out[name] = int(v) if re.fullmatch(r"\s*-?[0-9]+\s*", v) else float(v)
+        elif t == "bool" and isinstance(v, bool):
+            out[name] = v
+        elif t == "bool" and isinstance(v, str) and v.strip().lower() in BOOLS:
+            out[name] = BOOLS[v.strip().lower()]
+        elif t == "json" and isinstance(v, str):
+            try:
+                out[name] = json.loads(v)
+            except ValueError as e:
+                errs.append(f"input {name} is not valid JSON: {e}")
+        elif t == "json":
+            out[name] = v
+        else:
+            errs.append(f"input {name} must be a {t}{' (true/false)' if t == 'bool' else ''}, got {v!r}")
+    if errs:
+        raise ValueError("; ".join(errs))
+    return out
 
 
 def _handle(e: dict) -> str:
@@ -180,6 +223,30 @@ def validate(g: dict) -> list[dict]:
             err(f"duplicate node id {nid}", nid)
         if t not in TYPES:
             err(f"unknown node type {t!r}", nid)
+        if t == "trigger" and n.get("inputs") is not None:  # FR-036: typed run inputs, {{input.<name>}}
+            decl = n["inputs"]
+            if not isinstance(decl, list) or not all(isinstance(i, dict) for i in decl):
+                err("trigger inputs must be a list of {name, type, required, default, description}", nid)
+                decl = []
+            seen = set()
+            for i in decl:
+                name, it = i.get("name"), i.get("type") or "string"
+                if not isinstance(name, str) or not SLUG.fullmatch(name):
+                    err(f"bad input name {name!r}: use letters, digits, - or _", nid)
+                elif name in seen:
+                    err(f"duplicate input {name}", nid)
+                seen.add(name)
+                if it not in INPUT_TYPES:
+                    err(f"input {name}: type must be string, number, bool or json, not {it!r}", nid)
+                if "required" in i and type(i["required"]) is not bool:
+                    err(f"input {name}: required must be true or false", nid)
+                if "description" in i and not isinstance(i["description"], str):
+                    err(f"input {name}: description must be text", nid)
+                if it in INPUT_TYPES and isinstance(name, str):
+                    try:
+                        coerce_inputs({"inputs": [{"name": name, "type": it}]}, {name: i.get("default")})
+                    except ValueError as e:
+                        err(f"input {name}: bad default: {e}", nid)
         if t == "agent" and not (n.get("prompt") or n.get("cap")):
             err("an agent node needs a prompt or a cap", nid)
         if t == "agent" and n.get("permission_mode") not in PERMS:
@@ -345,6 +412,7 @@ def warnings(g: dict) -> list[dict]:
         byid = {n.get("id"): n for n in nodes}
         rev = [(e.get("to"), e.get("from")) for e in g["edges"]]
         vs = g["vars"] if isinstance(g.get("vars"), dict) else {}
+        decl = [i.get("name") for n in nodes if n.get("type") == "trigger" for i in n.get("inputs") or []]
         for n in nodes:
             nid = n.get("id")
             anc = set().union(*(_reach(a, rev) for b, a in rev if b == nid))  # nid itself only when it sits on a cycle
@@ -356,6 +424,8 @@ def warnings(g: dict) -> list[dict]:
                     msg = f"run has no field {field} ({', '.join(sorted(RUN_KEYS))})"
                 elif root == "vars" and field and field not in vs:
                     msg = f"no vars entry {field}"
+                elif root == "input" and field and decl and field not in decl:  # free-text {{input}}: no names to check
+                    msg = f"no declared input {field} ({', '.join(map(str, decl))})"
                 elif src is None:  # input, now, a good run/vars ref, or a root that names no node
                     continue
                 elif root not in anc:

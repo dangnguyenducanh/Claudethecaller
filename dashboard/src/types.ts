@@ -101,11 +101,13 @@ export type NodeType = 'trigger' | 'agent' | 'shell' | 'if' | 'switch' | 'approv
 export type Op = 'eq' | 'ne' | 'gt' | 'ge' | 'lt' | 'le' | 'contains' | 'not_contains' | 'regex' | 'exists' | 'truthy'
 export interface Condition { path: string; op: Op; value?: unknown }
 export interface SwitchCase { name: string; conditions: Condition[]; combine?: 'and' | 'or' }
+export interface RunInput { name: string; type?: 'string' | 'number' | 'bool' | 'json'; required?: boolean; default?: unknown; description?: string } // trigger inputs, as graph.validate checks them
 export interface WfNode {
   id: string; type: NodeType; pos: [number, number]; max_visits?: number
   notes?: string // any node type, shown on hover
   disabled?: boolean // any node but trigger, IF, Switch and For-each: runs pass straight through
-  input?: string // trigger
+  input?: string // trigger: the free-text {{input}} default
+  inputs?: RunInput[] // trigger: typed run inputs, read as {{input.<name>}}; every run start checks and coerces them
   prompt?: string; cap?: string; agent?: string; model?: string; effort?: string; permission_mode?: 'acceptEdits' | 'dontAsk' | 'plan' // agent
   allowed_tools?: string[]; mcp_config?: unknown; json_schema?: unknown; resume_from?: string; max_turns?: number
   readonly?: boolean // agent only: read tools + dontAsk; ready readonly agents batch in parallel
