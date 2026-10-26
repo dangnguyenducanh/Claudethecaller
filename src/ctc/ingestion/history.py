@@ -26,7 +26,9 @@ from ctc.ai.extract import INJECTED, extract_session, transcript_cwd
 from ctc.config import cfg
 from ctc.decision.bundle import decide, followed
 from ctc.ingestion.scanner import project_id
+from ctc.llm.client import _redact
 from ctc.memory.longterm import Memory, write_memory
+from ctc.memory.tags import strip_tags
 from ctc.retrieval.hybrid import search
 from ctc.runner.engine import in_runs
 from ctc.server.hooks import MAX_Q
@@ -304,6 +306,7 @@ async def _distill(st, sid: str, s: dict) -> dict:
     items, by_ref, by_text = [], {}, {}
     for i, (ts, raw, text) in enumerate(p["prompts"]):
         nxt = p["prompts"][i + 1][0] if i + 1 < len(p["prompts"]) else "￿"
+        raw, text = (_redact(strip_tags(x)) for x in (raw, text))  # as the live hook did, so one prompt keeps one ref
         window = [(tool, name) for t, tool, name in p["tools"] if ts and ts <= t < nxt]
         ref = hashlib.sha256((sid + raw).encode()).hexdigest()[:8]
         if ref in by_ref:
@@ -519,7 +522,7 @@ if __name__ == "__main__":
                 "content": [{"type": "tool_use", "id": f"tu-{mid}", "name": "Skill", "input": {"skill": skill}}]}}
 
     RAW = ["zebra-raw-1 please write the failing tests first for the parser using TDD", "zebra-raw-2 deploy the service to production now",
-           "zebra-raw-3 review my diff for bugs", "zebra-raw-4 write tests first with TDD for the utils", "/commit zebra-raw-5"]
+           "zebra-raw-3 review my diff for bugs", "zebra-raw-4 write tests first <private>zebra-secret</private>with TDD for the utils", "/commit zebra-raw-5"]
     home = Path(tempfile.mkdtemp())
     app = home / "projects" / "-x-app"
     s1 = jl(app / "s1.jsonl", [
@@ -546,13 +549,15 @@ if __name__ == "__main__":
                 ("deploy", "Deploy the service to production"), ("review", "Review a diff for bugs before merging"))]
             await s.upsert(caps, ["user"])
             await s.insert_vectors([(x.id, "t", "m", doc_text(x), v) for x, v in zip(caps, await st.embedder.embed([doc_text(x) for x in caps], "doc"))])
-            # a live hook session: raw title, a raw decision for RAW[3] and one for a slash command, a PostToolUse event
+            # a live hook session: raw title, a raw decision for RAW[3] and one for a slash command, a PostToolUse event;
+            # RAW[3] carries a <private> block, so the hook stored (and hashed) it stripped
+            H3 = _redact(strip_tags(RAW[3]))
             await s.ensure_project("/x/app")
             pid = project_id("/x/app")
             hb = lambda raw: Jsonb({"intent": raw, "abstained": False, "steps": [{"order": 1, "cap_id": "user:tdd", "invoke": "tdd", "kind": "skill", "reason": "r"}]})
-            await s.execute("insert into sessions (id, project_id, title, turns) values ('s2', %s, %s, 2)", (pid, RAW[3]))
+            await s.execute("insert into sessions (id, project_id, title, turns) values ('s2', %s, %s, 2)", (pid, H3))
             await s.executemany("insert into decisions (session_id, project_id, ref, prompt, abstained, bundle, at) values ('s2', %s, %s, %s, false, %s, %s)",
-                                [(pid, hashlib.sha256(("s2" + r).encode()).hexdigest()[:8], r, hb(r), T(at)) for r, at in ((RAW[3], 20), (RAW[4], 22))])
+                                [(pid, hashlib.sha256(("s2" + r).encode()).hexdigest()[:8], r, hb(r), T(at)) for r, at in ((H3, 20), (RAW[4], 22))])
             await s.execute("insert into events (session_id, type, payload, at) values ('s2', 'tool', %s, %s)", (Jsonb({"tool": "Skill", "name": "tdd"}), T(21)))
 
             # phase 1: structure only; a second scan reads nothing and writes nothing
@@ -598,6 +603,9 @@ if __name__ == "__main__":
             hk = {r["ref"]: r for r in await s.fetch("select * from decisions where session_id = 's2'")}
             assert len(hk) == 2 and all(r["source"] == "hook" and r["prompt"].startswith("asks for step") and r["bundle"]["intent"] == r["prompt"] for r in hk.values())
             assert sorted(r["followed"] for r in hk.values()) == [False, True], hk
+            # m7: the distilled prompt that had a <private> block hashes to the live hook row's ref (not just its text)
+            h3 = hashlib.sha256(("s2" + H3).encode()).hexdigest()[:8]
+            assert h3 in hk and "history_ref" not in hk[h3]["bundle"], hk
 
             # SessionEnd path: scan the one file, distill again; guards on the path
             st.llm = Stub(echo=True)  # an intent that copies its prompt is dropped
@@ -630,7 +638,7 @@ if __name__ == "__main__":
             # privacy: no raw prompt, tool output or meta text anywhere the import wrote
             dump = " ".join([str(x) for t in ("history_files", "sessions", "events", "decisions", "memories")
                              for x in await s.fetch(f"select * from {t}")])
-            assert not re.search(r"zebra-(raw|sub|tool|meta|nocwd)", dump), re.findall(r".{40}zebra-\w+.{20}", dump)
+            assert not re.search(r"zebra-(raw|sub|tool|meta|nocwd|secret)", dump), re.findall(r".{40}zebra-\w+.{20}", dump)
             print("synthetic: scan x2, 2 sessions distilled (stub LLM), followed, outcomes, privacy ok")
 
             # ONE real transcript (read-only), the real local LLM: one Distill + one A3 call (<= 3 with a retry)

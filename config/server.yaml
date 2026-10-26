@@ -20,3 +20,11 @@ db_pool: {min: 3, max: 5}   # a route runs up to 3 queries at once; a cold Supab
 runner: {claude_version: "2.1.306", idle_wait_min: 15, poll_s: 1.5}   # workflow runner (PLAN.md m5); runs refuse any other `claude --version`
 # m6 background extractor (graph/extract.py): claude -p cwd + log (`~` expanded there), haiku calls per job, seconds per call
 graph_extract: {dir: ~/.claudethecaller/extract, max_chunks_per_run: 40, timeout_s: 120}
+# m7 claude-mem memory (src/ctc/memory/observe.py, observations.py). enabled is the go-live switch: false = no observe job queued,
+# /v1/hook/start answers empty, the memory_* tools say "memory is off".
+memory:
+  enabled: false
+  observe: {max_calls_per_job: 8, chunk_chars: 32000, field_max_chars: 16000, prior_titles: 20,   # claude -p calls, chars per call / per tool field, titles shown to skip repeats
+            skip_tools: [ListMcpResourcesTool, SlashCommand, Skill, TodoWrite, AskUserQuestion], skip_bash_patterns: []}   # skip_bash_patterns: regexes on a Bash command
+  context: {observations: 50, sessions: 10, full_count: 0, limit_chars: 10000, ttl_s: 600}   # SessionStart index: rows, sessions, rows printed in full, char budget, Redis ttl
+  search: {recency_days: 90}   # window for memory_search; 0 = none; an explicit date range wins

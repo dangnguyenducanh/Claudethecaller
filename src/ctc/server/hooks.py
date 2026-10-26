@@ -27,8 +27,10 @@ from ctc.decision.bundle import Bundle, decide, followed, stage_rows, suggestion
 from ctc.graph import core, push
 from ctc.graph.extract import SOURCE, prose
 from ctc.ingestion.scanner import project_id
+from ctc.llm.client import _redact
 from ctc.memory.longterm import recall
 from ctc.memory.session import blend, project_vector, session_vector
+from ctc.memory.tags import strip_tags
 from ctc.retrieval.hybrid import result_json, search
 from ctc.runner.engine import in_runs
 from ctc.server.jobs import submit
@@ -145,7 +147,8 @@ async def _prompt(st: State, body: dict, user_id: str) -> str:
     """Route one UserPromptSubmit and write its session + decision rows; never raises."""
     try:
         prompt, sid, cwd = (str(body.get(f) or "") for f in ("prompt", "session_id", "cwd"))
-        if not (prompt.strip() and sid and cwd) or _in_run(body):
+        prompt = _redact(strip_tags(prompt))  # m7 FR-004: <private> text and secrets never reach route(), decisions or the title
+        if not (prompt and sid and cwd) or _in_run(body):
             return ""
         pid = project_id(cwd)
         if (user_id, pid) not in st.names:  # first sight in this worker: the row (FK of sessions), then its .claude/ caps
