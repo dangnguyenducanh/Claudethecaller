@@ -1,9 +1,12 @@
-"""/mcp over streamable HTTP (mcp 2.x MCPServer): find_capabilities (PLAN.md B5, B6); run_workflow and workflow_status
-(m5 WB13: local mode only, this login's runs, through server/runs.py's submit and read paths)."""
+"""/mcp over streamable HTTP (mcp 2.x MCPServer): find_capabilities (PLAN.md B5, B6); the run tools list_workflows,
+run_workflow, workflow_status, approve_run, reject_run, continue_run and cancel_run (m5 WB13, n8n-parity US4: local
+mode only, this login's runs, through server/runs.py's route helpers, so the dashboard's code path and owner scoping)."""
 
 from __future__ import annotations
 
 import contextlib
+import json
+from typing import Any, Literal
 
 from fastapi import HTTPException
 from mcp.server.mcpserver import Context, MCPServer
@@ -13,9 +16,14 @@ from mcp_types import CallToolResult, TextContent
 from ctc.decision.bundle import plan_text
 from ctc.server import runs
 from ctc.server.hooks import cached_bundle, route
+from ctc.server.library import _caps
 from ctc.server.state import State
 
-mcp = MCPServer("claudethecaller", instructions="Routes a coding task to the installed skills, agents, commands and workflows.")
+mcp = MCPServer("claudethecaller", instructions=(
+    "Routes a coding task to the installed skills, agents, commands and workflows (find_capabilities), and runs ctc "
+    "workflows on this machine: list_workflows, run_workflow, workflow_status, approve_run, reject_run, continue_run, "
+    "cancel_run."))
+STEP_OUT_MAX = 2000  # chars of a step's output or error in workflow_status
 state: State | None = None  # this worker's State; mcp_app() sets it from the FastAPI app on each request
 
 
@@ -48,28 +56,96 @@ def _api_errors():
 
 
 @mcp.tool()
-async def run_workflow(workflow: str, input: str = "", ctx: Context | None = None) -> dict:
+async def run_workflow(workflow: str, input: str = "", project: str | None = None, ctx: Context | None = None) -> dict[str, Any]:
     """Start a saved ctc workflow on this machine's Claude login, in its own git worktree and branch. `workflow` is its
-    capability id or its unique name; `input` fills {{input}}. Returns {run_id} at once; then call workflow_status."""
+    capability id or its unique name; `input` fills {{input}}; `project` (a project name) is where a user or plugin
+    workflow runs, by default the project of your latest prompt. Returns {run_id} at once; then call workflow_status."""
     with _api_errors():
         st, u, o = await runs.scope(state, _user(ctx))
         ids = [workflow] if workflow in st.store.catalog else sorted(
             i for i, c in st.store.catalog.items() if c["kind"] == "workflow" and c["name"] == workflow)
         if len(ids) != 1:
             raise ToolError(f"{workflow!r} names {len(ids)} workflows; pass one id of {ids}" if ids else f"no workflow {workflow!r}")
-        return {"run_id": await runs.submit_run(st, u, o, ids[0], input, trigger="mcp")}
+        if project is None and not st.store.catalog[ids[0]]["namespace"].startswith("project@"):
+            # ponytail: MCP over HTTP carries no cwd, so the latest hooked prompt's project stands in for it; two sessions
+            # in different projects may pick the other one (pass project to be exact)
+            project = await st.store.fetchval(
+                "select p.name from decisions d join projects p on p.user_id = d.user_id and p.id = d.project_id"
+                " where d.user_id = %s order by d.at desc limit 1", (u,))
+        return {"run_id": await runs.submit_run(st, u, o, ids[0], input, project, "mcp")}
 
 
 @mcp.tool()
-async def workflow_status(run_id: int, ctx: Context | None = None) -> dict:
-    """A workflow run's {status (queued, running, waiting, done, failed, cancelled, quota), error, quota_resets_at,
-    steps: [{node_id, visit, status}]}."""
+async def list_workflows(ctx: Context | None = None) -> dict[str, Any]:
+    """The saved ctc workflows: {workflows: [{id, name, scope (user, project, plugin), project (its name, for a project's
+    workflow), description, has_schedule (this login's schedule is on)}]}."""
     with _api_errors():
         st, u, o = await runs.scope(state, _user(ctx))
-        r = await runs._run(st, u, o, run_id)
-        steps = await st.store.fetch("select node_id, visit, status from wf_steps where run_id = %s order by id", (run_id,))
-        return {"status": r["status"], "error": r["error"],
-                "quota_resets_at": r["quota_resets_at"] and r["quota_resets_at"].isoformat(), "steps": steps}
+        rows = await _caps(st, u, None, kind="workflow", detail=True, n=500)
+    names = {r["id"]: r["name"] for r in await st.store.fetch("select id, name from projects where user_id = %s", (u,))}
+    sched = {r["workflow"] for r in await st.store.fetch("select workflow from wf_schedules where owner = %s and enabled", (o,))}
+    return {"workflows": [{
+        "id": r["id"], "name": r["name"], "description": r["description"], "has_schedule": r["id"] in sched,
+        "scope": "user" if r["namespace"] == "user" else "project" if r["namespace"].startswith("project@") else "plugin",
+        "project": names.get(r["namespace"].removeprefix("project@")) if r["namespace"].startswith("project@") else None}
+        for r in rows]}
+
+
+def _cut(v):
+    """A step's output or error as text of at most STEP_OUT_MAX chars (dicts as JSON); the run page has it all."""
+    if v is None:
+        return None
+    t = v if isinstance(v, str) else json.dumps(v, default=str)
+    return t if len(t) <= STEP_OUT_MAX else f"{t[:STEP_OUT_MAX]}... [{len(t) - STEP_OUT_MAX} more chars: see the run page]"
+
+
+@mcp.tool()
+async def workflow_status(run_id: int, ctx: Context | None = None) -> dict[str, Any]:
+    """A workflow run (GET /runs/{id}): {run_id, workflow, status (queued, running, waiting, done, failed, cancelled,
+    quota), error, branch, pr_url, tokens, quota_resets_at, steps: [{node_id, visit, kind, status, error, output (cut),
+    tokens, input (a waiting approval's message), marker}]}."""
+    with _api_errors():
+        r = await runs.detail(*(await runs.scope(state, _user(ctx))), run_id)
+    steps = [{"node_id": s["node_id"], "visit": s["visit"], "kind": s["kind"], "status": s["status"], "error": _cut(s["error"]),
+              "output": _cut(s["output"]), "tokens": s["tokens"]}
+             | ({"input": s["input"]} if s["status"] == "waiting" else {}) | ({"marker": s["marker"]} if s["marker"] else {})
+             for s in r["steps"]]
+    return {"run_id": r["id"], "workflow": r["workflow"], "status": r["status"], "error": r["error"], "branch": r["branch"],
+            "pr_url": r["pr_url"], "tokens": r["tokens"],
+            "quota_resets_at": r["quota_resets_at"] and r["quota_resets_at"].isoformat(), "steps": steps}
+
+
+async def _control(ctx: Context | None, fn, run_id: int, *args) -> dict[str, Any]:
+    """One of runs.py's control helpers (the dashboard's route code and owner scoping) -> {run_id, status, error}."""
+    with _api_errors():
+        r = await fn(*(await runs.scope(state, _user(ctx))), run_id, *args)
+    return {"run_id": r["id"], "status": r["status"], "error": r["error"]}
+
+
+@mcp.tool()
+async def approve_run(run_id: int, note: str | None = None, ctx: Context | None = None) -> dict[str, Any]:
+    """Approve a run waiting at an approval node: it walks on (status queued). Returns {run_id, status, error}."""
+    return await _control(ctx, runs.approve, run_id, True, note)
+
+
+@mcp.tool()
+async def reject_run(run_id: int, note: str | None = None, ctx: Context | None = None) -> dict[str, Any]:
+    """Reject a run waiting at an approval node: it ends (status cancelled). Returns {run_id, status, error}."""
+    return await _control(ctx, runs.approve, run_id, False, note)
+
+
+@mcp.tool()
+async def continue_run(run_id: int, when: Literal["now", "reset"] = "reset", ctx: Context | None = None) -> dict[str, Any]:
+    """Continue a run stopped at a usage limit (status quota): now, or by itself at its usage reset. Returns {run_id,
+    status, error}."""
+    return await _control(ctx, runs.resume, run_id, when == "now")
+
+
+@mcp.tool()
+async def cancel_run(run_id: int, ctx: Context | None = None) -> dict[str, Any]:
+    """Cancel a queued, running, waiting or quota run (a running node's processes are stopped). Returns {run_id, status,
+    error}."""
+    return await _control(ctx, runs.cancel, run_id)
 
 
 def mcp_app():
