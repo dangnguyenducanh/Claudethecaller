@@ -34,7 +34,7 @@ description: "Task list for m7 claude-mem memory in the Memories feature"
 
 ## Phase 1: Setup (lead, before wave 1)
 
-- [ ] T000 (lead, **owner yes**) Isolate the work from the live daemon (it runs from the main checkout and serves its `dashboard/dist`):
+- [x] T000 (lead, **owner yes**) Isolate the work from the live daemon (it runs from the main checkout and serves its `dashboard/dist`):
   1. Commit the docs on `m7-memory`: `docs(m7): claude-mem port inventory, spec, plan and tasks`.
   2. In the main checkout run `git checkout m6-graph` (where it was before m7).
   3. `git worktree add .worktrees/m7 m7-memory` (the repo's existing `.worktrees/<name>` convention).
@@ -45,7 +45,7 @@ description: "Task list for m7 claude-mem memory in the Memories feature"
   - With the scratch URL exported, `uv run python -c "import os,psycopg; print(psycopg.connect(os.environ['CTC_DATABASE_URL']).execute(\"select count(*) from pg_available_extensions where name in ('vector','unaccent')\").fetchone())"` prints `(2,)`.
   - `curl -s 127.0.0.1:18300/health` answers.
   - Scratch Redis: **(owner yes)** `docker run -d --rm --name ctc-scratch-redis -p 127.0.0.1:18395:6379 redis:8.2` (as in the `scripts/check.sh` header), then `uv run python -c "import redis; print(redis.Redis(port=18395).ping())"` prints `True` (`redis-cli` is not installed on this host). Never use the real Redis on `:18303` for scratch work.
-- [ ] T002 (lead) Baseline in the worktree on `m7-memory`: `env -u CTC_DATABASE_URL scripts/check.sh`, `scripts/check.sh` with the scratch URL and `CTC_REDIS_URL` on the scratch Redis, and `pnpm -C dashboard build` (the worktree's own dist) all succeed. Keep the outputs for the PR body. If the base is red, stop and report in one line.
+- [x] T002 (lead) Baseline in the worktree on `m7-memory`: `env -u CTC_DATABASE_URL scripts/check.sh`, `scripts/check.sh` with the scratch URL and `CTC_REDIS_URL` on the scratch Redis, and `pnpm -C dashboard build` (the worktree's own dist) all succeed. Keep the outputs for the PR body. If the base is red, stop and report in one line.
 
 ---
 
@@ -65,7 +65,7 @@ description: "Task list for m7 claude-mem memory in the Memories feature"
 - `src/ctc/ingestion/history.py`
 - `tests/test_memory_tags.py` (new)
 
-- [ ] T003 [P] Write `tests/test_memory_tags.py` first. It fails until T004–T009 exist.
+- [x] T003 [P] Write `tests/test_memory_tags.py` first. It fails until T004–T009 exist.
   - **`strip_tags` (DB-free):**
     - `a <private>x</private> b` → `a  b`, stripped to `a  b`;
     - nested `<private>a<private>b</private>c</private>` → empty;
@@ -83,34 +83,34 @@ description: "Task list for m7 claude-mem memory in the Memories feature"
     - a second summary with the same `(session_id, prompt_number)` conflicts;
     - a new session row has `observed_bytes = 0` and `observed_prompts = 0`;
     - re-opening the store re-applies the schema without error.
-- [ ] T004 In `src/ctc/storage/schema.sql`, after the `memories` block, append the DDL from inventory §3, as summarized in [data-model.md](data-model.md), in the file's `{schema}` style:
+- [x] T004 In `src/ctc/storage/schema.sql`, after the `memories` block, append the DDL from inventory §3, as summarized in [data-model.md](data-model.md), in the file's `{schema}` style:
   - the `obs_text(...)` immutable SQL function;
   - `observations` with `type text not null check (type in ('bugfix','feature','refactor','change','discovery','decision','security_alert','security_note','sensitive'))`, `title text not null`, `text[]` fields `default '{}'`, `content_hash text not null`, `embedding extensions.vector(1024) not null`, `tsv … generated always as (…) stored`, `unique (session_id, content_hash)`, the FKs `on delete cascade`, and the indexes `observations_recent`, `observations_tsv` (GIN) and `observations_hnsw` (`vector_cosine_ops`);
   - `session_summaries` with `unique (session_id, prompt_number)`, `summaries_recent` and `summaries_tsv`;
   - `alter table {schema}.sessions add column if not exists observed_bytes bigint not null default 0, add column if not exists observed_prompts int not null default 0;`;
   - `enable row level security` lines for both tables in the RLS block (L295-312).
-- [ ] T005 [P] Create `src/ctc/memory/tags.py` with the attribution header (source `src/utils/tag-stripping.ts`). Contents:
+- [x] T005 [P] Create `src/ctc/memory/tags.py` with the attribution header (source `src/utils/tag-stripping.ts`). Contents:
   - `TAG_NAMES` = `("private","claude-mem-context","ctc-memory-context","system_instruction","system-instruction","persisted-output","system-reminder")`;
   - `strip_tags(text) -> str`: a linear scan translated from `<cm>/src/utils/tag-stripping.ts` L4-227. `MAX_TAG_COUNT = 100` only logs a warning above it (every tag is still stripped, as upstream). **Deliberate divergence (privacy-first):** upstream leaves an unclosed tag untouched, ours strips an unbalanced opener to the end of the text. Say so in the header's `Changes:` line. Result `.strip()`ed;
   - a `__main__` assert self-check covering the T003 string cases.
-- [ ] T006 [P] In `src/ctc/llm/client.py`, extend the patterns used by `_redact` with every entry of `BUILTIN_REDACTION_PATTERNS` (`<cm>/src/utils/redaction.ts` L63-95: aws_access_key, aws_secret_key, aws_session_token, github_pat incl. `gh[oprsu]_`, slack, jwt, PEM private key, stripe, google) and `GENERIC_REDACTION_PATTERNS` (L107-109; on for us, because the store is cloud Supabase, D14). Add an unterminated-key pattern: `-----BEGIN [A-Z ]*PRIVATE KEY[^-]*-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY[^-]*-----|\Z)`. Keep the existing marker format and add one comment line citing the source. `_redact`'s signature does not change.
-- [ ] T007 [P] Copy `<cm>/LICENSE` and `<cm>/NOTICE` byte for byte into `third_party/claude-mem/LICENSE` and `third_party/claude-mem/NOTICE`. Create `config/observe-mode.yaml` from `<cm>/plugin/modes/code.json`:
+- [x] T006 [P] In `src/ctc/llm/client.py`, extend the patterns used by `_redact` with every entry of `BUILTIN_REDACTION_PATTERNS` (`<cm>/src/utils/redaction.ts` L63-95: aws_access_key, aws_secret_key, aws_session_token, github_pat incl. `gh[oprsu]_`, slack, jwt, PEM private key, stripe, google) and `GENERIC_REDACTION_PATTERNS` (L107-109; on for us, because the store is cloud Supabase, D14). Add an unterminated-key pattern: `-----BEGIN [A-Z ]*PRIVATE KEY[^-]*-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY[^-]*-----|\Z)`. Keep the existing marker format and add one comment line citing the source. `_redact`'s signature does not change.
+- [x] T007 [P] Copy `<cm>/LICENSE` and `<cm>/NOTICE` byte for byte into `third_party/claude-mem/LICENSE` and `third_party/claude-mem/NOTICE`. Create `config/observe-mode.yaml` from `<cm>/plugin/modes/code.json`:
 
   ```bash
   python3 -c "import json,yaml,sys; print(yaml.safe_dump(json.load(open(sys.argv[1])), sort_keys=False, allow_unicode=True, width=10000))" <cm>/plugin/modes/code.json
   ```
 
   Prepend the header line from contracts/observe-mode.md. Check that `yaml.safe_load` of the result equals `json.load` of the source.
-- [ ] T008 [P] In `config/server.yaml`, add the `memory:` block (inventory §5 config, one line each, with a one-line comment). First `enabled: false`, the go-live switch: while it is false no `observe` job is queued, `/v1/hook/start` answers empty and the `memory_*` tools answer "memory is off"; the owner flips it at T057 and tests set it with a `cfg` monkeypatch. Then:
+- [x] T008 [P] In `config/server.yaml`, add the `memory:` block (inventory §5 config, one line each, with a one-line comment). First `enabled: false`, the go-live switch: while it is false no `observe` job is queued, `/v1/hook/start` answers empty and the `memory_*` tools answer "memory is off"; the owner flips it at T057 and tests set it with a `cfg` monkeypatch. Then:
   - `observe: {max_calls_per_job: 8, chunk_chars: 32000, field_max_chars: 16000, prior_titles: 20, skip_tools: [ListMcpResourcesTool, SlashCommand, Skill, TodoWrite, AskUserQuestion], skip_bash_patterns: []}`
   - `context: {observations: 50, sessions: 10, full_count: 0, limit_chars: 10000, ttl_s: 600}`
   - `search: {recency_days: 90}`
-- [ ] T009 [US6] Apply `prompt = _redact(strip_tags(prompt))` (FR-004):
+- [x] T009 [US6] Apply `prompt = _redact(strip_tags(prompt))` (FR-004):
   - **`src/ctc/server/hooks.py` `_prompt`:** at the top, before `route()`, the `decisions` write and the `sessions.title = prompt[:200]` write. If the stripped prompt is empty, return `""` with no route and no writes.
   - **`src/ctc/ai/extract.py`:** apply both to the prompt text before it is sent to the LLM. Keep `INJECTED` for what it already matches.
   - **`src/ctc/ingestion/history.py`:** apply both to each typed prompt **before** `ref = sha256(sid + raw)[:8]` and the `by_text` keys are computed (L302-308), so a live hook row and its distilled transcript prompt still share one `ref` (otherwise distill inserts a second decision for any prompt containing a tag or a secret). Add one case to `history.check()`: `fix <private>k</private> bug` gives the hook row and the distill item the same ref.
   - Change nothing else in these files.
-- [ ] T010 Done-when (builder A):
+- [x] T010 Done-when (builder A):
   - `uv run pytest -q tests/test_memory_tags.py` passes with the scratch URL.
   - `uv run python -m ctc.memory.tags` exits 0, and `uv run python -m ctc.ingestion.history` (its self-check, scratch URL exported) still passes.
   - `uv run pytest -q tests` (m6 graph tests included) still passes.
@@ -134,8 +134,8 @@ description: "Task list for m7 claude-mem memory in the Memories feature"
 
 **Owns**: `dashboard/src/Memories.tsx`, `dashboard/src/parts.tsx`, `dashboard/src/Sessions.tsx`, `dashboard/src/Jobs.tsx`, `dashboard/src/App.tsx`, `dashboard/src/types.ts`, `dashboard/src/api.ts`, `dashboard/src/mock.ts`, `dashboard/src/styles.css`.
 
-- [ ] T011 [P] [US4] In `dashboard/src/types.ts`, add `ObsType`, `Observation`, `Summary`, `PromptItem`, `FeedItem` and `FeedCounts` exactly as in contracts/api.md. Add `observations?: number` to `Session`. Change `SessionDetail` to `Omit<Session, 'decisions' | 'memories' | 'observations'> & {…; observations?: Observation[]; summaries?: Summary[]}`, otherwise the field becomes `number & Observation[]` and `mock.ts`'s `satisfies SessionDetail` fails.
-- [ ] T012 [US4] In `dashboard/src/mock.ts`:
+- [x] T011 [P] [US4] In `dashboard/src/types.ts`, add `ObsType`, `Observation`, `Summary`, `PromptItem`, `FeedItem` and `FeedCounts` exactly as in contracts/api.md. Add `observations?: number` to `Session`. Change `SessionDetail` to `Omit<Session, 'decisions' | 'memories' | 'observations'> & {…; observations?: Observation[]; summaries?: Summary[]}`, otherwise the field becomes `number & Observation[]` and `mock.ts`'s `satisfies SessionDetail` fails.
+- [x] T012 [US4] In `dashboard/src/mock.ts`:
   - **Seed data:**
     - at least 36 observations covering all 9 types across 2 projects, 3 sessions and 3 days, with realistic titles, facts, concepts and files;
     - at least 5 summaries;
@@ -146,16 +146,16 @@ description: "Task list for m7 claude-mem memory in the Memories feature"
     - observation and summary delete/restore (soft: set `deleted_at`, hidden from the feed);
     - `jobs?kind=observe` returning one `running` job.
   - **Context sample:** the inventory §5 text, returned as JSON `{text}`.
-- [ ] T013 [US4] In `dashboard/src/api.ts`, add `memFeed`, `memFeedCounts`, `memTimeline`, `memContext`, `obsDelete`, `obsRestore`, `sumDelete` and `sumRestore`, using the file's existing request and mock-fallback pattern. Paths and params are those in contracts/api.md. `memContext(project)` returns `(await req<{text: string}>(…)).text`: the route returns JSON `{text}` because the file's `req()` parses only JSON and would return `undefined` for text/plain.
-- [ ] T014 [P] [US4] In `dashboard/src/styles.css`:
+- [x] T013 [US4] In `dashboard/src/api.ts`, add `memFeed`, `memFeedCounts`, `memTimeline`, `memContext`, `obsDelete`, `obsRestore`, `sumDelete` and `sumRestore`, using the file's existing request and mock-fallback pattern. Paths and params are those in contracts/api.md. `memContext(project)` returns `(await req<{text: string}>(…)).text`: the route returns JSON `{text}` because the file's `req()` parses only JSON and would return `undefined` for text/plain.
+- [x] T014 [P] [US4] In `dashboard/src/styles.css`:
   - Add the tokens `--obs`, `--obs-bg`, `--sum`, `--sum-bg`, `--sum-text`, `--prompt` and `--prompt-bg` for dark and light. Start from inventory §7: dark obs `#527aa0`/`#1a2332`, sum `#7a6a50`/`#2a2724`/text `#d4b888`, prompt `#6e5b9e`/`#262033`; light obs `#0969da`/`#f0f6fb`, sum `#d4a72c`/`#fffbf0`, prompt `#8250df`/`#f6f3fb`. Tune them to our near-black background.
   - Add the card classes `.obs-card`, `.sum-card`, `.prompt-card` and `.feed`, with a max-width of 650px.
-- [ ] T015 [US4] In `dashboard/src/parts.tsx`, add `ObservationCard`, `SummaryCard` and `PromptCard`, with an attribution comment citing `<cm>/src/ui/viewer/components/{ObservationCard,SummaryCard,PromptCard}.tsx`. Behaviour per inventory §7:
+- [x] T015 [US4] In `dashboard/src/parts.tsx`, add `ObservationCard`, `SummaryCard` and `PromptCard`, with an attribution comment citing `<cm>/src/ui/viewer/components/{ObservationCard,SummaryCard,PromptCard}.tsx`. Behaviour per inventory §7:
   - **ObservationCard:** type badge, title (17px/600), subtitle, a mutually exclusive facts/narrative toggle (facts shown only when facts, concepts or files exist), concept chips, `read:`/`modified:` file lists, footer `#id • date` in `var(--mono)`, delete via the MemoryCard soft-delete + Undo pattern.
   - **SummaryCard:** `SESSION SUMMARY` badge, `request` headline (20px/600), dashed divider, non-empty sections with the 5 icons inlined as SVG from `<cm>/src/ui/icon-thick-{investigated,learned,completed,next-steps,notes}.svg`, footer `session <id8> • prompt #n • date`; delete via the same soft-delete + Undo pattern using `sumDelete`/`sumRestore`.
   - **PromptCard:** `PROMPT #n` badge, clamped after 8 lines or 600 chars with Show more/less, no delete.
   - No claude-mem name or logo anywhere.
-- [ ] T016 [US4] In `dashboard/src/Memories.tsx`:
+- [x] T016 [US4] In `dashboard/src/Memories.tsx`:
   - **Tabs:** add `Segmented` **Timeline | Long-term**, defaulting to Timeline. Move the current page body unchanged into a `LongTerm` component in the same file.
   - **Header:** `Search` (sets `q`), an "extracting N…" pill (`api.jobs` with kind `observe`, queued + running) and a "Preview context" button.
   - **Chip row**, in the order prompt, summary, discovery, decision, bugfix, feature, refactor, change, security_alert, security_note, each labelled `Label (n)` from `memFeedCounts`. Multi-select; none selected means all. A session chip `session <id8> ✕` shows when the `session` prop is non-null (App sets it from `#memories?session=<id>`, T019); ✕ calls `onClearSession`.
@@ -167,20 +167,20 @@ description: "Task list for m7 claude-mem memory in the Memories feature"
     - end: "No more items to load".
   - **Polling:** every 3 s while `document.visibilityState === 'visible'`, `after=<newest>`, prepend, deduped by `` `${item_type}-${id}` ``. Add a `ponytail:` comment: polling, SSE later.
   - **Inputs:** the project, the global Range and the `session` prop flow into every call. With `q` set the feed is a single page: `hasMore` is false and polling is paused.
-- [ ] T017 [US5] In `dashboard/src/Memories.tsx`, the "Preview context" button (disabled, with a hint, when no project is selected: the route needs one) opens the `Drawer` (ui.tsx) with a `<pre>` of `memContext(project)` and a read-only list of the `memory.context` knobs (static text from the server.yaml defaults).
-- [ ] T018 [US5] In `dashboard/src/Sessions.tsx`:
+- [x] T017 [US5] In `dashboard/src/Memories.tsx`, the "Preview context" button (disabled, with a hint, when no project is selected: the route needs one) opens the `Drawer` (ui.tsx) with a `<pre>` of `memContext(project)` and a read-only list of the `memory.context` knobs (static text from the server.yaml defaults).
+- [x] T018 [US5] In `dashboard/src/Sessions.tsx`:
   - The session list shows an "Obs" count from `observations`.
   - The session drawer lists that session's observations (compact `ObservationCard`) and summaries (`SummaryCard`).
   - It has an "Open in Memories" link to `#memories?session=<id>`.
   - The session delete confirm text says observations and summaries are deleted with the session (FK cascade) while its long-term memories stay.
-- [ ] T019 [P] In `dashboard/src/Jobs.tsx`, add `observe` to `KINDS` (only this one; the missing graph kinds are a separate proposal). In `dashboard/src/App.tsx`:
+- [x] T019 [P] In `dashboard/src/Jobs.tsx`, add `observe` to `KINDS` (only this one; the missing graph kinds are a separate proposal). In `dashboard/src/App.tsx`:
   - add "observations and summaries" to the "Forget project" confirm text;
   - routing for the session filter: `parseHash` also matches `/^memories\?session=([\w-]+)$/` → view `memories` plus a new `memSession` state; the hash-writer effect writes `memories?session=${memSession}` while it is set (otherwise it rewrites the hash to the bare view and drops the query); pass `session={memSession}` and `onClearSession={() => setMemSession(null)}` to `<Memories>`; clicking the nav item clears it.
-- [ ] T020 Done-when (builder B): `pnpm -C dashboard build` (no `VITE_MOCK`) succeeds with no type errors; the last build left in the worktree must be this one, never a `VITE_MOCK=1` build. List any contract question in the report instead of inventing an API. Do not commit.
+- [x] T020 Done-when (builder B): `pnpm -C dashboard build` (no `VITE_MOCK`) succeeds with no type errors; the last build left in the worktree must be this one, never a `VITE_MOCK=1` build. List any contract question in the report instead of inventing an API. Do not commit.
 
 **Lead after wave 1**
 
-- [ ] T021 (lead) Review the O1 and O7 diffs and reports and re-run T010 and T020. Then commit on `m7-memory`, with Conventional Commits + the Co-Authored-By trailer:
+- [x] T021 (lead) Review the O1 and O7 diffs and reports and re-run T010 and T020. Then commit on `m7-memory`, with Conventional Commits + the Co-Authored-By trailer:
   - `feat(memory): observation tables, tag stripping, redaction and claude-mem assets (m7 O1)`
   - `feat(dashboard): Memories timeline tab, memory cards and session drawer (m7 O7)`
 
