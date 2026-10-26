@@ -213,6 +213,36 @@ async def hook_pre(request: Request) -> Response:
     return Response(status_code=200)
 
 
+START_BUDGET_S = 0.9  # curl -m 1 (m7 D16): the one hook allowed 1 s, it runs once per session; a warm ctx: key answers in ms
+STATS = re.compile(r"^Stats: (\d+) obs", re.MULTILINE)  # the index's own count; the welcome text of an empty project has none
+
+
+@router.post("/v1/hook/start")
+async def hook_start(request: Request) -> Response:
+    """SessionStart on startup|clear|compact (m7 FR-006): the project's memory index as additional context, framed as retrieved
+    data. Never creates a project row or a job (a hook in every repo must not opt it in); off, resume, a skipped or run
+    project, a miss that outlives its budget or any error = empty 200."""
+    try:
+        # here, not at the top: observations.py imports hooks._embed itself (circular)
+        from ctc.memory import observations
+        st, user_id, body = _st(request), _user(request), await _body(request)
+        cwd = str(body.get("cwd") or "")
+        pid = project_id(cwd)
+        name = st.names.get((user_id, pid)) or Path(cwd).name
+        if (cwd and st.cfg["memory"]["enabled"] and body.get("source") != "resume" and not _in_run(body)
+                and not {name, Path(cwd).name} & set(st.cfg["history"]["skip_projects"])):
+            text = await asyncio.wait_for(observations.context_text(st, user_id, pid, name), START_BUDGET_S)
+            out = {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}
+            if m := STATS.search(text):
+                out["systemMessage"] = f"ctc memory: {m[1]} observations · http://127.0.0.1:{st.cfg['port']}/#memories"
+            return JSONResponse(out)
+    except TimeoutError:
+        log.info("hook/start over its %.0f ms budget: no context", START_BUDGET_S * 1000)
+    except Exception:
+        log.exception("hook/start failed; no context")
+    return Response(status_code=200)
+
+
 EDIT_TOOLS = ("Write", "Edit", "MultiEdit")
 TICK = re.compile(r"^\s*- \[([ xX])\] (T\d{3})\b", re.MULTILINE)
 # one queued job per kind and file is enough: it parses / extracts the file as it is when it runs

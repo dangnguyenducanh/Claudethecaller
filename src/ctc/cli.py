@@ -817,8 +817,10 @@ def runner_upgrade() -> None:
 
 # event -> (route, curl max seconds); ours are recognised by the socket name in the command
 HOOKS = {"UserPromptSubmit": ("prompt", "0.15"), "PreToolUse": ("pre", "0.05"), "PostToolUse": ("tool", "0.05"),
-         "Stop": ("stop", "0.05"), "SessionEnd": ("stop", "0.05")}  # same endpoint: it reads hook_event_name
-MATCHERS = {"PostToolUse": "*", "PreToolUse": "Read|Edit|Write|MultiEdit"}  # tool events only; the others take none
+         "Stop": ("stop", "0.05"), "SessionEnd": ("stop", "0.05"),  # same endpoint: it reads hook_event_name
+         "SessionStart": ("start", "1")}  # m7 D16: the one hook allowed 1 s, it runs once per session
+MATCHERS = {"PostToolUse": "*", "PreToolUse": "Read|Edit|Write|MultiEdit",  # tool events only, plus SessionStart's sources;
+            "SessionStart": "startup|clear|compact"}  # never `resume`: it keeps the prompt-cache prefix byte-identical
 MCP = "claudethecaller"
 
 
