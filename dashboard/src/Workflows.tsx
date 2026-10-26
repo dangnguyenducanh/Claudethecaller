@@ -49,10 +49,13 @@ function NodeView({ id, type, data, selected }: NodeProps<FlowNode>) {
     : type === 'switch' ? `${cases.length} case${cases.length === 1 ? '' : 's'} + default`
     : data.conditions ? `${condText(data.conditions[0] ?? {})}${data.conditions.length > 1 ? ` +${data.conditions.length - 1}` : ''}`
     : condText(data)
+  // the run page's status is the latest visit's marker ?? status, so a disabled step arrives as 'disabled'
+  const kind = data.disabled && (status[id] === 'disabled' || status[id] === 'skipped') ? 'skipped (disabled)'
+    : status[id] ?? (data.disabled ? `${type} · disabled` : type)
   return (
-    <div className={`wfnode${selected ? ' sel' : ''}${bad === id ? ' bad' : ''}${status[id] ? ' st-' + status[id] : ''}`} title={data.notes}>
+    <div className={`wfnode${selected ? ' sel' : ''}${bad === id ? ' bad' : ''}${status[id] ? ' st-' + status[id] : ''}`} title={data.notes} style={data.disabled ? { opacity: 0.45 } : undefined}>
       {type !== 'trigger' && <Handle type="target" position={Position.Left} />}
-      <div className="mono wf-id"><span className="dot" style={{ background: TYPE_COLOR[type] }} />{id}<span className="wf-kind">{status[id] ?? type}</span>{(runs?.[id] ?? 0) > 1 && <span className="tag warn">×{runs![id]}</span>}{data.pin && <span className="tag" title="Pinned output: used by runs started with Use pins">pin</span>}{data.notes && <span className="tag">note</span>}</div>
+      <div className="mono wf-id"><span className="dot" style={{ background: TYPE_COLOR[type] }} />{id}<span className="wf-kind">{kind}</span>{(runs?.[id] ?? 0) > 1 && <span className="tag warn">×{runs![id]}</span>}{data.pin && <span className="tag" title="Pinned output: used by runs started with Use pins">pin</span>}{data.notes && <span className="tag">note</span>}</div>
       <div className="wf-sub mono">{sub || '—'}</div>
       {outs
         ? outs.map(h => <div key={h} className="wf-out">{h}<Handle type="source" position={Position.Right} id={h} /></div>)
@@ -269,6 +272,7 @@ function NodeForm({ n, ids, agents, set, rename, renameHandle, dropHandle, lastO
         set('path', undefined); set('op', undefined); set('value', undefined) // the old single form becomes conditions
       }} />}
       {n.type === 'switch' && <Cases cases={d.cases ?? []} set={c => set('cases', c)} renameHandle={renameHandle} dropHandle={dropHandle} />}
+      {!['trigger', 'if', 'switch'].includes(n.type!) && check('disabled', 'Disabled: runs pass straight through (output = upstream output)')}
       {num('max_visits', 'Max visits')}
       {area('notes', 'Notes (shown on hover)')}
     </>

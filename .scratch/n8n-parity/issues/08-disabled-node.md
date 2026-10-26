@@ -1,6 +1,6 @@
 # 08 — disabled-node
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01
 Spec: `.scratch/n8n-parity/spec.md` (read it first; this ticket implements part of it)
 Touches: src/ctc/runner/graph.py, src/ctc/runner/engine.py, src/ctc/runner/export.py, dashboard/src/Workflows.tsx, tests/test_disabled_node.py (engine-seam cases using the ticket 01 fixtures from tests/conftest.py)
@@ -21,3 +21,5 @@ Touches: src/ctc/runner/graph.py, src/ctc/runner/engine.py, src/ctc/runner/expor
 Engine-seam cases + graph tests.
 
 ## Comments
+
+2026-10-26 — resolved on branch `n8n-08-disabled-node`, merged into `m5-n8n-parity` (tasks T051–T056, T058; T057 browser QC deferred to the final QC pass). `disabled: true` (bool) on any node but trigger/IF/switch: execute() completes it through the canned path as `skipped` with marker `disabled`, its output = `graph.passthrough()` (first data in-edge's source; for a loop target readied by a back-edge, the first forward in-edge's source — `ponytail:`); no input, process, log or commit; ctx reload after a resume includes disabled steps. Validator: a disabled approval is not a push gate (safety). Export drops/reconnects disabled nodes, still refuses a disabled approval. Editor toggle, greyed node, "skipped (disabled)". Tests: tests/test_disabled_node.py (14).

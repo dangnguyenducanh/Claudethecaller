@@ -6,7 +6,8 @@ and, for an IF or switch, took that handle), which is walker rules 2-4 as plain 
 ...}); shell -> an agent told to run exactly that command, answering {exit_code, stdout_tail}; IF -> {value} over its
 conditions (every/some for combine and/or), switch -> {case} via a chain of ?: over its cases, both tested by the nodes
 after them; merge -> {inputs}; a loop (the back-edges into one node) -> a `while` capped at that node's max_visits;
-readonly nodes side by side -> await parallel([...]). Templates fill at run time: {{input}} is the workflow's `args`
+readonly nodes side by side -> await parallel([...]); a disabled node -> a pass-through of its first live input's
+output (graph.passthrough). Templates fill at run time: {{input}} is the workflow's `args`
 (else the trigger's input), {{node.x}} that node's output, shell values single-quoted like shlex.quote. Every string
 from the graph is embedded with json.dumps, so no prompt or command can break out into code.
 Not exported: approval nodes (a native run can't pause for a sign-off: the caller refuses them), regex conditions
@@ -93,7 +94,9 @@ def to_js(g: dict, name: str, description: str = "") -> str:
         n, t = nodes[nid], nodes[nid]["type"]
         if t == "trigger":
             return f"set({J(nid)}, {{input}})"
-        if t == "agent":
+        if n.get("disabled"):  # the first live input's output, as graph.passthrough: nothing runs
+            v = f"out[[{', '.join(f'{on(e)} && {J(e['from'])}' for e in fwd if e['to'] == nid)}].find(Boolean)]"
+        elif t == "agent":
             opts = {"label": nid, **{k: n[f] for k, f in (("model", "model"), ("effort", "effort"), ("schema", "json_schema"))
                                     if n.get(f)}, **({"agentType": _name(n["agent"])} if n.get("agent") else {})}
             prompt = (f"/{_name(n['cap'])} " if n.get("cap") else "") + (n.get("prompt") or "")
