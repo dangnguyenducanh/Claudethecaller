@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from ctc.config import cfg
-from ctc.graph import db, extract, parse
+from ctc.graph import core, db, extract, parse
 from ctc.ingestion.scanner import project_id
 from ctc.server import hooks
 
@@ -75,7 +75,8 @@ def test_argv_haiku_one_turn_no_tools_no_hooks():
     a = extract.argv()
     assert a[a.index("--model") + 1] == "haiku" and a[a.index("--max-turns") + 1] == "1"
     assert json.loads(a[a.index("--settings") + 1]) == {"disableAllHooks": True}
-    assert "--allowedTools" not in a and "-p" in a
+    assert a[a.index("--tools") + 1] == "" and "--allowedTools" not in a and "-p" in a  # --tools "": no tool exists at all
+    assert "--no-session-persistence" in a and "--append-system-prompt" not in a  # no transcript; not a workflow node
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -171,9 +172,17 @@ def test_run_job_cap_and_refusals(tmp_path, monkeypatch, in_store):
     assert len(calls) == 1
 
 
+def test_run_job_never_reads_outside_the_repo(tmp_path, monkeypatch, in_store):
+    repo, calls = _repo(tmp_path), _fake(monkeypatch)
+    out = tmp_path.parent / f"{tmp_path.name}-secret.md"
+    out.write_text("# Secret\n\nnot in the repo\n")
+    r = in_store(lambda s: extract.run_job(_st(s, tmp_path), {"cwd": str(repo), "files": [f"specs/../../{out.name}"]}, _prog))
+    assert (r["files"], r["sent"], calls) == (0, 0, [])
+
+
 # ---- PostToolUse triggers (hooks.hook_tool) ----------------------------------------------------------------------
 
-def _client(monkeypatch, queued=None):
+def _client(monkeypatch, queued=None, built="2026-10-26 00:00:00+00"):
     subs, events = [], []
 
     async def submit(st, kind, payload, user_id="local"):
@@ -184,7 +193,7 @@ def _client(monkeypatch, queued=None):
         events.append((kind, row))
 
     async def fetchval(sql, args):
-        return queued
+        return built if sql == core.VERSION_SQL else queued  # built: the project's graph version ('' = no graph)
 
     async def get_json(key):
         return None
@@ -223,6 +232,19 @@ def test_hook_skips_queued_and_code_files(monkeypatch, tmp_path):
     assert subs == [] and events[0][1]["payload"] == {"tool": "Edit", "file_path": "src/a.py"}
     _post(c, str(tmp_path), "Read", {"file_path": f"{tmp_path}/specs/x/spec.md"})
     assert subs == [] and events[1][1]["payload"] == {"tool": "Read"}
+
+
+def test_hook_only_in_a_graphed_project_and_inside_it(monkeypatch, tmp_path):
+    c, subs, _ = _client(monkeypatch, built="")
+    _post(c, str(tmp_path), "Write", {"file_path": f"{tmp_path}/CLAUDE.md", "content": "# x"})
+    assert subs == []  # another repo (no `ctc graph build` there): never a Claude call on the owner's login
+    c, subs, events = _client(monkeypatch)
+    for f in (f"{tmp_path}/specs/../../secret.md", "specs/../../secret.md", f"{tmp_path}/specs/x/../../../secret.md"):
+        _post(c, str(tmp_path), "Write", {"file_path": f, "content": "# x"})
+    assert subs == [] and len(events) == 3  # `..` out of the repo: logged, never parsed or sent to Claude
+    (tmp_path / "specs").symlink_to(tmp_path.parent)  # a symlink out of the repo is outside it too
+    _post(c, str(tmp_path), "Write", {"file_path": f"{tmp_path}/specs/x.md", "content": "# x"})
+    assert subs == []
 
 
 def test_hook_tick_in_tasks_md(monkeypatch, tmp_path):

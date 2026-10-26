@@ -230,8 +230,11 @@ def _ticks(tool: str, tin: dict) -> list[str]:
 
 async def _graph_jobs(st: State, user_id: str, cwd: str, rel: str, tick: dict | None) -> None:
     """After the 204 (m6 FR-012, FR-020): a saved context source queues graph_build + graph_extract for that file, unless
-    one is already queued; ticked tasks.md boxes queue a graph_build that confirms the session's edited files."""
+    one is already queued; ticked tasks.md boxes queue a graph_build that confirms the session's edited files. Only in a
+    project that has a graph: the hook runs in every repo, and `ctc graph build` there is the opt-in (spec: this repo only)."""
     try:
+        if not await st.store.fetchval(core.VERSION_SQL, (user_id, project_id(cwd))):
+            return
         if SOURCE.fullmatch(rel):
             # extract first: the worker runs jobs in order, so the build embeds and links the extractor's new nodes
             for kind in ("graph_extract", "graph_build") if prose(rel) else ("graph_build",):
@@ -251,13 +254,15 @@ async def hook_tool(request: Request, tasks: BackgroundTasks) -> Response:
         tin, cwd = tin if isinstance(tin, dict) else {}, str(body.get("cwd") or "")
         if sid and tool and not _in_run(body):
             name = tin.get("skill") or tin.get("subagent_type")
-            rel = str(tin.get("file_path") or "") if tool in EDIT_TOOLS else ""
-            if rel and cwd and Path(rel).is_relative_to(cwd):
-                rel = Path(rel).relative_to(cwd).as_posix()
+            rel, inside = str(tin.get("file_path") or "") if tool in EDIT_TOOLS else "", False
+            if rel and cwd:  # resolved, not lexical: `specs/../../x.md` or a symlink out of the repo is not inside it
+                p, root = (Path(cwd) / rel).resolve(), Path(cwd).resolve()
+                if inside := p.is_relative_to(root):
+                    rel = p.relative_to(root).as_posix()
             await write(st, "event", {"session_id": sid, "type": "tool", "payload": {
                 "tool": tool, **({"name": name} if name else {}), **({"file_path": rel} if rel else {})}})
             # shared mode: cwd names a path on the client's disk, which the jobs cannot read
-            if rel and cwd and st.cfg["mode"] == "local":
+            if inside and st.cfg["mode"] == "local":
                 ticks = _ticks(tool, tin) if rel.endswith("tasks.md") else []
                 if SOURCE.fullmatch(rel) or ticks:
                     tasks.add_task(_graph_jobs, st, user_id, cwd, rel,

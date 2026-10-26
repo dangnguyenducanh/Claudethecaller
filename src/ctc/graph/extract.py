@@ -128,9 +128,12 @@ def parse_xml(out: str, known_ids: set[str], file: str, mode: dict | None = None
 
 
 def argv(model: str = "haiku") -> list[str]:
-    """claude -p for one chunk: no tools, one turn, every hook off (research.md R3/R4)."""
-    a, _ = proc.agent_argv({"model": model, "max_turns": 1, "allowed_tools": []}, {}, None)
-    return [*a, "--settings", json.dumps({"disableAllHooks": True})]
+    """claude -p for one chunk (research.md R3/R4): `--tools ""` (none exist: --allowedTools only pre-approves), one turn,
+    no MCP server, every hook off, and no transcript on disk (history import never sees it). Not proc.agent_argv: that
+    adds the workflow node's "do the task with the tools you have" system prompt and acceptEdits."""
+    return [proc._bin(), "-p", "--output-format", "stream-json", "--verbose", "--model", model, "--max-turns", "1",
+            "--tools", "", "--no-session-persistence", "--permission-mode", "dontAsk", "--strict-mcp-config",
+            "--mcp-config", json.dumps({"mcpServers": {}}), "--settings", json.dumps({"disableAllHooks": True})]
 
 
 async def _call(argv: list[str], prompt: str, log_path: str, timeout_s: float = 120) -> dict:
@@ -154,7 +157,8 @@ async def run_job(st, payload: dict, progress) -> dict:
         return {"error": pre["error"]}
     mode, msha = load_mode()
     # ponytail: a deleted doc keeps its claude nodes until a job names it in `files`; sweep origin claude by file if that bites
-    files = [f for f in payload.get("files") or sources(repo) if prose(f)]
+    root = repo.resolve()  # a file outside the repo (`..`, a symlink out) is never read nor sent to Claude
+    files = [f for f in payload.get("files") or sources(repo) if prose(f) and (repo / f).resolve().is_relative_to(root)]
     pnodes, _ = parse.parse_repo(repo, files)
     wd = Path(gc["dir"]).expanduser()
     wd.mkdir(parents=True, exist_ok=True)

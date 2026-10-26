@@ -22,7 +22,7 @@ All questions were settled by the owner grilling (Q1–Q26) and design.md; this 
 
 ## R4. Running the extractor through the runner's process code
 
-- **Decision**: reuse `runner/proc.py`: `preflight()` (must be `ok`, `authMethod == "claude.ai"`, pinned version), `agent_argv(node, ctx, session_id=None)` with `node = {"prompt": <chunk prompt>, "model": "haiku", "max_turns": 1, "allowed_tools": []}` plus the `--settings` flag above, and `run_agent(argv, prompt, cwd, log_path)`, whose result gives `status` (`done | failed | timeout | quota`), `output.result`, `usage`, `resets_at`.
+- **Decision**: reuse `runner/proc.py`'s `preflight()` (must be `ok`, `authMethod == "claude.ai"`, pinned version), `_bin()` and `run_agent(argv, prompt, cwd, log_path)`, whose result gives `status` (`done | failed | timeout | quota`), `output.result`, `usage`, `resets_at`. The argv is built in `extract.argv()`, not with `agent_argv` (review fix, 2026-10-26): `--model haiku --max-turns 1 --tools "" --no-session-persistence --permission-mode dontAsk --strict-mcp-config --mcp-config {"mcpServers":{}} --settings {"disableAllHooks":true}`. `--allowedTools` only pre-approves tools, so `--tools ""` is what removes them; `agent_argv` would add the workflow node's "use the tools you have" system prompt and acceptEdits; `--no-session-persistence` keeps the extractor's sessions out of `~/.claude/projects` and so out of the history import.
 - **Rationale**: one place for auth, version pin, quota detection and usage parsing; claude-mem itself uses the same `claude` CLI 2.1.306 on the owner's login.
 - **Alternatives**: the local Qwen 3B via `Llm`: rejected by the owner (too weak for this extraction).
 

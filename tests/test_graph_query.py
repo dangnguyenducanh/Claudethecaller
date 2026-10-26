@@ -115,6 +115,13 @@ def test_explain_resolves_names():
     assert len(big["neighbours"]) == 20 and big["truncated"] == 21 and big["text"].endswith("(truncated: 21 more)")
 
 
+def test_code_for_breaks_ties_by_id():
+    links = [(f"code:c{i}", "implemented_in", "EXTRACTED", 1.0) for i in (3, 1, 2, 0)] + [("code:z", "tested_by", "CONFIRMED", 0.5)]
+    for out in (links, links[::-1]):  # load_rows has no ORDER BY: the fetch order must not pick the pointers
+        g = core.Graph("v", {}, {TASK: out}, {}, {}, np.array([], dtype=object), np.zeros((0, 1024), np.float32))
+        assert [d for d, *_ in g.code_for(TASK)] == ["code:z", "code:c0", "code:c1"]
+
+
 def test_affected_and_path():
     r = query.affected(graph(), RETRY)
     assert {(c["id"], c["depth"]) for c in r["code"]} == {(CLAIM, 1), (TEST, 1), (MAIN, 2), (RUN, 3)}  # app() is depth 4

@@ -58,10 +58,11 @@ class Graph:
         return [e for side in sides for e in side.get(node_id, ()) if relations is None or e[1] in relations]
 
     def code_for(self, ctx_id: str, k: int = 3) -> list[tuple[str, str, float]]:
-        """(code id, confidence, score) of implemented_in/tested_by targets: CONFIRMED > EXTRACTED > INFERRED, then score."""
+        """(code id, confidence, score) of implemented_in/tested_by targets: CONFIRMED > EXTRACTED > INFERRED, then score,
+        then id (load_rows has no order: ties must not flip between loads)."""
         best: dict[str, tuple[str, str, float]] = {}
         for d, c, s in sorted(((d, c, s) for d, r, c, s in self.out.get(ctx_id, ()) if r in ("implemented_in", "tested_by")),
-                              key=lambda h: (RANK.get(h[1], 3), -h[2])):
+                              key=lambda h: (RANK.get(h[1], 3), -h[2], h[0])):
             best.setdefault(d, (d, c, s))
         return list(best.values())[:k]
 
