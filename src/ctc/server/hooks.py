@@ -313,6 +313,23 @@ async def _want_extract(st: State, sid: str, end: bool, user_id: str) -> bool:
     return await st.store.fetchval(INFLIGHT_SQL, (user_id, "distill" if end else "extract", sid)) is None
 
 
+# a queued observe job for the session reads up to its payload's upto when it runs: a second Stop only raises it
+OBSERVE_UPTO_SQL = ("update jobs set payload = jsonb_set(payload, '{upto}', to_jsonb(greatest((payload->>'upto')::bigint, %s::bigint)))"
+                    " where user_id = %s and kind = 'observe' and status = 'queued' and payload->>'session_id' = %s")
+
+
+async def _observe(st: State, sid: str, cwd: str, path: Path, upto: int, end: bool, user_id: str) -> None:
+    """m7: queue the capture job for the turn that just finished. Only with memory.enabled, never for a skip_projects project
+    (name or folder basename); the payload holds ids and the transcript size at Stop time, never last_assistant_message.
+    A running job does not count: it may have stopped reading before this turn."""
+    pid = project_id(cwd)
+    if not st.cfg["memory"]["enabled"] or {st.names.get((user_id, pid)), Path(cwd).name} & set(st.cfg["history"]["skip_projects"]):
+        return
+    if not await st.store.execute(OBSERVE_UPTO_SQL, (upto, user_id, sid)):
+        await submit(st, "observe", {"session_id": sid, "project_id": pid, "user_id": user_id, "transcript_path": str(path),
+                                     "final": end, "upto": upto}, user_id)
+
+
 async def _stop(st: State, body: dict, user_id: str) -> None:
     """Stop and SessionEnd (same endpoint; Claude Code names the event in hook_event_name)."""
     try:
@@ -321,17 +338,19 @@ async def _stop(st: State, body: dict, user_id: str) -> None:
             return
         end = body.get("hook_event_name") == "SessionEnd"
         await write(st, "event", {"session_id": sid, "type": "session_end" if end else "stop", "payload": {}})
-        model, tokens, path = "", 0, None
+        model, tokens, path, upto = "", 0, None, 0
         if st.cfg["mode"] == "local" and tp:  # shared mode: the transcript is on the client's disk
             p = Path(tp).expanduser().resolve()
             # the TCP port is open to every local user: read only Claude Code transcripts (same rule as ai/extract.py)
             if p.suffix == ".jsonl" and p.is_relative_to(Path(st.cfg["claude_home"]).resolve() / "projects") and p.is_file():
-                path = p
+                path, upto = p, p.stat().st_size
                 model, tokens = await asyncio.to_thread(_usage, p)
         await write(st, "session_end", {"id": sid, "model": model, "tokens": tokens})
         if path and await _want_extract(st, sid, end, user_id):
             await submit(st, "distill" if end else "extract", {"session_id": sid, "transcript_path": str(path),
                                          "project_id": project_id(cwd) if cwd else None, "user_id": user_id}, user_id)
+        if path and cwd:
+            await _observe(st, sid, cwd, path, upto, end, user_id)
     except Exception:
         log.exception("hook/stop failed")
 

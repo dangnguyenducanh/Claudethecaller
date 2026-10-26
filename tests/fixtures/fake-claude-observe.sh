@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Fake `claude` for the m7 observe job: answers `--version` and `auth status` like the pinned CLI (so proc.preflight passes), then a
+# -p run that returns two canned observations and a summary. The second observation quotes a 250-char line of the tool result in
+# tests/fixtures/transcript-m7.jsonl on purpose: the job must not store it (SC-002).
+#   CTC_CLAUDE_BIN=tests/fixtures/fake-claude-observe.sh uv run ctc daemon start
+case "$1" in
+  --version) echo "$(grep -o 'claude_version: "[^"]*"' "$(dirname "$0")/../../config/server.yaml" | cut -d'"' -f2) (Claude Code)"; exit 0 ;;
+  auth) echo '{"loggedIn": true, "authMethod": "claude.ai", "apiProvider": "firstParty", "email": "fake@example.com", "subscriptionType": "max"}'; exit 0 ;;
+esac
+cat >/dev/null  # the prompt
+echo '{"type":"system","subtype":"init","cwd":"'"$PWD"'","session_id":"fake","apiKeySource":"none","claude_code_version":"fake","model":"claude-haiku-5","permissionMode":"dontAsk","tools":[],"mcp_servers":[]}'
+cat <<'CANNED'
+{"type": "result", "subtype": "success", "is_error": false, "duration_ms": 412, "num_turns": 1, "result": "<observation>\n  <type>bugfix</type>\n  <title>Splitter now keeps the last line</title>\n  <subtitle>Parser fix</subtitle>\n  <facts><fact>split() no longer drops the final element</fact></facts>\n  <narrative>The splitter dropped its final element. It now returns every line.</narrative>\n  <concepts><concept>problem-solution</concept></concepts>\n  <files_read><file>src/p.py</file></files_read>\n  <files_modified><file>src/p.py</file></files_modified>\n</observation>\n<observation>\n  <type>discovery</type>\n  <title>Joiner depends on the trailing newline</title>\n  <subtitle>Downstream coupling</subtitle>\n  <facts><fact>The joiner flushes its buffer on the final newline</fact></facts>\n  <narrative>The splitter feeds a joiner. # NOTE: the splitter keeps every line including the trailing one, because the downstream joiner relies on the final newline to flush its buffer, so never strip the last element before returning and never add a sentinel line here without updating the </narrative>\n  <concepts><concept>gotcha</concept></concepts>\n  <files_read><file>src/p.py</file></files_read>\n  <files_modified></files_modified>\n</observation>\n<summary>\n  <request>Repair the splitter that lost its last element</request>\n  <investigated>The splitter and the joiner that consumes it</investigated>\n  <learned>The joiner needs the final newline to flush</learned>\n  <completed>The splitter keeps every line and the test passes</completed>\n  <next_steps>Check the other callers of split()</next_steps>\n  <notes></notes>\n</summary>", "stop_reason": "end_turn", "total_cost_usd": 0, "usage": {"input_tokens": 1200, "output_tokens": 300}, "permission_denials": []}
+CANNED
