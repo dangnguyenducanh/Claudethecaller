@@ -673,6 +673,27 @@ def graph_extract(file: str | None = typer.Option(None, "--file", help="Only thi
         out.print(f"{dot(WARN)} quota until [bold]{r['quota_until']}[/]: the rest waits for the reset")
 
 
+@graph.command("export")
+def graph_export(kind: str = typer.Option("both", "--kind", help="context | coding | both"),
+                 out_path: str | None = typer.Option(None, "--out", help="Default graphify-out/ctc-<kind>.json (untracked).")) -> None:
+    """Write the graph in graphify's graph.json shape, for `graphify query --graph <file>` and graphify's viewer."""
+    from ctc.graph import export as gexport
+
+    if kind not in ("context", "coding", "both"):
+        err.print(f"[{BAD}]●[/] --kind must be context, coding or both, not {kind!r}")
+        raise typer.Exit(2)
+
+    async def go() -> tuple[Path, dict]:
+        s = await Store.open(cfg()["database_url"], pool_max=1)
+        try:
+            return await gexport.write(s, Path.cwd(), kind, Path(out_path) if out_path else None)
+        finally:
+            await s.close()
+
+    path, d = _run(go())
+    out.print(f"{dot(GREEN)} {path}  [{FAINT}]{len(d['nodes'])} nodes, {len(d['links'])} links ({kind})[/]")
+
+
 # ---- workflow runs (PLAN.md m5) -----------------------------------------------
 
 STATUS = {"done": GREEN, "skipped": FAINT, "cancelled": FAINT, "failed": BAD, "timeout": BAD, "quota": WARN,
