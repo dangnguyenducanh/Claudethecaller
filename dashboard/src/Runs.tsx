@@ -2,7 +2,7 @@ import { Background, Controls, ReactFlow } from '@xyflow/react'
 import { Fragment, useEffect, useState } from 'react'
 import { NEED_DAEMON, api, errText, usingMock } from './api'
 import type { Diff, RunDetail, RunStatus, Step } from './types'
-import { Header, Segmented, fmtTime, fmtTokens } from './ui'
+import { Header, Segmented, fmtMs, fmtTime, fmtTokens } from './ui'
 import { NodeCtx, dashBack, nodeTypes, toFlow } from './Workflows'
 
 const PILL: Record<string, string> = { running: 'warn', waiting: 'warn', quota: 'warn', done: 'good', failed: 'bad', timeout: 'bad' } // run and step statuses
@@ -12,6 +12,9 @@ const POLL_MS = 1500 // config/server.yaml runner.poll_s
 const MAX_ROWS = 1000
 const TABS = ['output', 'log', 'diff', 'meta'] as const
 type RetryBody = { from_node?: string; to_node?: string }
+/** engine.fresh_tokens: every count but cache reads, as wf_runs.tokens adds them up. */
+const freshTokens = (t: Record<string, number>) => Object.entries(t).reduce((n, [k, v]) => (k === 'cache_read_input_tokens' ? n : n + v), 0)
+const took = (s: Step) => (s.status === 'running' ? 'running' : s.status === 'skipped' || !s.ended_at ? '—' : fmtMs(Date.parse(s.ended_at) - Date.parse(s.started_at)))
 
 /** Loads, then reloads every 1.5 s while `again(result)` holds; stops on unmount or when `deps` change. */
 function usePoll<T>(load: () => Promise<T>, again: (t: T) => boolean, deps: unknown[]): [T | null, string] {
@@ -156,6 +159,24 @@ function RunPage({ id, theme, onBack }: { id: number; theme: string; onBack: () 
           {step ? <StepPanel run={run} step={step} visits={vs.length > 1 ? vs : []} onVisit={setVisit} onRetry={ended ? retry : undefined} />
             : <div className="muted">{sel ? `${sel} has not run yet.` : 'Click a node to see its output, log, diff and session.'}</div>}
         </aside>
+      </div>
+      <div className="card tablewrap">
+        <table>
+          <thead><tr><th>Node</th><th className="num">Visit</th><th>Status</th><th className="num">Duration</th><th className="num">Tokens</th><th>Error</th></tr></thead>
+          <tbody>
+            {run.steps.map(s => ( // the API's order: s.id, which is start order
+              <tr key={s.id} className="click" onClick={() => { setSel(s.node_id); setVisit(s.visit) }}>
+                <td className="mono">{s.node_id}</td>
+                <td className="num">{s.visit}</td>
+                <td><span className={'tag ' + (PILL[s.status] ?? '')}>{s.status}</span>{s.marker && <span className="tag">{s.marker}</span>}</td>
+                <td className="num">{took(s)}</td>
+                <td className="num">{s.tokens ? fmtTokens(freshTokens(s.tokens)) : '—'}</td>
+                <td className="err">{(s.error ?? '').split('\n')[0]}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!run.steps.length && <div className="empty">No steps yet.</div>}
       </div>
     </>
   )

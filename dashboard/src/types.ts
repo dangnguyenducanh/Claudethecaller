@@ -42,6 +42,7 @@ export interface Activity {
 export interface Capability {
   id: string; kind: Kind; namespace: string; description: string
   override: Override | null; calls_30d: number; followed_30d: number; cluster_id: string | null
+  file_hash?: string | null // sha256 of the file; GET /capabilities/{id} and PATCH
 }
 export interface CapabilityDetail extends Capability {
   name: string; invoke: string; path: string; body: string; summary: string | null; triggers: string[]
@@ -55,7 +56,10 @@ export interface NewCapability {
   kind: Kind; scope: 'user' | 'project'; project?: string; name: string; description: string; body?: string; steps?: WorkflowStep[]
   graph?: Graph; settings?: WorkflowSettings // workflows: `graph` replaces `steps`
 }
-export type CapabilityPatch = { description?: string; body?: string; steps?: WorkflowStep[]; graph?: Graph; settings?: WorkflowSettings }
+export type CapabilityPatch = {
+  description?: string; body?: string; steps?: WorkflowStep[]; graph?: Graph; settings?: WorkflowSettings
+  base_hash?: string // 409 changed_on_disk when the file changed since load
+}
 export interface DedupPair { id: number; a: string; b: string; similarity: number; status: 'open' | 'merged' | 'kept_apart' }
 
 export interface Session {
@@ -97,6 +101,7 @@ export interface Condition { path: string; op: Op; value?: unknown }
 export interface SwitchCase { name: string; conditions: Condition[]; combine?: 'and' | 'or' }
 export interface WfNode {
   id: string; type: NodeType; pos: [number, number]; max_visits?: number
+  notes?: string // any node type, shown on hover
   input?: string // trigger
   prompt?: string; cap?: string; agent?: string; model?: string; effort?: string; permission_mode?: 'acceptEdits' | 'dontAsk' | 'plan' // agent
   allowed_tools?: string[]; mcp_config?: unknown; json_schema?: unknown; resume_from?: string; max_turns?: number; on_error?: 'fail' | 'continue'

@@ -16,6 +16,7 @@ complete() returns the run's error when a loop passes its cap; a node that lands
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 import shlex
@@ -158,6 +159,8 @@ def validate(g: dict) -> list[dict]:
             err("readonly is for agent nodes only: shells never batch in parallel", nid)
         if (v := n.get("max_visits")) is not None and not (type(v) is int and v >= 1):
             err("max_visits must be a whole number >= 1", nid)
+        if "notes" in n and not isinstance(n["notes"], str):
+            err("notes must be text", nid)
         if "pin" in n:
             pin = n["pin"]
             if t not in ("agent", "shell"):
@@ -348,6 +351,30 @@ def render(tpl: str, ctx: dict, shell: bool = False) -> str:
         s = _text(lookup(ctx, m.group(1)))
         return shlex.quote(s) if shell else s
     return TPL.sub(one, tpl or "")
+
+
+def rename_node(g: dict, old: str, new: str) -> dict:
+    """A copy of g with node `old` renamed to `new`: its edges, every {{old...}} template at any depth of any node
+    (spacing and tail kept) and every `path` / `resume_from` value naming old follow. dashboard/src/Workflows.tsx
+    renameRefs ports this: keep the two in sync. A taken `new` is left to validate() (duplicate id)."""
+    def ref(s: str) -> str:
+        head, dot, tail = s.partition(".")
+        return new + dot + tail if head == old else s
+
+    def walk(v, key=None):
+        if isinstance(v, dict):
+            return {k: walk(x, k) for k, x in v.items()}
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        if isinstance(v, str):
+            v = TPL.sub(lambda m: m.group(0).replace(m.group(1), ref(m.group(1)), 1), v)
+            return ref(v) if key in ("path", "resume_from") else v
+        return v
+
+    g2 = copy.deepcopy(g)
+    g2["nodes"] = [walk(n) | ({"id": new} if n.get("id") == old else {}) for n in g2["nodes"]]
+    g2["edges"] = [e | {k: new for k in ("from", "to") if e.get(k) == old} for e in g2["edges"]]
+    return g2
 
 
 def conditions(node: dict) -> list:

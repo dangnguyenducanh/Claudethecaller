@@ -4,7 +4,7 @@ import {
   useUpdateNodeInternals,
   type Connection, type Edge, type Node, type NodeProps,
 } from '@xyflow/react'
-import { createContext, useContext, useEffect, useState, type DragEvent } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type DragEvent } from 'react'
 import { ApiError, NEED_DAEMON, api, errText, usingMock } from './api'
 import type { ViewProps } from './App'
 import { parseSteps } from './parts'
@@ -50,9 +50,9 @@ function NodeView({ id, type, data, selected }: NodeProps<FlowNode>) {
     : data.conditions ? `${condText(data.conditions[0] ?? {})}${data.conditions.length > 1 ? ` +${data.conditions.length - 1}` : ''}`
     : condText(data)
   return (
-    <div className={`wfnode${selected ? ' sel' : ''}${bad === id ? ' bad' : ''}${status[id] ? ' st-' + status[id] : ''}`}>
+    <div className={`wfnode${selected ? ' sel' : ''}${bad === id ? ' bad' : ''}${status[id] ? ' st-' + status[id] : ''}`} title={data.notes}>
       {type !== 'trigger' && <Handle type="target" position={Position.Left} />}
-      <div className="mono wf-id"><span className="dot" style={{ background: TYPE_COLOR[type] }} />{id}<span className="wf-kind">{status[id] ?? type}</span>{(runs?.[id] ?? 0) > 1 && <span className="tag warn">×{runs![id]}</span>}{data.pin && <span className="tag" title="Pinned output: used by runs started with Use pins">pin</span>}</div>
+      <div className="mono wf-id"><span className="dot" style={{ background: TYPE_COLOR[type] }} />{id}<span className="wf-kind">{status[id] ?? type}</span>{(runs?.[id] ?? 0) > 1 && <span className="tag warn">×{runs![id]}</span>}{data.pin && <span className="tag" title="Pinned output: used by runs started with Use pins">pin</span>}{data.notes && <span className="tag">note</span>}</div>
       <div className="wf-sub mono">{sub || '—'}</div>
       {outs
         ? outs.map(h => <div key={h} className="wf-out">{h}<Handle type="source" position={Position.Right} id={h} /></div>)
@@ -108,6 +108,24 @@ const freeId = (base: string, taken: string[]) => {
   let id = b
   for (let i = 2; taken.includes(id); i++) id = `${b}-${i}`
   return id
+}
+const TPL = /\{\{\s*([\w.-]+)\s*\}\}/g // graph.TPL
+/** A rename's references: every {{from…}} at any depth and every `path` / `resume_from` value naming `from` now names `to`,
+ *  spacing and tail kept. Port of rename_node in src/ctc/runner/graph.py: keep the two in sync. */
+export function renameRefs(data: WfData, from: string, to: string): WfData {
+  const ref = (s: string) => (s.split('.')[0] === from ? to + s.slice(from.length) : s)
+  const walk = (v: unknown, key?: string): unknown => {
+    if (Array.isArray(v)) return v.map(x => walk(x))
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x, k)]))
+    if (typeof v !== 'string') return v
+    const s = v.replace(TPL, (m, r: string) => m.replace(r, ref(r)))
+    return key === 'path' || key === 'resume_from' ? ref(s) : s
+  }
+  return walk(data) as WfData
+}
+if (import.meta.env.DEV) {
+  const r = renameRefs({ command: 'echo {{fix.result}} {{ fixer.x }}', path: 'fix.exit_code' }, 'fix', 'repair')
+  console.assert(r.command === 'echo {{repair.result}} {{ fixer.x }}' && r.path === 'repair.exit_code', 'renameRefs self-check failed')
 }
 const snap = (g: Graph, s: WorkflowSettings, desc: string) => JSON.stringify([g, s, desc.trim()])
 const json = (v: unknown) => (v === undefined ? '' : JSON.stringify(v, null, 2))
@@ -220,7 +238,7 @@ function NodeForm({ n, ids, agents, set, rename, renameHandle, dropHandle, lastO
       <BlurField label="Id (templates use {{id.field}})" init={n.id} commit={s => {
         if (!NAME_RE.test(s)) throw new Error('Lowercase letters, digits and dashes; start with a letter or digit.')
         if (ids.includes(s)) throw new Error('Another node has this id.')
-        rename(s) // ponytail: templates that name the old id are not rewritten; the daemon's 422 points at them
+        rename(s)
       }} />
       {n.type === 'trigger' && area('input', 'Default input')}
       {n.type === 'agent' && <>
@@ -252,6 +270,7 @@ function NodeForm({ n, ids, agents, set, rename, renameHandle, dropHandle, lastO
       }} />}
       {n.type === 'switch' && <Cases cases={d.cases ?? []} set={c => set('cases', c)} renameHandle={renameHandle} dropHandle={dropHandle} />}
       {num('max_visits', 'Max visits')}
+      {area('notes', 'Notes (shown on hover)')}
     </>
   )
 }
@@ -321,6 +340,10 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
   const [readOnly, setReadOnly] = useState('') // why Save is off, shown instead of an error
   const [pinned, setPinned] = useState(false) // Run with pins: pinned nodes return their pinned output
   const [last, setLast] = useState<RunDetail | null>(null) // the loaded workflow's latest run, for 'Pin output of run #N'
+  const [conflict, setConflict] = useState(false) // a save hit 409 changed_on_disk: Reload or Overwrite
+  // Undo/redo history: JSON of toGraph() (no selection, settings or description); cur = the last recorded canvas
+  const hist = useRef({ past: [] as string[], future: [] as string[], cur: JSON.stringify(toGraph([TRIGGER], [])) })
+  const [, setTick] = useState(0) // re-renders Undo/Redo after a history change
   const flow = useReactFlow()
   const loadedId = loaded?.id
 
@@ -357,7 +380,7 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
     return { ...n, data: data as WfData }
   }))
   const rename = (from: string, to: string) => {
-    setNodes(ns => ns.map(n => (n.id === from ? { ...n, id: to } : n)))
+    setNodes(ns => ns.map(n => ({ ...n, id: n.id === from ? to : n.id, data: renameRefs(n.data, from, to) })))
     setEdges(es => es.map(e => ({ ...e, source: e.source === from ? to : e.source, target: e.target === from ? to : e.target })))
   }
   const renameHandle = (node: string, from: string, to: string) =>
@@ -366,7 +389,8 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
 
   const reset = () => {
     setNodes([TRIGGER]); setEdges([]); setSettings(DEFAULT_SETTINGS); setLoaded(null); setSaved(''); setName(''); setDesc('')
-    setErr(''); setOk(''); setReadOnly(''); setBad(null); setScope(project ? 'project' : 'user')
+    setErr(''); setOk(''); setReadOnly(''); setBad(null); setScope(project ? 'project' : 'user'); setConflict(false)
+    hist.current = { past: [], future: [], cur: JSON.stringify(toGraph([TRIGGER], [])) }; setTick(t => t + 1)
   }
   const open = async (id: string) => {
     try {
@@ -380,6 +404,7 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
       if (g) {
         const f = toFlow(g)
         setNodes(f.nodes); setEdges(f.edges)
+        hist.current.cur = JSON.stringify(toGraph(f.nodes, f.edges)) // the opened graph is the history's start
         if (d.graph) setSaved(snap(toGraph(f.nodes, f.edges), s, d.description))
       }
       setSettings(s)
@@ -393,27 +418,52 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
   const nameErr = !loaded && name && !NAME_RE.test(name) ? 'Lowercase letters, digits and dashes; start with a letter or digit; up to 64 characters.' : ''
   const graph = toGraph(nodes, edges)
   const canRun = !!loaded && snap(graph, settings, desc) === saved
+  const graphJson = JSON.stringify(graph)
+  const record = (json: string) => { // one entry per settled change: a drag or a typed prompt is one step
+    const h = hist.current
+    if (json === h.cur) return
+    h.past = [...h.past, h.cur].slice(-100); h.future = []; h.cur = json; setTick(t => t + 1)
+  }
+  useEffect(() => { const t = setTimeout(() => record(graphJson), 300); return () => clearTimeout(t) }, [graphJson]) // eslint-disable-line react-hooks/exhaustive-deps -- record reads only the ref
+  const show = (json: string) => { const f = toFlow(JSON.parse(json)); setNodes(f.nodes); setEdges(f.edges) }
+  const undo = () => {
+    record(graphJson) // an edit still inside the 300 ms window is its own step
+    const h = hist.current, prev = h.past.pop()
+    if (prev === undefined) return
+    h.future.push(h.cur); h.cur = prev; show(prev)
+  }
+  const redo = () => {
+    record(graphJson) // a fresh edit drops the redo stack, as it would 300 ms later
+    const h = hist.current, next = h.future.pop()
+    if (next === undefined) return
+    h.past.push(h.cur); h.cur = next; show(next)
+  }
   const fail = (e: unknown) => {
     if (e instanceof ApiError && e.node_id) setBad(e.node_id)
     setErr(errText(e, { ns: loaded?.namespace }))
   }
-  const save = async () => {
-    setOk(''); setBad(null)
+  const save = async (overwrite = false) => { // overwrite: no base_hash, so the daemon writes over an on-disk edit
+    setOk(''); setBad(null); setConflict(false)
     if (!loaded && (!name || nameErr)) return setErr(nameErr || 'Name the workflow.')
     if (!desc.trim()) return setErr('Add a description (what Claude matches against).')
     if (scope === 'project' && !project && !loaded) return setErr('Select a project in the sidebar first, or save to user scope.')
     try {
       setErr('')
       if (loaded) {
-        await api.updateCapability(loaded.id, { description: desc.trim(), graph, settings })
+        const c = await api.updateCapability(loaded.id, { description: desc.trim(), graph, settings, base_hash: overwrite ? undefined : loaded.file_hash ?? undefined })
+        setLoaded(l => l && { ...l, file_hash: c.file_hash ?? null })
         setSaved(snap(graph, settings, desc)); setOk(`Saved ${loaded.id}.`)
       } else {
         const c = await api.createCapability({ kind: 'workflow', scope, project: scope === 'project' ? project ?? undefined : undefined, name, description: desc.trim(), graph, settings })
         await open(c.id)
         setOk(`Created ${c.id}.`)
       }
-    } catch (e) { fail(e) }
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'changed_on_disk') setConflict(true) // before fail(): errText reads every 409 as a name clash
+      else fail(e)
+    }
   }
+  const reload = () => { if (loaded && confirm('Drop your unsaved canvas edits?')) open(loaded.id) }
   const run = async () => {
     if (!loaded) return
     try {
@@ -439,6 +489,52 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
   const lastStep = last?.steps.filter(s => s.node_id === sel?.id && s.status === 'done' && s.output && s.marker !== 'pinned').at(-1)
   const lastOut = last && lastStep?.output ? { run: last.id, output: lastStep.output } : undefined
 
+  useEffect(() => { // re-bound every render, so the handlers see the current canvas; fields keep their native undo and clipboard
+    const inField = (e: Event) => {
+      const t = e.target as HTMLElement | null
+      return !!t && (['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || t.isContentEditable)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (locked || inField(e) || !(e.ctrlKey || e.metaKey)) return
+      const k = e.key.toLowerCase()
+      if (k === 'z' && !e.shiftKey) undo()
+      else if (k === 'z' || (k === 'y' && e.ctrlKey)) redo()
+      else return
+      e.preventDefault()
+    }
+    const onCopy = (e: ClipboardEvent) => { // read-only workflows too
+      const picked = nodes.filter(n => n.selected && n.type !== 'trigger')
+      if (inField(e) || !picked.length || !e.clipboardData || window.getSelection()?.toString()) return
+      const ids = new Set(picked.map(n => n.id))
+      // ponytail: JSON is valid YAML; no YAML lib in the dashboard, so block-style YAML pasted from a file is refused
+      e.clipboardData.setData('text/plain', JSON.stringify(toGraph(picked, edges.filter(x => ids.has(x.source) && ids.has(x.target))), null, 2))
+      e.preventDefault()
+    }
+    const onPaste = (e: ClipboardEvent) => {
+      if (locked || inField(e)) return
+      e.preventDefault()
+      try {
+        const g = JSON.parse(e.clipboardData?.getData('text/plain') ?? '') as Graph
+        if (!Array.isArray(g?.nodes)) throw new Error('no nodes')
+        const picked = g.nodes.filter(n => n.type !== 'trigger' && Object.hasOwn(TYPE_COLOR, n.type)) // one trigger per workflow
+        const taken = nodes.map(n => n.id), ids = new Map<string, string>()
+        for (const n of picked) { const id = freeId(n.id, taken); ids.set(n.id, id); taken.push(id) }
+        const f = toFlow({
+          nodes: picked.map(n => ({ ...n, id: ids.get(n.id)!, pos: [(n.pos?.[0] ?? 0) + 40, (n.pos?.[1] ?? 0) + 40] })),
+          edges: (g.edges ?? []).filter(x => ids.has(x.from) && ids.has(x.to)).map(x => ({ ...x, from: ids.get(x.from)!, to: ids.get(x.to)! })),
+        })
+        const renames = [...ids].filter(([a, b]) => a !== b).reverse() // a new id can equal a later pasted node's old id, never an earlier one's
+        const stamp = Date.now()
+        setNodes(ns => [...ns.map(n => ({ ...n, selected: false })),
+          ...f.nodes.map(n => ({ ...n, selected: true, data: renames.reduce((d, [a, b]) => renameRefs(d, a, b), n.data) }))])
+        setEdges(es => [...es.map(x => ({ ...x, selected: false })), ...f.edges.map((x, i) => ({ ...x, id: `p${stamp}-${i}` }))])
+        setErr('')
+      } catch { setErr('Paste expects nodes copied from this editor.') }
+    }
+    window.addEventListener('keydown', onKey); window.addEventListener('copy', onCopy); window.addEventListener('paste', onPaste)
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('copy', onCopy); window.removeEventListener('paste', onPaste) }
+  })
+
   return (
     <div className="wf">
       <div className="wf-top card pad">
@@ -451,8 +547,10 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
               <option value="user">user (~/.claude)</option><option value="project">project{project ? `: ${project}` : ' (select one)'}</option>
             </select>
           )}
-        <button className="btn" style={{ borderColor: 'var(--accent)' }} onClick={save} disabled={locked}>{loaded ? 'Save' : 'Create'}</button>
+        <button className="btn" style={{ borderColor: 'var(--accent)' }} onClick={() => save()} disabled={locked}>{loaded ? 'Save' : 'Create'}</button>
         <button className="btn" onClick={reset}>New</button>
+        <button className="btn" onClick={undo} title="Undo (Ctrl+Z)" disabled={locked || !(hist.current.past.length || graphJson !== hist.current.cur)}>Undo</button>
+        <button className="btn" onClick={redo} title="Redo (Ctrl+Shift+Z)" disabled={locked || !hist.current.future.length || graphJson !== hist.current.cur}>Redo</button>
         <button className="btn" onClick={async () => setExisting(existing ? null : await api.capabilities({ project, kind: 'workflow' }))}>Open existing</button>
         <input className="inline-input" placeholder="Run input, fills {{input}}" aria-label="Run input" value={input} onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && canRun && run()} />
@@ -462,6 +560,8 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
         <div className="wf-msg">
           {nameErr && <span className="err">{nameErr}</span>}
           {err && <span className="err">{err}{bad && ` (node ${bad})`}</span>}
+          {conflict && <span className="err">The file changed on disk since you opened it.{' '}
+            <button className="btn" onClick={reload}>Reload</button> <button className="btn" onClick={() => save(true)}>Overwrite</button></span>}
           {readOnly && <span className="muted">{readOnly}</span>}
           {ok && <span className="okmsg">{ok}</span>}
         </div>

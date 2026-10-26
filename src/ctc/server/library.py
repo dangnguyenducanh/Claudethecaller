@@ -121,6 +121,14 @@ def _inside(path: Path, root: Path) -> None:
         fail(403, "forbidden", f"{path} is in the real ~/.claude: set CTC_CLAUDE_HOME to a temp dir (or CTC_ALLOW_REAL_CLAUDE_HOME=1 after H3)")
 
 
+def _sha(path: Path) -> str | None:
+    """sha256 hex of a file's bytes (the editor's file_hash, runs.py's wf_runs.file_sha); None when it cannot be read."""
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
 def _local_only(st, what: str = "capability files can only be edited") -> None:
     if st.cfg["mode"] != "local":  # shared mode: never write files (or run workflows) on the daemon host for a remote client
         fail(403, "forbidden", f"{what} in local mode")
@@ -205,6 +213,7 @@ async def capability(cap_id: str, request: Request, project: str | None = None):
     if wf and st.cfg["mode"] == "local" and (o := await owner()):  # this login's (PUT /api/workflows/{id}/schedule)
         sched = schedule.view(await st.store.fetchrow("select * from wf_schedules where owner = %s and workflow = %s", (o, cap_id)), o)
     return {**c, "editable": c["namespace"] == "user" or c["namespace"].startswith("project@"), "schedule": sched,
+            "file_hash": _sha(Path(c["path"])),
             "cluster_members": sorted(i for i, x in st.store.catalog.items() if cl and x["cluster_id"] == cl and i != cap_id),
             "recent_decisions": [to_decision(r) for r in decs],
             "steps": [s for s in _workflow_steps(c["path"]) if isinstance(s.get("cap"), str)] if wf else None,
@@ -252,6 +261,8 @@ async def update_capability(cap_id: str, b: CapabilityPatch, request: Request):
         fail(422, "invalid", "description must not be blank")
     path = Path(c["path"])
     _inside(path, _cap_root(st, c))
+    if b.base_hash is not None and _sha(path) != b.base_hash:  # a deleted file (None) is a conflict too
+        fail(409, "changed_on_disk", f"{path} changed on disk since it was loaded: reload it, or save without base_hash to overwrite")
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
@@ -274,7 +285,7 @@ async def update_capability(cap_id: str, b: CapabilityPatch, request: Request):
             meta["steps"] = [s.model_dump(exclude_none=True) for s in b.steps]
     path.write_text(_yaml(meta) if plain else _render(meta, body if b.body is None else b.body), encoding="utf-8")
     await _reindex(st, path, c["kind"], c["namespace"])
-    return await _cap(st, u, cap_id)
+    return {**await _cap(st, u, cap_id), "file_hash": _sha(path)}
 
 
 @router.delete("/capabilities/{cap_id}", response_model=Ok)
