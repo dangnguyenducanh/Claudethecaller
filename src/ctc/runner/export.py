@@ -2,13 +2,15 @@
 (https://code.claude.com/docs/en/workflows), which runs the same nodes as subagents of the user's own session.
 
 Each node is one guarded statement, in topological order: it runs when one of its in-edges is live (its source ran
-and, for an IF, took that handle), which is walker rules 2-4 as plain `if`s. agent -> agent(prompt, {label, ...});
-shell -> an agent told to run exactly that command, answering {exit_code, stdout_tail}; IF -> {value}, tested by the
-nodes after it; merge -> {inputs}; a loop (the back-edges into one node) -> a `while` capped at that node's max_visits;
+and, for an IF or switch, took that handle), which is walker rules 2-4 as plain `if`s. agent -> agent(prompt, {label,
+...}); shell -> an agent told to run exactly that command, answering {exit_code, stdout_tail}; IF -> {value} over its
+conditions (every/some for combine and/or), switch -> {case} via a chain of ?: over its cases, both tested by the nodes
+after them; merge -> {inputs}; a loop (the back-edges into one node) -> a `while` capped at that node's max_visits;
 readonly nodes side by side -> await parallel([...]). Templates fill at run time: {{input}} is the workflow's `args`
 (else the trigger's input), {{node.x}} that node's output, shell values single-quoted like shlex.quote. Every string
 from the graph is embedded with json.dumps, so no prompt or command can break out into code.
-Not exported: approval nodes (a native run can't pause for a sign-off: the caller refuses them), and per-node
+Not exported: approval nodes (a native run can't pause for a sign-off: the caller refuses them), regex conditions
+(Python re and JS RegExp differ, so a script could branch where the walker would not), and per-node
 permissions, tools, MCP, max_turns and timeouts: the session's own permission rules apply.
 """
 
@@ -16,7 +18,7 @@ from __future__ import annotations
 
 import json
 
-from ctc.runner.graph import TPL, back_edges, loop_body, max_visits
+from ctc.runner.graph import NUM, TPL, back_edges, conditions, loop_body, max_visits
 from ctc.runner.proc import _name
 
 J = json.dumps
@@ -25,14 +27,20 @@ const out = {}, ran = new Set(), visits = {}
 const get = (v, path) => path.reduce((x, k) => x == null ? undefined : x[k], v)
 const txt = v => v == null ? '' : typeof v === 'string' ? v : JSON.stringify(v)
 const q = s => "'" + s.replaceAll("'", "'\\''") + "'"
-const on = (id, handle) => ran.has(id) && (handle === undefined || out[id].value === handle)
+const on = (id, handle) => ran.has(id) && (handle === undefined || (out[id].case ?? out[id].value) === handle)
 const set = (id, v) => { out[id] = v; ran.add(id); visits[id] = (visits[id] || 0) + 1 }
-const test = (v, op, want) => v !== undefined && (op === 'truthy' ? Boolean(v)
-  : op === 'contains' ? (Array.isArray(v) ? v.includes(want) : txt(v).includes(txt(want)))
+const NUM = new RegExp(NUM_PATTERN)
+const num = v => typeof v === 'number' ? v : typeof v === 'string' && NUM.test(v) ? Number(v) : NaN  // booleans: NaN, as graph._num
+const cmp = (a, op, b) => !isNaN(a) && !isNaN(b) && (op === 'gt' ? a > b : op === 'ge' ? a >= b : op === 'lt' ? a < b : a <= b)
+const has = (v, want) => Array.isArray(v) ? v.includes(want) : txt(v).includes(txt(want))
+const test = (v, op, want) => v !== undefined && (op === 'truthy' ? Boolean(v) && (typeof v !== 'object' || Object.keys(v).length > 0)
+  : op === 'exists' ? v !== null
+  : op === 'contains' ? has(v, want) : op === 'not_contains' ? !has(v, want)
+  : ['gt', 'ge', 'lt', 'le'].includes(op) ? cmp(num(v), op, num(want))
   : (v === want || txt(v) === txt(want)) === (op === 'eq'))
 const ag = async (prompt, opts) => { const r = await agent(prompt, opts); return typeof r === 'string' ? {result: r} : {result: txt(r), structured_output: r} }
 const sh = (id, cmd) => agent('Run exactly this shell command in the repo and report the exit code and the last lines of output: ' + cmd, {label: id, schema: SHELL})
-"""
+""".replace("NUM_PATTERN", J(f"^(?:{NUM.pattern})$"))
 
 
 def _ref(path: str) -> str:
@@ -52,10 +60,16 @@ def _tpl(s: str, shell: bool = False) -> str:
 
 
 def to_js(g: dict, name: str, description: str = "") -> str:
-    """A validated graph -> the workflow script. ValueError for an approval node or a loop the script can't nest."""
+    """A validated graph -> the workflow script. ValueError for an approval node, a regex condition or a loop the
+    script can't nest."""
     nodes = {n["id"]: (g.get("defaults") or {}) | n for n in g["nodes"]}
     if gate := next((i for i, n in nodes.items() if n["type"] == "approval"), None):
         raise ValueError(f"has_approval: {gate}")
+    for nid, n in nodes.items():
+        conds = [c for k in n["cases"] for c in k["conditions"]] if n["type"] == "switch" else (
+            conditions(n) if n["type"] == "if" else [])
+        if any(c.get("op") == "regex" for c in conds):
+            raise ValueError(f"regex_condition: {nid} uses op regex; Python re and JS RegExp differ, so it is not exported")
     back = back_edges(g)
     fwd = [e for i, e in enumerate(g["edges"]) if i not in back]
     loops: dict[str, tuple[set, list]] = {}  # target -> (loop body, back-edges into it)
@@ -67,9 +81,13 @@ def to_js(g: dict, name: str, description: str = "") -> str:
     todo = [nid for nid in nodes if not indeg[nid]]
     lines, batch, stack, emitted = [], [], [], set()  # stack: open loops [(target, body, back-edges)]
 
-    def on(e: dict) -> str:  # an edge is live: its source ran and, for an IF, took this edge's handle
-        h = f", {str(e.get('handle')).lower()}" if nodes[e["from"]]["type"] == "if" else ""
-        return f"on({J(e['from'])}{h})"
+    def on(e: dict) -> str:  # an edge is live: its source ran and, for an IF or switch, took this edge's handle
+        t, h = nodes[e["from"]]["type"], str(e.get("handle")).lower()
+        return f"on({J(e['from'])}{', ' + h if t == 'if' else ', ' + J(h) if t == 'switch' else ''})"
+
+    def tests(n: dict) -> str:  # an IF's (or a switch case's) conditions as one JS boolean
+        ts = ", ".join(f"test({_ref(str(c['path']))}, {J(c['op'])}, {J(c.get('value'))})" for c in conditions(n))
+        return f"[{ts}].{'some' if n.get('combine') == 'or' else 'every'}(Boolean)"
 
     def stmt(nid: str) -> str:
         n, t = nodes[nid], nodes[nid]["type"]
@@ -83,7 +101,9 @@ def to_js(g: dict, name: str, description: str = "") -> str:
         elif t == "shell":
             v = f"await sh({J(nid)}, {_tpl(n['command'], shell=True)})"
         elif t == "if":
-            v = f"{{value: test({_ref(str(n['path']))}, {J(n['op'])}, {J(n.get('value'))})}}"
+            v = f"{{value: {tests(n)}}}"
+        elif t == "switch":  # the first matching case, else default
+            v = "{case: " + "".join(f"{tests(k)} ? {J(k['name'])} : " for k in n["cases"]) + '"default"}'
         else:  # merge: the outputs of its live inputs
             ins = ", ".join(f"{on(e)} && [{J(e['from'])}, out[{J(e['from'])}]]" for e in fwd if e["to"] == nid)
             v = f"{{inputs: Object.fromEntries([{ins}].filter(Boolean))}}"

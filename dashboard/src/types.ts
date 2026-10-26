@@ -91,7 +91,10 @@ export interface ApiKey { id: number; name: string; created_at: string; revoked_
 export interface NewApiKey { name: string }
 
 // Workflow runner, PLAN.md "Workflow runner (m5)" → Workflow file and API.
-export type NodeType = 'trigger' | 'agent' | 'shell' | 'if' | 'approval' | 'merge' // merge has no fields of its own
+export type NodeType = 'trigger' | 'agent' | 'shell' | 'if' | 'switch' | 'approval' | 'merge' // merge has no fields of its own
+export type Op = 'eq' | 'ne' | 'gt' | 'ge' | 'lt' | 'le' | 'contains' | 'not_contains' | 'regex' | 'exists' | 'truthy'
+export interface Condition { path: string; op: Op; value?: unknown }
+export interface SwitchCase { name: string; conditions: Condition[]; combine?: 'and' | 'or' }
 export interface WfNode {
   id: string; type: NodeType; pos: [number, number]; max_visits?: number
   input?: string // trigger
@@ -99,10 +102,16 @@ export interface WfNode {
   allowed_tools?: string[]; mcp_config?: unknown; json_schema?: unknown; resume_from?: string; max_turns?: number; on_error?: 'fail' | 'continue'
   command?: string // shell
   timeout_s?: number; readonly?: boolean // agent and shell
-  path?: string; op?: 'eq' | 'ne' | 'contains' | 'truthy'; value?: unknown // if
+  path?: string; op?: Op; value?: unknown // if, the old single-condition form
+  conditions?: Condition[]; combine?: 'and' | 'or' // if
+  cases?: SwitchCase[] // switch: out-edges use a case name or 'default' as handle
   message?: string // approval
 }
-export interface Graph { nodes: WfNode[]; edges: { from: string; to: string; handle?: 'true' | 'false' }[]; defaults?: { max_visits?: number } } // a run's snapshot carries `defaults`
+export interface Graph {
+  nodes: WfNode[]
+  edges: { from: string; to: string; handle?: string }[] // IF 'true' | 'false'; Switch case name | 'default'
+  defaults?: { max_visits?: number } // a run's snapshot carries `defaults`
+}
 export interface WorkflowSettings { permission: 'worktree' | 'container'; allow_extra_usage: boolean; auto_resume: boolean; max_run_tokens: number | null }
 export interface Schedule { cron: string; input: string; enabled: boolean; next_at: string | null; last_fired_at: string | null } // cron in daemon local time
 

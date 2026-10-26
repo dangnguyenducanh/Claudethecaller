@@ -1,18 +1,21 @@
 import '@xyflow/react/dist/style.css'
 import {
   Background, Controls, Handle, MarkerType, Position, ReactFlow, ReactFlowProvider, addEdge, useEdgesState, useNodeConnections, useNodesState, useReactFlow,
+  useUpdateNodeInternals,
   type Connection, type Edge, type Node, type NodeProps,
 } from '@xyflow/react'
 import { createContext, useContext, useEffect, useState, type DragEvent } from 'react'
 import { ApiError, NEED_DAEMON, api, errText, usingMock } from './api'
 import type { ViewProps } from './App'
 import { parseSteps } from './parts'
-import type { Capability, CapabilityDetail, Graph, Kind, NodeType, Schedule, WfNode, WorkflowSettings, WorkflowStep } from './types'
+import type { Capability, CapabilityDetail, Condition, Graph, Kind, NodeType, Op, Schedule, SwitchCase, WfNode, WorkflowSettings, WorkflowStep } from './types'
 import { Header, Search, fmtTime } from './ui'
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
 const KIND_COLOR: Record<Kind, string> = { skill: '#7c8cff', agent: '#b38cff', command: '#f59e42', workflow: '#3ddc97' }
-const TYPE_COLOR: Record<NodeType, string> = { trigger: '#3ddc97', agent: '#b38cff', shell: '#f59e42', if: '#7c8cff', approval: '#f5b14a', merge: '#4ac9f5' }
+const TYPE_COLOR: Record<NodeType, string> = { trigger: '#3ddc97', agent: '#b38cff', shell: '#f59e42', if: '#7c8cff', switch: '#c77dff', approval: '#f5b14a', merge: '#4ac9f5' }
+const OPS: Op[] = ['eq', 'ne', 'gt', 'ge', 'lt', 'le', 'contains', 'not_contains', 'regex', 'exists', 'truthy']
+const CASE_RE = /^[a-z0-9][a-z0-9_-]*$/ // graph.CASE: switch case names are their output handles
 const DND = 'application/ctc-cap'
 const DEFAULT_SETTINGS: WorkflowSettings = { permission: 'worktree', allow_extra_usage: false, auto_resume: true, max_run_tokens: null }
 const arrow = { type: MarkerType.ArrowClosed }
@@ -26,28 +29,38 @@ export const NodeCtx = createContext<{ bad: string | null; status: Record<string
 const NO_STATUS = { bad: null, status: {} }
 
 const firstLine = (s?: string) => (s ?? '').split('\n')[0]
+const condText = (c: Partial<Condition>) => `${c.path || '?'} ${c.op ?? 'eq'} ${c.op === 'truthy' || c.op === 'exists' ? '' : JSON.stringify(c.value ?? null)}`
+/** An IF's conditions: `conditions`, else the old single path/op/value form (graph.conditions). */
+const ifConds = (d: WfData): Condition[] => d.conditions ?? (d.path ? [{ path: d.path, op: d.op ?? 'eq', ...(d.value !== undefined ? { value: d.value } : {}) }] : [])
 
 function NodeView({ id, type, data, selected }: NodeProps<FlowNode>) {
   const { bad, status, runs } = useContext(NodeCtx)
   const inbound = useNodeConnections({ handleType: 'target' }).length
+  const cases = data.cases ?? []
+  const outs = type === 'if' ? ['true', 'false'] : type === 'switch' ? [...cases.map(c => c.name), 'default'] : null
+  const updateInternals = useUpdateNodeInternals()
+  const outKey = outs?.join('\n')
+  useEffect(() => updateInternals(id), [id, outKey, updateInternals]) // React Flow caches handle positions
   const sub = type === 'trigger' ? (data.input ? `input: ${data.input}` : 'run input → {{input}}')
     : type === 'agent' ? data.cap ?? data.agent ?? firstLine(data.prompt)
     : type === 'shell' ? firstLine(data.command)
     : type === 'approval' ? firstLine(data.message)
     : type === 'merge' ? `waits for ${inbound} input${inbound === 1 ? '' : 's'}`
-    : `${data.path ?? '?'} ${data.op ?? 'eq'} ${data.op === 'truthy' ? '' : JSON.stringify(data.value ?? null)}`
+    : type === 'switch' ? `${cases.length} case${cases.length === 1 ? '' : 's'} + default`
+    : data.conditions ? `${condText(data.conditions[0] ?? {})}${data.conditions.length > 1 ? ` +${data.conditions.length - 1}` : ''}`
+    : condText(data)
   return (
     <div className={`wfnode${selected ? ' sel' : ''}${bad === id ? ' bad' : ''}${status[id] ? ' st-' + status[id] : ''}`}>
       {type !== 'trigger' && <Handle type="target" position={Position.Left} />}
       <div className="mono wf-id"><span className="dot" style={{ background: TYPE_COLOR[type] }} />{id}<span className="wf-kind">{status[id] ?? type}</span>{(runs?.[id] ?? 0) > 1 && <span className="tag warn">×{runs![id]}</span>}</div>
       <div className="wf-sub mono">{sub || '—'}</div>
-      {type === 'if'
-        ? (['true', 'false'] as const).map(h => <div key={h} className="wf-out">{h}<Handle type="source" position={Position.Right} id={h} /></div>)
+      {outs
+        ? outs.map(h => <div key={h} className="wf-out">{h}<Handle type="source" position={Position.Right} id={h} /></div>)
         : <Handle type="source" position={Position.Right} />}
     </div>
   )
 }
-export const nodeTypes = { trigger: NodeView, agent: NodeView, shell: NodeView, if: NodeView, approval: NodeView, merge: NodeView }
+export const nodeTypes = { trigger: NodeView, agent: NodeView, shell: NodeView, if: NodeView, switch: NodeView, approval: NodeView, merge: NodeView }
 
 export const toFlow = (g: Graph): { nodes: FlowNode[]; edges: Edge[] } => ({
   nodes: g.nodes.map(({ id, type, pos, ...data }) => ({ id, type, position: { x: pos[0], y: pos[1] }, data, deletable: type !== 'trigger' })),
@@ -55,7 +68,7 @@ export const toFlow = (g: Graph): { nodes: FlowNode[]; edges: Edge[] } => ({
 })
 const toGraph = (nodes: FlowNode[], edges: Edge[]): Graph => ({
   nodes: nodes.map(n => ({ id: n.id, type: n.type!, pos: [Math.round(n.position.x), Math.round(n.position.y)], ...n.data })),
-  edges: edges.map(e => ({ from: e.source, to: e.target, ...(e.sourceHandle ? { handle: e.sourceHandle as 'true' | 'false' } : {}) })),
+  edges: edges.map(e => ({ from: e.source, to: e.target, ...(e.sourceHandle ? { handle: e.sourceHandle } : {}) })),
 })
 
 /** Ids of edges that point at a node on the DFS stack from the trigger. Display only (dashed); the walker decides for real. */
@@ -119,8 +132,67 @@ function BlurField({ label, init, commit, area }: { label: string; init: string;
   )
 }
 
+const GROUP = { display: 'grid', gap: 8, paddingTop: 8, borderTop: '1px solid var(--line)' }
+const valueText = (v: unknown) => (v === undefined ? '' : typeof v === 'string' ? v : JSON.stringify(v))
+
+/** An IF's (or a switch case's) condition rows and their and/or. */
+function Conditions({ conds, combine, onChange }: { conds: Condition[]; combine?: 'and' | 'or'; onChange: (conds: Condition[], combine?: 'and' | 'or') => void }) {
+  const put = (i: number, patch: Partial<Condition>) => onChange(conds.map((c, j) => {
+    if (j !== i) return c
+    const { value, ...rest } = { ...c, ...patch }
+    return value === undefined ? rest : { ...rest, value }
+  }), combine)
+  return (
+    <>
+      {conds.map((c, i) => (
+        <div key={i} style={GROUP}>
+          <label>Path, e.g. test.exit_code (missing = false)<input value={c.path} onChange={e => put(i, { path: e.target.value })} /></label>
+          <div className="row2">
+            <label>Op<select value={c.op} onChange={e => put(i, { op: e.target.value as Op })}>{OPS.map(o => <option key={o}>{o}</option>)}</select></label>
+            {c.op !== 'exists' && c.op !== 'truthy' && <BlurField label="Value (JSON or text)" init={valueText(c.value)} commit={s => put(i, { value: s === '' ? undefined : jsonOrText(s) })} />}
+          </div>
+          <div className="actions"><button type="button" className="btn" onClick={() => onChange(conds.filter((_, j) => j !== i), combine)}>Remove condition</button></div>
+        </div>
+      ))}
+      <div className="actions">
+        <button type="button" className="btn" onClick={() => onChange([...conds, { path: '', op: 'eq' }], combine)}>+ Condition</button>
+        {conds.length > 1 && <select aria-label="Combine" value={combine ?? 'and'} onChange={e => onChange(conds, e.target.value as 'and' | 'or')}>
+          <option value="and">and: all match</option><option value="or">or: any matches</option></select>}
+      </div>
+    </>
+  )
+}
+
+/** A switch's cases: each name is its output handle, so a rename or removal also moves or drops that handle's edges. */
+function Cases({ cases, set, renameHandle, dropHandle }: { cases: SwitchCase[]; set: (c: SwitchCase[]) => void; renameHandle: (from: string, to: string) => void; dropHandle: (h: string) => void }) {
+  const put = (i: number, c: SwitchCase) => set(cases.map((x, j) => (j === i ? c : x)))
+  const free = () => { let k = cases.length + 1; while (cases.some(c => c.name === `case-${k}`)) k++; return `case-${k}` }
+  return (
+    <>
+      {cases.map((c, i) => (
+        <div key={i} style={GROUP}>
+          <BlurField label={`Case ${i + 1}: name (its output)`} init={c.name} commit={s => {
+            if (!CASE_RE.test(s)) throw new Error('Lowercase letters, digits, - or _; start with a letter or digit.')
+            if (s === 'default') throw new Error('default is the output when no case matches.')
+            if (cases.some((x, j) => j !== i && x.name === s)) throw new Error('Another case has this name.')
+            put(i, { ...c, name: s }); renameHandle(c.name, s)
+          }} />
+          <Conditions conds={c.conditions} combine={c.combine} onChange={(conds, combine) => put(i, { name: c.name, conditions: conds, ...(combine ? { combine } : {}) })} />
+          <div className="actions"><button type="button" className="btn" onClick={() => { set(cases.filter((_, j) => j !== i)); dropHandle(c.name) }}>Remove case {c.name}</button></div>
+        </div>
+      ))}
+      <div className="actions"><button type="button" className="btn" onClick={() => set([...cases, { name: free(), conditions: [{ path: '', op: 'eq' }] }])}>+ Case</button></div>
+      <div className="muted">The first case whose conditions match fires its output; when none does, default fires.</div>
+    </>
+  )
+}
+
 type SetField = (k: keyof WfData, v: unknown) => void
-function NodeForm({ n, ids, agents, set, rename }: { n: FlowNode; ids: string[]; agents: string[]; set: SetField; rename: (to: string) => void }) {
+type NodeFormProps = {
+  n: FlowNode; ids: string[]; agents: string[]; set: SetField; rename: (to: string) => void
+  renameHandle: (from: string, to: string) => void; dropHandle: (h: string) => void // this node's out-edges, by handle
+}
+function NodeForm({ n, ids, agents, set, rename, renameHandle, dropHandle }: NodeFormProps) {
   const d = n.data
   const str = (k: keyof WfData) => (d[k] as string | undefined) ?? ''
   const text = (k: keyof WfData, label: string) => <label>{label}<input value={str(k)} onChange={e => set(k, e.target.value)} /></label>
@@ -162,14 +234,11 @@ function NodeForm({ n, ids, agents, set, rename }: { n: FlowNode; ids: string[];
       </>}
       {n.type === 'approval' && area('message', 'Message (shown on the run page while it waits)')}
       {n.type === 'merge' && <div className="muted">Runs once every inbound edge has arrived and at least one input ran (skipped branches count as arrived); output {'{inputs: {node: output}}'} over the inputs that ran. Not allowed inside a loop.</div>}
-      {n.type === 'if' && <>
-        {text('path', 'Path, e.g. test.exit_code (missing = false)')}
-        <div className="row2">
-          <label>Op<select value={d.op ?? 'eq'} onChange={e => set('op', e.target.value)}>{['eq', 'ne', 'contains', 'truthy'].map(o => <option key={o}>{o}</option>)}</select></label>
-          <BlurField label="Value (JSON or text)" init={d.value === undefined ? '' : typeof d.value === 'string' ? d.value : JSON.stringify(d.value)}
-            commit={s => set('value', s === '' ? undefined : jsonOrText(s))} />
-        </div>
-      </>}
+      {n.type === 'if' && <Conditions conds={ifConds(d)} combine={d.combine} onChange={(conds, combine) => {
+        set('conditions', conds); set('combine', combine)
+        set('path', undefined); set('op', undefined); set('value', undefined) // the old single form becomes conditions
+      }} />}
+      {n.type === 'switch' && <Cases cases={d.cases ?? []} set={c => set('cases', c)} renameHandle={renameHandle} dropHandle={dropHandle} />}
       {num('max_visits', 'Max visits')}
     </>
   )
@@ -272,6 +341,9 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
     setNodes(ns => ns.map(n => (n.id === from ? { ...n, id: to } : n)))
     setEdges(es => es.map(e => ({ ...e, source: e.source === from ? to : e.source, target: e.target === from ? to : e.target })))
   }
+  const renameHandle = (node: string, from: string, to: string) =>
+    setEdges(es => es.map(e => (e.source === node && e.sourceHandle === from ? { ...e, sourceHandle: to, label: to } : e)))
+  const dropHandle = (node: string, h: string) => setEdges(es => es.filter(e => !(e.source === node && e.sourceHandle === h)))
 
   const reset = () => {
     setNodes([TRIGGER]); setEdges([]); setSettings(DEFAULT_SETTINGS); setLoaded(null); setSaved(''); setName(''); setDesc('')
@@ -382,7 +454,8 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
           <div className="pad actions">
             <button className="btn" disabled={locked} onClick={() => add('agent', { prompt: '{{input}}' })}>+ Agent</button>
             <button className="btn" disabled={locked} onClick={() => add('shell', {})}>+ Shell</button>
-            <button className="btn" disabled={locked} onClick={() => add('if', { op: 'eq' })}>+ IF</button>
+            <button className="btn" disabled={locked} onClick={() => add('if', { conditions: [{ path: '', op: 'eq' }] })}>+ IF</button>
+            <button className="btn" disabled={locked} onClick={() => add('switch', { cases: [{ name: 'case-1', conditions: [{ path: '', op: 'eq' }] }] })}>+ Switch</button>
             <button className="btn" disabled={locked} onClick={() => add('approval', { message: 'Approve and continue?' })}>+ Approval</button>
             <button className="btn" disabled={locked} onClick={() => add('merge', {})}>+ Merge</button>
             <Search value={q} onChange={setQ} placeholder="Find a capability" />
@@ -404,12 +477,13 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
               <Controls showInteractive={false} />
             </ReactFlow>
           </NodeCtx.Provider>
-          {nodes.length <= 1 && <div className="wf-hint">Drag capabilities here (each becomes an Agent node) or add Shell, IF, Approval and Merge nodes,<br />then connect them from the trigger. Edges that loop back are drawn dashed.</div>}
+          {nodes.length <= 1 && <div className="wf-hint">Drag capabilities here (each becomes an Agent node) or add Shell, IF, Switch, Approval and Merge nodes,<br />then connect them from the trigger. Edges that loop back are drawn dashed.</div>}
         </div>
         <aside className="wf-panel card pad">
           <fieldset className="form" disabled={locked}>
             {sel
-              ? <NodeForm key={sel.id} n={sel} ids={nodes.map(n => n.id)} agents={agents} set={(k, v) => setField(sel.id, k, v)} rename={to => rename(sel.id, to)} />
+              ? <NodeForm key={sel.id} n={sel} ids={nodes.map(n => n.id)} agents={agents} set={(k, v) => setField(sel.id, k, v)} rename={to => rename(sel.id, to)}
+                renameHandle={(from, to) => renameHandle(sel.id, from, to)} dropHandle={h => dropHandle(sel.id, h)} />
               : <div className="muted">Select a node to edit it.</div>}
           </fieldset>
           {sel?.type === 'trigger' && <fieldset className="form">{/* not locked: the schedule is the owner's DB row, not the file */}
@@ -424,5 +498,5 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
 }
 
 export default function Workflows(props: ViewProps & { theme: string }) {
-  return <><Header crumb="Workflows" title="Workflow editor" sub="Agent, Shell, IF, Approval and Merge nodes on a canvas; each run gets its own git branch and worktree" /><ReactFlowProvider><Editor {...props} /></ReactFlowProvider></>
+  return <><Header crumb="Workflows" title="Workflow editor" sub="Agent, Shell, IF, Switch, Approval and Merge nodes on a canvas; each run gets its own git branch and worktree" /><ReactFlowProvider><Editor {...props} /></ReactFlowProvider></>
 }

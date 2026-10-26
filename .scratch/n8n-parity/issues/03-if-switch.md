@@ -1,6 +1,6 @@
 # 03 — if-switch
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: none
 Spec: `.scratch/n8n-parity/spec.md` (read it first; this ticket implements part of it)
 Touches: src/ctc/runner/graph.py, src/ctc/runner/export.py, dashboard/src/Workflows.tsx, dashboard/src/types.ts, tests/test_graph_if_switch.py
@@ -22,3 +22,5 @@ IF gains `conditions: [{path, op, value}]` + `combine: and|or` and ops `gt ge lt
 Pure graph tests (no DB). Editor: browser QC in the lane.
 
 ## Comments
+
+2026-10-26 — resolved on branch `n8n-03-if-switch`, merged into `m5-n8n-parity` (tasks T096–T103, T105; T104 browser QC deferred to the final QC pass). IF `conditions` + `combine`, ops eq ne gt ge lt le contains not_contains regex exists truthy (regex input capped at REGEX_MAX chars); new `switch` node (`cases`, first match else `default`); `eval_switch` reuses `eval_if`; engine dispatches switch in `_input()`/`_spawn()`; export translates IF/Switch, refuses regex conditions (`regex_condition`, a 422 not_exportable). Known export gaps: `contains` on a dict and eq/ne on objects differ between Python and JS. Tests: tests/test_graph_if_switch.py (72, no DB).
