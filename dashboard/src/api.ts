@@ -1,8 +1,8 @@
 import { handle } from './mock'
 import type {
-  Activity, ApiKey, Capability, CapabilityDetail, CapabilityPatch, Decision, DedupPair, Diff, Health, HistoryFile, HistoryStatus,
-  Job, Kind, Kpis, Memory, MemoryDetail, MemoryKind, MemoryPatch, MemoryWrite, Metric, NewCapability, NewMemory, Ok, Override,
-  Project, ProjectDetail, Range, Run, RunDetail, RunStatus, RunTrigger, Schedule, Session, SessionDetail, Source, StepLog, Timeline,
+  Activity, ApiKey, Capability, CapabilityDetail, CapabilityPatch, Decision, DedupPair, Diff, FeedCounts, FeedItem, Health, HistoryFile, HistoryStatus,
+  Job, Kind, Kpis, Memory, MemoryDetail, MemoryKind, MemoryPatch, MemoryWrite, Metric, NewCapability, NewMemory, Observation, Ok, Override,
+  Project, ProjectDetail, Range, Run, RunDetail, RunStatus, RunTrigger, Schedule, Session, SessionDetail, Source, StepLog, Summary, Timeline,
 } from './types'
 
 export class ApiError extends Error {
@@ -138,6 +138,18 @@ export const api = {
   restoreMemory: (id: string) => req<Memory>('POST', `/memories/${seg(id)}/restore`),
   importMemories: () => req<{ job_id: string }>('POST', '/memories/import', {}), // Claude's own memory files, read-only
   backfillMemories: (sessions: number) => req<{ job_id: string }>('POST', '/memories/backfill', { sessions }), // A3 over recent transcripts
+
+  // Timeline (m7): observations, summaries and prompts merged newest first; cursor `before`/`after` = `<iso>,<kind>,<id>`
+  memFeed: (o: { project: string | null; session_id?: string | null; types?: string; q?: string; range?: Range; before?: string; after?: string; limit?: number }) =>
+    req<FeedItem[]>('GET', '/memories/feed' + qs(o)),
+  memFeedCounts: (o: { project: string | null; session_id?: string | null; q?: string; range?: Range }) => req<FeedCounts>('GET', '/memories/feed/counts' + qs(o)),
+  memTimeline: (o: { anchor: string | number; depth_before?: number; depth_after?: number; project?: string | null }) => req<FeedItem[]>('GET', '/memories/timeline' + qs(o)),
+  // JSON {text}, because req() parses only JSON
+  memContext: async (project: string) => (await req<{ text: string }>('GET', '/memories/context' + qs({ project }))).text,
+  obsDelete: (id: number) => req<Ok>('DELETE', `/observations/${id}`),
+  obsRestore: (id: number) => req<Observation>('POST', `/observations/${id}/restore`),
+  sumDelete: (id: number) => req<Ok>('DELETE', `/summaries/${id}`),
+  sumRestore: (id: number) => req<Summary>('POST', `/summaries/${id}/restore`),
 
   // Health (outside /api, unversioned dashboard routes don't apply: it is the machine-facing /v1 route)
   health: () => req<Health>('GET', '/health', undefined, '/v1'),

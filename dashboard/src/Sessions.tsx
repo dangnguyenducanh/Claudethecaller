@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { PAGE, api, errText } from './api'
 import type { ViewProps } from './App'
-import { DecisionDetail, DecisionTable, MemoryCard } from './parts'
+import { DecisionDetail, DecisionTable, MemoryCard, ObservationCard, SummaryCard } from './parts'
 import type { Decision, Session, SessionDetail } from './types'
 import { Drawer, Header, Search, colorOf, fmtInt, fmtTime, fmtTokens } from './ui'
 
@@ -30,7 +30,7 @@ export default function Sessions({ project, projects }: ViewProps) {
       </Header>
       <div className="card tablewrap">
         <table>
-          <thead><tr><th>Session</th><th className="num">Turns</th><th className="num">Tokens</th><th className="num">Routes</th><th className="num">Followed</th><th className="num">Memories</th></tr></thead>
+          <thead><tr><th>Session</th><th className="num">Turns</th><th className="num">Tokens</th><th className="num">Routes</th><th className="num">Followed</th><th className="num">Memories</th><th className="num">Obs</th></tr></thead>
           <tbody>
             {sessions.map(s => (
               <tr key={s.id} className="click" onClick={() => setOpen(s.id)}>
@@ -45,6 +45,7 @@ export default function Sessions({ project, projects }: ViewProps) {
                 <td className="num">{s.decisions}</td>
                 <td className="num">{s.followed}/{s.decisions}</td>
                 <td className="num">{s.memories}</td>
+                <td className="num">{s.observations ?? 0}</td>
               </tr>
             ))}
           </tbody>
@@ -65,7 +66,7 @@ function SessionDrawer({ id, projects, onClose, onDeleted }: { id: string; proje
   useEffect(() => { api.session(id).then(setS).catch(e => setErr(errText(e))) }, [id])
 
   const remove = async () => {
-    if (!s || !confirm(`Delete this session and its ${s.decisions.length} decisions? Its memories stay.`)) return
+    if (!s || !confirm(`Delete this session with its ${s.decisions.length} decisions, ${s.observations?.length ?? 0} observations and ${s.summaries?.length ?? 0} summaries? Its long-term memories stay.`)) return
     try { await api.deleteSession(id); onDeleted() } catch (e) { setErr(errText(e)) }
   }
 
@@ -90,6 +91,17 @@ function SessionDrawer({ id, projects, onClose, onDeleted }: { id: string; proje
           {s.memories.length ? s.memories.map(m => (
             <MemoryCard key={m.id} m={m} onChange={next => setS({ ...s, memories: s.memories.map(x => (x.id === next.id ? next : x)) })} />
           )) : <div className="faint">None extracted.</div>}
+          <div className="card-title">Observations from this session <span className="faint mono">{s.observations?.length ?? 0}</span></div>
+          {s.observations?.length ? s.observations.map(o => (
+            <ObservationCard key={o.id} o={o} compact onChange={next => setS({ ...s, observations: s.observations?.map(x => (x.id === next.id ? next : x)) })} />
+          )) : <div className="faint">None captured.</div>}
+          {!!s.summaries?.length && (
+            <>
+              <div className="card-title">Summaries <span className="faint mono">{s.summaries.length}</span></div>
+              {s.summaries.map(x => <SummaryCard key={x.id} x={x} onChange={next => setS({ ...s, summaries: s.summaries?.map(y => (y.id === next.id ? next : y)) })} />)}
+            </>
+          )}
+          <a className="btn" style={{ alignSelf: 'flex-start' }} href={`#memories?session=${encodeURIComponent(id)}`}>Open in Memories</a>
           <div className="actions"><button className="btn danger" onClick={remove}>Delete session</button>{err && <span className="err">{err}</span>}</div>
         </>
       )}

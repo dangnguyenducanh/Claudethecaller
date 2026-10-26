@@ -6,7 +6,7 @@ import type { HistoryStatus, IndexResult, Job } from './types'
 import { Header, Segmented, fmtTime } from './ui'
 
 const STATUS = ['all', 'queued', 'running', 'done', 'failed'] as const
-const KINDS = ['all', 'index', 'enrich', 'import_memory', 'backfill', 'extract', 'history', 'distill'] as const // the daemon's job kinds (jobs.py HANDLERS)
+const KINDS = ['all', 'index', 'enrich', 'import_memory', 'backfill', 'extract', 'history', 'distill', 'observe'] as const // the daemon's job kinds (jobs.py HANDLERS)
 const PILL: Record<Job['status'], string> = { queued: '', running: 'warn', done: 'good', failed: 'bad' }
 const active = (j: Job) => j.status === 'queued' || j.status === 'running'
 
