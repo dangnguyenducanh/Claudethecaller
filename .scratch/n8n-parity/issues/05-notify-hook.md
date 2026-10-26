@@ -1,6 +1,6 @@
 # 05 — notify-hook
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01
 Spec: `.scratch/n8n-parity/spec.md` (read it first; this ticket implements part of it)
 Touches: src/ctc/runner/notify.py (new), src/ctc/runner/engine.py (call sites only), config/server.yaml (runner.notify), tests/test_notify_hook.py (engine-seam cases using the ticket 01 fixtures from tests/conftest.py)
@@ -21,3 +21,5 @@ A notify command: daemon-wide `runner.notify` in server config, overridable per 
 Engine-seam cases from ticket 01.
 
 ## Comments
+
+2026-10-26 — resolved on branch `n8n-05-notify-hook`, merged into `m5-n8n-parity` (tasks T034–T039). New `src/ctc/runner/notify.py`: `fire(run, status, error)` runs `runner.notify` (config/server.yaml, `notify: ""` = off) or the workflow's `settings.notify` (present wins) with CTC_RUN_ID/STATUS/WORKFLOW/URL/ERROR, detached in a thread, 10 s kill, output to <runs>/<id>/notify.log, never CTC_RUN; only for failed|waiting|quota|done. engine.py fires from `_fail` (returns the rows it moved), claim's quota and failed gates, the approved-nothing-left done path and the batch loop's end. `update_capability` keeps YAML-only settings keys across editor saves. Tests: tests/test_notify_hook.py (18). Note: a notify still hanging when the daemon exits is not killed.

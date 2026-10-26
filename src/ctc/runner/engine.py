@@ -30,6 +30,7 @@ from pathlib import Path
 import psycopg
 from psycopg.types.json import Jsonb
 
+from ctc.runner import notify
 from ctc.runner.graph import (
     _reach,
     batch,
@@ -164,12 +165,14 @@ async def _set(st, rid: int, **cols) -> None:
 
 
 async def _fail(st, ids: list[int], error: str) -> None:
-    """Fail running runs and their running steps. Nothing re-runs (PLAN.md m5 Recovery)."""
+    """Fail running runs and their running steps. Nothing re-runs (PLAN.md m5 Recovery). The one choke point for
+    failing a running run (max_run_tokens, runner error, sweep, Ctrl-C): each run it moved fires notify once."""
     if ids:
         await st.store.execute("update wf_steps set status = 'failed', error = %s, ended_at = now()"
                                " where run_id = any(%s) and status = 'running'", (error, ids))
-        await st.store.execute("update wf_runs set status = 'failed', error = %s, ended_at = now()"
-                               " where id = any(%s) and status = 'running'", (error, ids))
+        for row in await st.store.fetch("update wf_runs set status = 'failed', error = %s, ended_at = now()"
+                                        " where id = any(%s) and status = 'running' returning id, workflow, graph", (error, ids)):
+            notify.fire(row, "failed", error)
 
 
 async def submit(st, owner: str, workflow: str, g: dict, file_sha: str, repo: str, project_id: str | None = None,
@@ -263,7 +266,9 @@ async def claim(st, run_id: int | None = None) -> dict | None:
     if resets := await st.store.fetchval(
             "select max(quota_resets_at) from wf_runs where owner = %(o)s and quota_resets_at > now()"
             " and not exists (select 1 from wf_runs where id = %(id)s and quota_resets_at <= now())", {"o": o, "id": rid}):
-        await _set(st, rid, status="quota", quota_resets_at=resets, error=f"usage limit: waiting for the reset at {resets.isoformat()}")
+        msg = f"usage limit: waiting for the reset at {resets.isoformat()}"
+        await _set(st, rid, status="quota", quota_resets_at=resets, error=msg)
+        notify.fire(run, "quota", msg)
         return None
     pre = await preflight((run["graph"].get("settings") or {}).get("permission") == "container")  # in the image too
     _owner = pre["email"] or _owner
@@ -280,6 +285,7 @@ async def claim(st, run_id: int | None = None) -> dict | None:
             err = str(e)
     if err:
         await _set(st, rid, **cols, status="failed", error=err, ended_at=datetime.now(UTC))
+        notify.fire(run, "failed", err)
         return None
     await _set(st, rid, **cols)
     return run | cols
@@ -402,8 +408,9 @@ async def execute(st, run: dict) -> None:
         reused = {(r["node_id"], r["visit"]): r for r in await st.store.fetch(
             "select id, node_id, visit, output, session_id from wf_steps where run_id = %s and marker = 'reused'", (rid,))}
         if not (r := ready(g, wst)):  # approved with nothing left to run: what quiescence skipped, then done
-            await _save(st, [], skips(), {"rid": rid, "state": Jsonb(wst), "tokens": 0, "end": "done", "err": None,
-                                          "resets": None, "pr": None})
+            if await _save(st, [], skips(), {"rid": rid, "state": Jsonb(wst), "tokens": 0, "end": "done", "err": None,
+                                             "resets": None, "pr": None}):
+                notify.fire(run, "done", None)
             return
         while r:
             b = batch(g, r)
@@ -474,6 +481,8 @@ async def execute(st, run: dict) -> None:
                 end = None if r else "done"
             saved = await _save(st, steps, skips(), {"rid": rid, "state": Jsonb(wst), "tokens": tok, "end": end,
                                                      "err": err, "resets": resets, "pr": pr})
+            if saved and end:  # committed: failed, quota, waiting or done
+                notify.fire(run, end, err)
             for *_, log_path, _ in jobs:
                 if log_path and log_path.exists():
                     await asyncio.to_thread(_gzip, log_path)
