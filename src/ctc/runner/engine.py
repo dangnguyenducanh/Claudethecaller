@@ -46,6 +46,7 @@ from ctc.runner.graph import (
 )
 from ctc.runner.proc import (
     RUNS,
+    TAIL,
     agent_argv,
     child_env,
     kill_containers,
@@ -352,8 +353,9 @@ def _input(node: dict, ctx: dict, resume: str | None) -> tuple[str, list[str] | 
 
 
 def _exit_fails(node: dict) -> bool:
-    """A shell's non-zero exit fails the step (with retry set); otherwise the exit code is data in a done step."""
-    return bool(node.get("retry"))
+    """A shell's non-zero exit fails the step with retry set or on_error continue / error_output; with the default
+    stop the exit code is data in a done step."""
+    return bool(node.get("retry")) or node.get("on_error") in ("continue", "error_output")
 
 
 async def _spawn(node: dict, text: str, argv: list[str] | None, ctx: dict, wt: str, gd: str, log_path: Path | None,
@@ -479,10 +481,16 @@ async def execute(st, run: dict) -> None:
             for (sid, node, *_), res in zip(jobs, ress):
                 nid, out = node["id"], res.get("output")
                 tok += fresh_tokens(res.get("usage"))
-                if res["status"] == "done" or res.get("marker") == "disabled" or (
-                        res["status"] == "failed" and out and node.get("on_error") == "continue"):
+                failed = res["status"] in ("failed", "timeout")
+                if routed := failed and node.get("on_error") == "error_output":  # FR-014: this goes down the error edge
+                    o, shell = out or {}, node["type"] == "shell"
+                    out = {"error": res.get("error") or res["status"],
+                           "output_tail": ((o["stdout_tail"] + o["stderr_tail"]) if shell else o.get("result") or "")[-TAIL:],
+                           "exit_code": o["exit_code"] if shell else res.get("exit_code")}
+                if routed or res["status"] == "done" or res.get("marker") == "disabled" or (
+                        failed and out and node.get("on_error") == "continue"):
                     ctx[nid], sessions[nid] = out, res.get("session_id")
-                    err = err or complete(g, wst, nid, out)  # a loop over its max_visits fails the run
+                    err = err or complete(g, wst, nid, out, failed=routed)  # a loop over its max_visits fails the run
                     done.append(nid)
                 elif res["status"] == "waiting":  # an approval (always alone): the run leaves the lane until approve()
                     end = "waiting"
@@ -490,7 +498,8 @@ async def execute(st, run: dict) -> None:
                     stops.append((nid, res))
                 if res.get("marker") == "reused":  # its copied row is final; DONE_SQL would null its shas
                     continue
-                if node["type"] == "shell" and not res.get("marker") and (m := PR_URL.search((out or {}).get("stdout_tail") or "")):
+                if node["type"] == "shell" and not res.get("marker") and (m := PR_URL.search(
+                        (res.get("output") or {}).get("stdout_tail") or "")):  # the shell's own output, not an error payload
                     pr = m.group(0)
                 steps.append({"sid": sid, "status": res["status"], "output": _j(out), "error": res.get("error"),
                               "session_id": res.get("session_id"), "num_turns": res.get("num_turns"),

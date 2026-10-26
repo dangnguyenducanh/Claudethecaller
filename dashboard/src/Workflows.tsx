@@ -37,7 +37,8 @@ function NodeView({ id, type, data, selected }: NodeProps<FlowNode>) {
   const { bad, status, runs } = useContext(NodeCtx)
   const inbound = useNodeConnections({ handleType: 'target' }).length
   const cases = data.cases ?? []
-  const outs = type === 'if' ? ['true', 'false'] : type === 'switch' ? [...cases.map(c => c.name), 'default'] : null
+  const errOut = (type === 'agent' || type === 'shell') && data.on_error === 'error_output' // 'ok' = the id-less default handle
+  const outs = type === 'if' ? ['true', 'false'] : type === 'switch' ? [...cases.map(c => c.name), 'default'] : errOut ? ['ok', 'error'] : null
   const updateInternals = useUpdateNodeInternals()
   const outKey = outs?.join('\n')
   useEffect(() => updateInternals(id), [id, outKey, updateInternals]) // React Flow caches handle positions
@@ -58,16 +59,19 @@ function NodeView({ id, type, data, selected }: NodeProps<FlowNode>) {
       <div className="mono wf-id"><span className="dot" style={{ background: TYPE_COLOR[type] }} />{id}<span className="wf-kind">{kind}</span>{(runs?.[id] ?? 0) > 1 && <span className="tag warn">×{runs![id]}</span>}{data.pin && <span className="tag" title="Pinned output: used by runs started with Use pins">pin</span>}{data.notes && <span className="tag">note</span>}</div>
       <div className="wf-sub mono">{sub || '—'}</div>
       {outs
-        ? outs.map(h => <div key={h} className="wf-out">{h}<Handle type="source" position={Position.Right} id={h} /></div>)
+        ? outs.map(h => <div key={h} className="wf-out">{h}<Handle type="source" position={Position.Right} id={errOut && h === 'ok' ? undefined : h}
+          style={errOut && h === 'error' ? { background: 'var(--bad)' } : undefined} /></div>)
         : <Handle type="source" position={Position.Right} />}
     </div>
   )
 }
 export const nodeTypes = { trigger: NodeView, agent: NodeView, shell: NodeView, if: NodeView, switch: NodeView, approval: NodeView, merge: NodeView }
 
+/** An error edge (on_error: error_output) is drawn red. ponytail: a switch case named 'error' is red too. */
+const errStyle = (h?: string | null) => (h === 'error' ? { style: { stroke: 'var(--bad)' } } : {})
 export const toFlow = (g: Graph): { nodes: FlowNode[]; edges: Edge[] } => ({
   nodes: g.nodes.map(({ id, type, pos, ...data }) => ({ id, type, position: { x: pos[0], y: pos[1] }, data, deletable: type !== 'trigger' })),
-  edges: g.edges.map((e, i) => ({ id: `e${i}`, source: e.from, target: e.to, sourceHandle: e.handle ?? null, label: e.handle, markerEnd: arrow })),
+  edges: g.edges.map((e, i) => ({ id: `e${i}`, source: e.from, target: e.to, sourceHandle: e.handle ?? null, label: e.handle, markerEnd: arrow, ...errStyle(e.handle) })),
 })
 const toGraph = (nodes: FlowNode[], edges: Edge[]): Graph => ({
   nodes: nodes.map(n => ({ id: n.id, type: n.type!, pos: [Math.round(n.position.x), Math.round(n.position.y)], ...n.data })),
@@ -249,7 +253,7 @@ function NodeForm({ n, ids, agents, set, rename, renameHandle, dropHandle, lastO
         {text('cap', 'Capability (prefixes the prompt with /<invoke>)')}
         {pick('agent', 'Agent', agents, 'none')}
         <div className="row2">{text('model', 'Model')}{text('effort', 'Effort')}</div>
-        <div className="row2">{pick('permission_mode', 'Permission mode', ['acceptEdits', 'dontAsk', 'plan'])}{pick('on_error', 'On error', ['fail', 'continue'])}</div>
+        <div className="row2">{pick('permission_mode', 'Permission mode', ['acceptEdits', 'dontAsk', 'plan'])}{pick('on_error', 'On error', ['continue', 'error_output'], 'stop (default)')}</div>
         <BlurField area label="Allowed tools (one per line)" init={(d.allowed_tools ?? []).join('\n')}
           commit={s => { const t = s.split('\n').map(x => x.trim()).filter(Boolean); set('allowed_tools', t.length ? t : undefined) }} />
         <BlurField area label="JSON schema (structured output)" init={json(d.json_schema)} commit={s => set('json_schema', parseJson(s))} />
@@ -261,7 +265,7 @@ function NodeForm({ n, ids, agents, set, rename, renameHandle, dropHandle, lastO
       </>}
       {n.type === 'shell' && <>
         {area('command', 'Command (bash -c; template values are shell-quoted)')}
-        {num('timeout_s', 'Timeout (s)')}
+        <div className="row2">{num('timeout_s', 'Timeout (s)')}{pick('on_error', 'On error', ['continue', 'error_output'], 'stop (default)')}</div>
         {d.readonly && check('readonly', 'Read-only (not allowed on shells: untick to save)')}
         <label className="toggle"><input type="checkbox" checked={!!d.idempotent} onChange={e => {
           set('idempotent', e.target.checked || undefined); if (!e.target.checked) set('retry', undefined)
@@ -385,7 +389,7 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
   // Any shape is allowed (branches, loops); the daemon's validator has the last word. Only self-loops and duplicates are blocked here.
   const isValid = (c: Edge | Connection) => c.source !== c.target
     && !edges.some(e => e.source === c.source && e.target === c.target && (e.sourceHandle ?? null) === (c.sourceHandle ?? null))
-  const onConnect = (c: Connection) => setEdges(es => addEdge({ ...c, label: c.sourceHandle ?? undefined, markerEnd: arrow }, es))
+  const onConnect = (c: Connection) => setEdges(es => addEdge({ ...c, label: c.sourceHandle ?? undefined, markerEnd: arrow, ...errStyle(c.sourceHandle) }, es))
   const setField = (id: string, k: keyof WfData, v: unknown) => setNodes(ns => ns.map(n => {
     if (n.id !== id) return n
     const data: Record<string, unknown> = { ...n.data, [k]: v }

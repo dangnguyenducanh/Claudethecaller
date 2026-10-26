@@ -10,7 +10,8 @@ readonly nodes side by side -> await parallel([...]); a disabled node -> a pass-
 output (graph.passthrough). Templates fill at run time: {{input}} is the workflow's `args`
 (else the trigger's input), {{node.x}} that node's output, shell values single-quoted like shlex.quote. Every string
 from the graph is embedded with json.dumps, so no prompt or command can break out into code.
-Not exported: approval nodes (a native run can't pause for a sign-off: the caller refuses them), regex conditions
+Not exported: approval nodes (a native run can't pause for a sign-off: the caller refuses them), error edges
+(on_error: error_output; a native agent's failure is not a branch, so they are refused), regex conditions
 (Python re and JS RegExp differ, so a script could branch where the walker would not), and per-node
 permissions, tools, MCP, max_turns and timeouts: the session's own permission rules apply.
 """
@@ -66,6 +67,9 @@ def to_js(g: dict, name: str, description: str = "") -> str:
     nodes = {n["id"]: (g.get("defaults") or {}) | n for n in g["nodes"]}
     if gate := next((i for i, n in nodes.items() if n["type"] == "approval"), None):
         raise ValueError(f"has_approval: {gate}")
+    if e := next((e for e in g["edges"] if str(e.get("handle")).lower() == "error"
+                  and nodes[e["from"]]["type"] != "switch"), None):  # a switch's "error" is a case name
+        raise ValueError(f"error_edge: {e['from']} -> {e['to']}: a native workflow has no error branch")
     for nid, n in nodes.items():
         conds = [c for k in n["cases"] for c in k["conditions"]] if n["type"] == "switch" else (
             conditions(n) if n["type"] == "if" else [])
