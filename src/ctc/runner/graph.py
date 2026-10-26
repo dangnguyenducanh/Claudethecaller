@@ -1,7 +1,9 @@
 """Workflow walker (PLAN.md m5 "Walker rules"): pure functions over a graph dict and a JSON-able state dict, no I/O.
 
-Graph = {nodes: [{id, type, pos, ...}], edges: [{from, to, handle?}]}. Types: trigger|agent|shell|if|switch|approval|
-merge, loops (back-edges, rule 5), ready readonly agents in one batch (rule 7). An IF tests `conditions: [{path, op,
+Graph = {nodes: [{id, type, pos, ...}], edges: [{from, to, handle?}], vars?: {name: value}, settings?}. Types:
+trigger|agent|shell|if|switch|approval|merge|stop (fails the run with its rendered message; no out-edges), loops
+(back-edges, rule 5), ready readonly agents in one batch (rule 7). Templates (render()) read input, run.*, now,
+vars.* and node outputs; warnings() flags refs that would render empty. An IF tests `conditions: [{path, op,
 value}]` (or the old single path/op/value) joined by `combine: and|or`; ops: eq ne gt ge lt le contains not_contains
 regex exists truthy. A switch has `cases: [{name, conditions, combine}]`; its out-edges' handles are case names or
 default, and the first matching case's handle fires. An agent or shell node may carry `pin: {output: {...}}`: a run
@@ -29,7 +31,7 @@ from pathlib import Path
 
 import yaml
 
-TYPES = {"trigger", "agent", "shell", "if", "switch", "approval", "merge"}
+TYPES = {"trigger", "agent", "shell", "if", "switch", "approval", "merge", "stop"}
 OPS = {"eq", "ne", "gt", "ge", "lt", "le", "contains", "not_contains", "regex", "exists", "truthy"}
 NUM = re.compile(r"\s*-?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][-+]?[0-9]+)?\s*")  # [0-9], not \d: export.py reuses it in JS
 REGEX_MAX = 10_000  # chars of a value a regex condition searches
@@ -38,7 +40,12 @@ PUSH = re.compile(r"\b(git\s+push|gh\s+pr\s+(create|merge))\b")
 SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 CASE = re.compile(r"[a-z0-9][a-z0-9_-]*")  # switch case names: lowercase, so they compare to _handle() as-is
 TPL = re.compile(r"\{\{\s*([\w.-]+)\s*\}\}")
-ROOTS = {"input", "run"}  # template roots that are not node ids, so not allowed as ids
+ROOTS = {"input", "run", "now", "vars"}  # template roots that are not node ids, so not allowed as ids
+RUN_KEYS = {"branch", "id", "visit", "trigger"}
+# a node type's output fields, as proc.run_agent / run_shell and the engine write them (warnings() checks refs against them)
+OUT_KEYS = {"trigger": {"input"}, "agent": {"result", "structured_output", "is_error", "subtype"},
+            "shell": {"exit_code", "stdout_tail", "stderr_tail", "duration_ms"}, "if": {"value"}, "switch": {"case"},
+            "approval": {"approved", "note"}, "merge": {"inputs"}}
 _MISSING = object()
 
 
@@ -147,10 +154,16 @@ def validate(g: dict) -> list[dict]:
         err(f"a workflow needs exactly one trigger, found {len(triggers)}", triggers[1] if len(triggers) > 1 else None)
     if (g.get("settings") or {}).get("permission", "worktree") not in ("worktree", "container"):
         err("settings.permission must be worktree or container")
+    for k in ("max_run_minutes", "approval_timeout_minutes"):  # FR-035
+        if (v := (g.get("settings") or {}).get(k)) is not None and not (type(v) in (int, float) and v > 0):
+            err(f"settings.{k} must be a number > 0")
+    vs = g.get("vars")
+    if vs is not None and not (isinstance(vs, dict) and all(isinstance(k, str) and SLUG.fullmatch(k) for k in vs)):
+        err("vars must be a mapping of name: value")  # FR-033: {{vars.<name>}}
     for n in nodes:
         nid, t = n.get("id"), n.get("type")
         if not isinstance(nid, str) or not SLUG.fullmatch(nid) or nid in ROOTS:
-            err(f"bad node id {nid!r}: use letters, digits, - or _ (not input/run)", nid)
+            err(f"bad node id {nid!r}: use letters, digits, - or _ (not {'/'.join(sorted(ROOTS))})", nid)
         elif ids.count(nid) > 1:
             err(f"duplicate node id {nid}", nid)
         if t not in TYPES:
@@ -161,6 +174,10 @@ def validate(g: dict) -> list[dict]:
             err("permission_mode must be acceptEdits, dontAsk or plan: no bypass on the host", nid)
         if t == "shell" and not n.get("command"):
             err("a shell node needs a command", nid)
+        if t == "stop" and not (isinstance(n.get("message"), str) and n["message"].strip()):
+            err("a stop node needs a message: the run fails with it", nid)
+        if t == "stop" and any(e.get("from") == nid for e in g["edges"]):
+            err("a stop node has no out-edges", nid)
         if t == "shell" and n.get("readonly"):
             err("readonly is for agent nodes only: shells never batch in parallel", nid)
         if (v := n.get("max_visits")) is not None and not (type(v) is int and v >= 1):
@@ -205,7 +222,6 @@ def validate(g: dict) -> list[dict]:
         cmd = str(n.get("command") or "")
         if t == "shell" and any(_open_quote(cmd[:m.start()]) for m in TPL.finditer(cmd)):
             err("leave {{...}} unquoted in a shell command: the runner shell-quotes it", nid)
-        conds = []  # every condition of an IF or switch: its path is a template ref
         if t == "if":
             if "conditions" not in n:
                 if n.get("op") not in OPS or not n.get("path"):
@@ -217,7 +233,6 @@ def validate(g: dict) -> list[dict]:
                     err(m, nid)
             if {_handle(e) for e in g["edges"] if e.get("from") == nid} != {"true", "false"}:
                 err("an if node needs exactly its true and false edges", nid)
-            conds = conditions(n)
         if t == "switch":
             cases = n.get("cases")
             if not isinstance(cases, list) or not cases or not all(isinstance(c, dict) for c in cases):
@@ -232,12 +247,9 @@ def validate(g: dict) -> list[dict]:
                     err(f"duplicate case name {name}", nid)
                 for m in _conds_errors(c.get("conditions"), c.get("combine")):
                     err(f"case {name}: {m}", nid)
-                conds += c["conditions"] if isinstance(c.get("conditions"), list) else []
             for h in sorted({_handle(e) for e in g["edges"] if e.get("from") == nid} - {*map(str, names), "default"}):
                 err(f"switch edge handle {h} is not a case name or default", nid)
-        refs = TPL.findall(f"{n.get('prompt') or ''} {n.get('command') or ''} {n.get('message') or ''}") + [
-            c["path"] for c in (conds if isinstance(conds, list) else []) if isinstance(c, dict) and isinstance(c.get("path"), str)]
-        for ref in refs:
+        for ref in _refs(n):
             if ref.split(".")[0] not in known | ROOTS:
                 err(f"{ref} names no node", nid)
     for e in g["edges"]:
@@ -269,6 +281,53 @@ def validate(g: dict) -> list[dict]:
                         and not (byid.get(nid, {}).get("on_error") == "error_output" and sorted(hs) == [False, True]):
                     err(f"only an IF or Switch may branch inside a loop ({loop})", nid)  # error_output: one ok + one error
     return errs
+
+
+def _refs(n: dict) -> list[str]:
+    """A node's template refs: {{...}} in its prompt, command and message, plus its IF / switch condition paths."""
+    t, cases = n.get("type"), n.get("cases") if isinstance(n.get("cases"), list) else []
+    conds = conditions(n) if t == "if" else [c for k in cases if isinstance(k, dict) and isinstance(
+        k.get("conditions"), list) for c in k["conditions"]] if t == "switch" else []
+    return TPL.findall(f"{n.get('prompt') or ''} {n.get('command') or ''} {n.get('message') or ''}") + [
+        c["path"] for c in (conds if isinstance(conds, list) else []) if isinstance(c, dict) and isinstance(c.get("path"), str)]
+
+
+def warnings(g: dict) -> list[dict]:
+    """FR-034: [{message, node_id}] for template refs that would render empty: a node that cannot have run before the
+    referencing one (not its ancestor over any edge, back-edges included), a field its type never outputs (OUT_KEYS,
+    plus pinned and error_output fields), a run field outside RUN_KEYS, a vars name the file does not set. Never
+    raises and never blocks a save or a run; refs naming no node are validate()'s errors."""
+    out: list[dict] = []
+    try:
+        nodes = [(g.get("defaults") or {}) | n for n in g["nodes"]]
+        byid = {n.get("id"): n for n in nodes}
+        rev = [(e.get("to"), e.get("from")) for e in g["edges"]]
+        vs = g["vars"] if isinstance(g.get("vars"), dict) else {}
+        for n in nodes:
+            nid = n.get("id")
+            anc = set().union(*(_reach(a, rev) for b, a in rev if b == nid))  # nid itself only when it sits on a cycle
+            for ref in _refs(n):
+                root, _, rest = ref.partition(".")
+                field = rest.split(".")[0]  # ponytail: deeper paths and merge inputs are not checked
+                src = None if root in ROOTS else byid.get(root)
+                if root == "run" and field and field not in RUN_KEYS:
+                    msg = f"run has no field {field} ({', '.join(sorted(RUN_KEYS))})"
+                elif root == "vars" and field and field not in vs:
+                    msg = f"no vars entry {field}"
+                elif src is None:  # input, now, a good run/vars ref, or a root that names no node
+                    continue
+                elif root not in anc:
+                    msg = f"{root} cannot run before {nid}"
+                elif field and (t := src.get("type")) in OUT_KEYS and field not in OUT_KEYS[t] | (
+                        set(src["pin"]["output"]) if isinstance(src.get("pin"), dict) and isinstance(src["pin"].get("output"), dict)
+                        else set()) | ({"error", "output_tail", "exit_code"} if src.get("on_error") == "error_output" else set()):
+                    msg = f"a {t} node has no field {field}"
+                else:
+                    continue
+                out.append({"message": f"{ref}: {msg}", "node_id": nid})
+    except (AttributeError, TypeError, KeyError):  # not the shape the walker reads: validate() says what is wrong
+        pass
+    return out
 
 
 def ready(g: dict, st: dict) -> list[str]:
@@ -376,7 +435,8 @@ def _send(g: dict, st: dict, i: int, tok: str, back: set[int]) -> None:
 
 
 def lookup(ctx: dict, path: str):
-    """Dotted lookup in ctx = {input, run: {branch}, <node_id>: output}; _MISSING when any part is absent."""
+    """Dotted lookup in ctx = {input, run: {branch, id, visit, trigger}, now, vars, <node_id>: output}; _MISSING when
+    any part is absent."""
     v = ctx
     for k in path.split("."):
         if isinstance(v, dict) and k in v:
@@ -393,7 +453,8 @@ def _text(v) -> str:
 
 
 def render(tpl: str, ctx: dict, shell: bool = False) -> str:
-    """Fill {{input}}, {{<node>.<dotted.path>}}, {{run.branch}}; missing or skipped -> "". shell=True quotes each value."""
+    """Fill {{input}}, {{<node>.<dotted.path>}}, {{run.<branch|id|visit|trigger>}}, {{now}}, {{vars.<name>}} (ctx as
+    lookup()); missing or skipped -> "". shell=True quotes each value."""
     def one(m):
         s = _text(lookup(ctx, m.group(1)))
         return shlex.quote(s) if shell else s

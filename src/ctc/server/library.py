@@ -33,7 +33,7 @@ from ctc.memory.longterm import Memory as MemoryRow
 from ctc.memory.longterm import _unit, write_memory
 from ctc.runner import schedule
 from ctc.runner.engine import SETTINGS, owner
-from ctc.runner.graph import derived_steps, load, validate
+from ctc.runner.graph import derived_steps, load, validate, warnings
 from ctc.server import jobs
 from ctc.server.api import (
     DEC_COLS,
@@ -66,6 +66,7 @@ from ctc.server.schemas import (
     Ok,
     Override,
     OverrideSet,
+    SavedCapability,
     Scope,
     WorkflowSettings,
     to_decision,
@@ -154,24 +155,28 @@ def _yaml(meta: dict) -> str:  # a ctc-workflows file: no frontmatter, no body; 
     return yaml.safe_dump(meta, sort_keys=False, allow_unicode=True, default_flow_style=None)
 
 
-def check_graph(g: dict) -> dict:
-    """ctc.runner.graph.validate; its first error -> 422 invalid_graph {message, node_id}."""
+def check_graph(g: dict) -> list[dict]:
+    """ctc.runner.graph.validate; its first error -> 422 invalid_graph {message, node_id, warnings}. Returns the
+    graph's warnings() (never blocking)."""
     try:
         errs = validate(g)
     except (AttributeError, TypeError, KeyError) as e:  # not the shape the walker reads (a hand-edited file)
         errs = [{"message": f"malformed workflow: {e!r}", "node_id": None}]
+    warns = warnings(g)
     if errs:
-        raise HTTPException(422, {"code": "invalid_graph", **errs[0]})
-    return g
+        raise HTTPException(422, {"code": "invalid_graph", **errs[0], "warnings": warns})
+    return warns
 
 
-def _wf_meta(graph: Graph | None, settings: WorkflowSettings | None) -> dict:
-    """The workflow file keys a save writes: settings; nodes + edges (validated) and the router's steps derived from them."""
-    meta = {"settings": settings.model_dump()} if settings else {}
+def _wf_meta(graph: Graph | None, settings: WorkflowSettings | None, vars: dict | None = None) -> tuple[dict, list[dict]]:
+    """(the workflow file keys a save writes, the graph's warnings): settings; nodes + edges (validated, with the file's
+    vars: block, which the editor never sends) and the router's steps derived from them."""
+    meta, warns = {"settings": settings.model_dump()} if settings else {}, []
     if graph:
-        g = check_graph(load(graph.model_dump(by_alias=True, exclude_none=True)))
+        g = load(graph.model_dump(by_alias=True, exclude_none=True))
+        warns = check_graph(g | {"vars": vars or {}, "settings": settings.model_dump() if settings else {}})
         meta |= {"nodes": g["nodes"], "edges": g["edges"], "steps": derived_steps(g)}
-    return meta
+    return meta, warns
 
 
 def _wf_doc(path: str) -> dict:
@@ -221,7 +226,7 @@ async def capability(cap_id: str, request: Request, project: str | None = None):
             "settings": SETTINGS | (doc.get("settings") or {}) if wf else None}
 
 
-@router.post("/capabilities", response_model=Capability, status_code=201)
+@router.post("/capabilities", response_model=SavedCapability, status_code=201)
 async def create_capability(b: NewCapability, request: Request):
     st, u = ctx(request)
     _local_only(st)
@@ -238,9 +243,10 @@ async def create_capability(b: NewCapability, request: Request):
     _inside(path, root)
     if f"{ns}:{b.name}" in st.store.catalog:
         fail(409, "conflict", f"{ns}:{b.name} already exists")
-    meta = {"name": b.name, "description": b.description}
+    meta, warns = {"name": b.name, "description": b.description}, []
     if b.kind == "workflow":
-        meta |= _wf_meta(b.graph, b.settings)
+        m, warns = _wf_meta(b.graph, b.settings)
+        meta |= m
         if not b.graph:
             meta["steps"] = [s.model_dump(exclude_none=True) for s in b.steps or []]
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -250,10 +256,10 @@ async def create_capability(b: NewCapability, request: Request):
     except FileExistsError:
         fail(409, "conflict", f"{path} already exists")
     await _reindex(st, path, b.kind, ns)
-    return await _cap(st, u, f"{ns}:{b.name}", await project_id(st, u, b.project))
+    return {**await _cap(st, u, f"{ns}:{b.name}", await project_id(st, u, b.project)), "warnings": warns}
 
 
-@router.patch("/capabilities/{cap_id}", response_model=Capability)
+@router.patch("/capabilities/{cap_id}", response_model=SavedCapability)
 async def update_capability(cap_id: str, b: CapabilityPatch, request: Request):
     st, u = ctx(request)
     c = _known(st, cap_id)
@@ -276,16 +282,18 @@ async def update_capability(cap_id: str, b: CapabilityPatch, request: Request):
         fail(422, "invalid", f"{path} has no YAML {'mapping' if plain else 'frontmatter'} to edit")
     if b.description is not None:
         meta["description"] = b.description
+    warns = []
     if c["kind"] == "workflow":
         old = meta["settings"] if isinstance(meta.get("settings"), dict) else {}
-        meta |= _wf_meta(b.graph, b.settings)
+        m, warns = _wf_meta(b.graph, b.settings, meta.get("vars"))
+        meta |= m
         if b.settings:  # the editor sends only WorkflowSettings' fields: keep YAML-only keys (settings.notify)
             meta["settings"] = old | b.settings.model_dump()
         if b.steps is not None and not b.graph:
             meta["steps"] = [s.model_dump(exclude_none=True) for s in b.steps]
     path.write_text(_yaml(meta) if plain else _render(meta, body if b.body is None else b.body), encoding="utf-8")
     await _reindex(st, path, c["kind"], c["namespace"])
-    return {**await _cap(st, u, cap_id), "file_hash": _sha(path)}
+    return {**await _cap(st, u, cap_id), "file_hash": _sha(path), "warnings": warns}
 
 
 @router.delete("/capabilities/{cap_id}", response_model=Ok)

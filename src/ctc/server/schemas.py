@@ -143,6 +143,8 @@ class WorkflowSettings(BaseModel):
     allow_extra_usage: bool = False
     auto_resume: bool = True
     max_run_tokens: int | None = Field(default=None, ge=1)
+    max_run_minutes: float | None = Field(default=None, gt=0)  # the run's wall clock; past it the run fails
+    approval_timeout_minutes: float | None = Field(default=None, gt=0)  # a waiting approval past it fails the run
 
 
 class ScheduleSet(BaseModel):  # PUT /api/workflows/{cap_id}/schedule
@@ -169,6 +171,15 @@ class Capability(BaseModel):
     followed_30d: int
     cluster_id: str | None
     file_hash: str | None = None  # sha256 of the file bytes: GET /capabilities/{id} and PATCH set it, null in lists
+
+
+class GraphIssue(BaseModel):  # ctc.runner.graph.validate / warnings entry
+    message: str
+    node_id: str | None = None
+
+
+class SavedCapability(Capability):  # POST / PATCH /capabilities: warnings = graph.warnings() of a saved workflow
+    warnings: list[GraphIssue] = []
 
 
 class CapabilityDetail(Capability):
