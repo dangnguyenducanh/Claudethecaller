@@ -266,7 +266,10 @@ async def update_capability(cap_id: str, b: CapabilityPatch, request: Request):
     if b.description is not None:
         meta["description"] = b.description
     if c["kind"] == "workflow":
+        old = meta["settings"] if isinstance(meta.get("settings"), dict) else {}
         meta |= _wf_meta(b.graph, b.settings)
+        if b.settings:  # the editor sends only WorkflowSettings' fields: keep YAML-only keys (settings.notify)
+            meta["settings"] = old | b.settings.model_dump()
         if b.steps is not None and not b.graph:
             meta["steps"] = [s.model_dump(exclude_none=True) for s in b.steps]
     path.write_text(_yaml(meta) if plain else _render(meta, body if b.body is None else b.body), encoding="utf-8")

@@ -17,4 +17,10 @@ jobs: {timeout_s: 60, retries: 1, dead_after: 3}
 rate_limit_per_min: 600
 history: {skip_projects: [], max_prompt_chars: 300, chunk: 30, on_start: true}   # B9: skip_projects = project names or folder basenames
 db_pool: {min: 3, max: 5}   # a route runs up to 3 queries at once; a cold Supabase connection costs ~450 ms (TLS + pooler)
-runner: {claude_version: "2.1.306", idle_wait_min: 15, poll_s: 1.5}   # workflow runner (PLAN.md m5); runs refuse any other `claude --version`
+# runner.notify: a shell command run after each run status change to failed | waiting | quota | done, with env CTC_RUN_ID
+# CTC_RUN_STATUS CTC_RUN_WORKFLOW CTC_RUN_URL CTC_RUN_ERROR, a 10 s timeout and output in
+# ~/.claudethecaller/runs/<id>/notify.log; a workflow's settings.notify overrides it ("" = off); empty = no notify. E.g.
+#   notify-send "ctc run $CTC_RUN_ID $CTC_RUN_STATUS" "$CTC_RUN_WORKFLOW"
+#   curl -s -m 5 -H 'content-type: application/json' -d "{\"text\": \"$CTC_RUN_WORKFLOW $CTC_RUN_STATUS $CTC_RUN_URL\"}" "$CHAT_WEBHOOK_URL"
+# (the webhook URL comes from the daemon's env, never a token written here)
+runner: {claude_version: "2.1.306", idle_wait_min: 15, poll_s: 1.5, notify: ""}   # workflow runner (PLAN.md m5); runs refuse any other `claude --version`
