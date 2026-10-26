@@ -835,12 +835,19 @@ Design (intent, goals, anti-goals, data model, eval): `specs/002-context-coding-
 - **Data:** Supabase `graph_nodes`, `graph_edges`, `graph_sources`; RAM copy per worker; nothing generated is committed.
 
 ### Build order (m6, branch `m6-graph`)
-- [ ] **G1 — tables + graphify import.** Done when: `uv run ctc graph import` prints node/edge counts matching graph.json's code + rationale subset, and `ctc graph status` shows built_at_commit vs HEAD.
-- [ ] **G2 — context parser.** Done when: `uv run ctc graph build` prints 16 stories for `specs/001-n8n-parity` plus FR/SC/task/ticket/decision counts.
-- [ ] **G3 — embeddings + links + claude-mem import.** Done when: build prints the % of tasks with ≥ 1 code link.
-- [ ] **G4 — extractor, `/ctc-context` skill, speckit hooks, re-parse on save.** Done when: editing a spec.md section changes nodes with no manual run, and an unchanged re-run makes 0 Claude calls.
-- [ ] **G5 — MCP pull tools + `ctc graph export`.** Done when: `graph_search("retry a failed run from a node")` returns engine.py symbols and the export loads in `graphify query --graph`.
-- [ ] **G6 — push line + `/v1/hook/pre` + install.** Done when: `CTC_CLAUDE_HOME=<tmp> uv run ctc install --dry-run` shows the PreToolUse hook and both hooks return their lines on curl.
+- [x] **G1 — tables + graphify import.** Done when: `uv run ctc graph import` prints node/edge counts matching graph.json's code + rationale subset, and `ctc graph status` shows built_at_commit vs HEAD.
+  - Result 2026-10-26: `ctc graph import` on the scratch DB: 1396 code+rationale nodes / 3788 edges = graph.json subset; second run `skipped`; status shows built_at = HEAD.
+- [x] **G2 — context parser.** Done when: `uv run ctc graph build` prints 16 stories for `specs/001-n8n-parity` plus FR/SC/task/ticket/decision counts.
+  - Result 2026-10-26: 16 stories / 31 FR / 7 SC / 170 tasks for 001-n8n-parity, 17 tickets, 20 decisions, 75 PLAN steps (parser self-check + `ctc graph build`).
+- [x] **G3 — embeddings + links + claude-mem import.** Done when: build prints the % of tasks with ≥ 1 code link.
+  - Result 2026-10-26: scratch build: 515 extracted + 225 inferred links, 194 unresolved paths dropped, tasks linked 79%; claude-mem 2 observations; rebuild with no changes embeds 0.
+- [x] **G4 — extractor, `/ctc-context` skill, speckit hooks, re-parse on save.** Done when: editing a spec.md section changes nodes with no manual run, and an unchanged re-run makes 0 Claude calls.
+  - Result 2026-10-26: tests (fake claude): a saved spec queues graph_extract then graph_build, unchanged re-run sends 0 chunks, one edited section sends 1; tasks.md left to the parser; packed chunks: first full pass ≈ 66 calls. Live check pending deploy; the real extractor has not run yet.
+- [x] **G5 — MCP pull tools + `ctc graph export`.** Done when: `graph_search("retry a failed run from a node")` returns engine.py symbols and the export loads in `graphify query --graph`.
+  - Result 2026-10-26: `graph_search("retry a failed run from a node")` → US1, T014 and ticket-11 linked to `src/ctc/runner/engine.py`; export of 462 context nodes loads in `graphify query --graph`.
+- [x] **G6 — push line + `/v1/hook/pre` + install.** Done when: `CTC_CLAUDE_HOME=<tmp> uv run ctc install --dry-run` shows the PreToolUse hook and both hooks return their lines on curl.
+  - Result 2026-10-26: install dry-run on a temp home adds PreToolUse `Read|Edit|Write|MultiEdit` → `/v1/hook/pre`; in-process both hooks return their lines (prompt_line p95 4.8 ms, file_note < 0.1 ms). Curl on the live daemon pending deploy.
 - [ ] **G7 — eval** (`evaluation/graph_eval.py`). Done when: it prints dev (tickets 01–08) and test (09–16) Recall@3, MetaTool false-trigger rate and hook p95; pass = test Recall@3 ≥ 0.8, false triggers ≤ 10%, prompt p95 ≤ 150 ms, PreToolUse p95 ≤ 50 ms.
+  - Result 2026-10-26: eval built and run (scratch schema `ctc_eval`, commit links off): test Recall@3 0.750 (6/8) **FAIL** vs 0.8 (misses 09 retry-on-fail, 14 graph-extras); false triggers 2% PASS; prompt_line p95 5.9 ms, file_note p95 0.02 ms PASS (in-process; `--daemon` after deploy). Strict (parser links ignored) test 0.375. Floor tuned on dev to 0.3 (bottom of the sweep).
 
 Order: G1, G2 → G3 → G5, G6; G4 alongside G3; G7 last.
