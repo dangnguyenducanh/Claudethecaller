@@ -6,6 +6,8 @@ value}]` (or the old single path/op/value) joined by `combine: and|or`; ops: eq 
 regex exists truthy. A switch has `cases: [{name, conditions, combine}]`; its out-edges' handles are case names or
 default, and the first matching case's handle fires. An agent or shell node may carry `pin: {output: {...}}`: a run
 started with pinned completes it with that output instead of running it (the engine applies it, not the walker).
+`disabled: true` on any node but trigger, IF and switch: the engine completes it without running it, its output the
+upstream output (passthrough()).
 State (wf_runs.state, `{}` = not started): {inbox: {node: {"<edge#>": "data"|"skip"}}, deferred: [edge#], ready: [node],
 visits: {node: n}, execs: n, skipped: [node]}; edge# is the edge's index in graph["edges"]. visits counts runs and skips.
 Engine loop: `while (r := ready(g, st)): run batch(g, r) together (visit = visits.get(id, 0) + 1; a merge's output is
@@ -161,6 +163,10 @@ def validate(g: dict) -> list[dict]:
             err("max_visits must be a whole number >= 1", nid)
         if "notes" in n and not isinstance(n["notes"], str):
             err("notes must be text", nid)
+        if (v := n.get("disabled")) is not None and type(v) is not bool:
+            err("disabled must be true or false", nid)
+        elif v and t in ("trigger", "if", "switch"):  # FR-016: a branching node has no one handle to pass through on
+            err(f"a {t} node cannot be disabled: delete it or rewire its branches", nid)
         if "pin" in n:
             pin = n["pin"]
             if t not in ("agent", "shell"):
@@ -216,7 +222,7 @@ def validate(g: dict) -> list[dict]:
                 next((x for x in (e.get("from"), e.get("to")) if x in known), None))
     if len(triggers) == 1:
         byid = {n.get("id"): n for n in nodes}
-        gates = {nid for nid, n in byid.items() if n.get("type") == "approval"}
+        gates = {nid for nid, n in byid.items() if n.get("type") == "approval" and not n.get("disabled")}  # disabled: passes
         ungated = _reach(triggers[0], [(e.get("from"), e.get("to")) for e in g["edges"]], gates)
         for nid in sorted(ungated - gates):
             if byid.get(nid, {}).get("type") == "shell" and PUSH.search(str(byid[nid].get("command"))):
@@ -267,6 +273,18 @@ def merge_output(g: dict, st: dict, node_id: str, ctx: dict) -> dict:
     box = st["inbox"].get(node_id, {})
     srcs = [g["edges"][int(i)]["from"] for i in sorted(box, key=int) if box[i] == "data"]
     return {"inputs": {n: ctx.get(n) for n in srcs}}
+
+
+def passthrough(g: dict, st: dict, node_id: str, ctx: dict):
+    """A ready disabled node's output: the output of the source of its first in-edge (edge order) holding data; when
+    its inbox is empty (a loop target readied by a back-edge), of its first forward in-edge's source in ctx, as
+    export.to_js does; else None. Call it before complete(), which clears the inbox.
+    ponytail: a disabled loop target passes on the loop entry's output on every pass, not the back-edge source's."""
+    box = st["inbox"].get(node_id, {})
+    back = back_edges(g)
+    srcs = [g["edges"][int(i)]["from"] for i in sorted(box, key=int) if box[i] == "data"] or [
+        e["from"] for i, e in enumerate(g["edges"]) if e["to"] == node_id and i not in back and e["from"] in ctx]
+    return ctx.get(srcs[0]) if srcs else None
 
 
 def complete(g: dict, st: dict, node_id: str, output: dict | None) -> str | None:

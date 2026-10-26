@@ -102,6 +102,7 @@ export interface SwitchCase { name: string; conditions: Condition[]; combine?: '
 export interface WfNode {
   id: string; type: NodeType; pos: [number, number]; max_visits?: number
   notes?: string // any node type, shown on hover
+  disabled?: boolean // any node but trigger, IF and Switch: runs pass straight through
   input?: string // trigger
   prompt?: string; cap?: string; agent?: string; model?: string; effort?: string; permission_mode?: 'acceptEdits' | 'dontAsk' | 'plan' // agent
   allowed_tools?: string[]; mcp_config?: unknown; json_schema?: unknown; resume_from?: string; max_turns?: number; on_error?: 'fail' | 'continue'

@@ -40,6 +40,7 @@ from ctc.runner.graph import (
     eval_if,
     eval_switch,
     merge_output,
+    passthrough,
     ready,
     render,
 )
@@ -404,7 +405,8 @@ async def execute(st, run: dict) -> None:
     try:
         gd = await wt_git_dir(run["repo"], wt)
         for row in await st.store.fetch("select node_id, output, session_id from wf_steps where run_id = %s"
-                                        " and status in ('done', 'failed') and output is not null order by id", (rid,)):
+                                        " and (status in ('done', 'failed') or marker = 'disabled') and output is not null"
+                                        " order by id", (rid,)):
             ctx[row["node_id"]], sessions[row["node_id"]] = row["output"], row["session_id"]
         # a retry child's steps copied from its parent (retry()): the walker completes them with the parent's outputs
         reused = {(r["node_id"], r["visit"]): r for r in await st.store.fetch(
@@ -432,8 +434,10 @@ async def execute(st, run: dict) -> None:
                 # a pinned run completes a pinned node with its pin: its input is kept, no argv, log, process or commit
                 pin = {"status": "done", "output": node["pin"]["output"], "marker": "pinned"} if (
                     run.get("pinned") and node.get("pin")) else None
+                if node.get("disabled"):  # FR-016: skipped, its output the upstream one; no input, argv, log, process or commit
+                    pin = {"status": "skipped", "output": passthrough(g, wst, nid, ctx), "marker": "disabled"}
                 log_path = RUNS / str(rid) / f"{nid}-{node['visit']}.jsonl" if node["type"] == "agent" and not pin else None
-                text, argv = _input(node, ctx, sessions.get(node.get("resume_from")))
+                text, argv = ("", None) if node.get("disabled") else _input(node, ctx, sessions.get(node.get("resume_from")))
                 argv = None if pin else argv
                 row = await st.store.fetchrow(STEP_SQL, {"rid": rid, "nid": nid, "visit": node["visit"], "kind": node["type"],
                                                          "input": text, "log": str(log_path) if log_path else None})
@@ -453,7 +457,8 @@ async def execute(st, run: dict) -> None:
             for (sid, node, *_), res in zip(jobs, ress):
                 nid, out = node["id"], res.get("output")
                 tok += fresh_tokens(res.get("usage"))
-                if res["status"] == "done" or (res["status"] == "failed" and out and node.get("on_error") == "continue"):
+                if res["status"] == "done" or res.get("marker") == "disabled" or (
+                        res["status"] == "failed" and out and node.get("on_error") == "continue"):
                     ctx[nid], sessions[nid] = out, res.get("session_id")
                     err = err or complete(g, wst, nid, out)  # a loop over its max_visits fails the run
                     done.append(nid)
