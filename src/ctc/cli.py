@@ -616,6 +616,16 @@ def continue_cmd(run_id: int = typer.Argument(..., help="Run id, from ctc runs."
     out.print(f"{_status(r['status'])}  [{FAINT}]run #{r['id']} · {r['workflow']}{when}[/]")
 
 
+@app.command("retry")
+def retry_cmd(run_id: int = typer.Argument(..., help="Run id, from ctc runs."),
+              from_node: str | None = typer.Option(None, "--from", help="Start at this node, reusing the earlier nodes' outputs (default: the failed step, else the start)."),
+              to_node: str | None = typer.Option(None, "--to", help="Stop with done after this node.")) -> None:
+    """Start a new run from an earlier run, on a worktree reset to the start node's commit."""
+    r = _api("POST", f"/runs/{run_id}/retry", json={"from_node": from_node, "to_node": to_node, "trigger": "cli"})
+    where = (f" from {from_node}" if from_node else "") + (f" to {to_node}" if to_node else "")
+    out.print(f"{dot(BLUE)} run [bold]#{r['run_id']}[/] queued  [{FAINT}]retry of #{run_id}{where}[/]")
+
+
 runner = typer.Typer(no_args_is_help=True, help="The workflow runner's pinned claude CLI.")
 app.add_typer(runner, name="runner")
 

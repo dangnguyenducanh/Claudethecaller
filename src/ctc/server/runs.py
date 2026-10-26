@@ -1,5 +1,5 @@
 """/api workflow runs (PLAN.md m5 "API"): start, list, detail, step log + diff, run diff, compare, cancel, approve,
-continue; schedules.
+continue, retry (also run from / run to a node); schedules.
 
 Local mode only, and scoped to this machine's claude login (`claude auth status` email = wf_runs.owner).
 """
@@ -27,6 +27,7 @@ from ctc.server.schemas import (
     RunContinue,
     RunDetail,
     RunRef,
+    RunRetry,
     RunStart,
     RunStatus,
     RunTrigger,
@@ -45,7 +46,7 @@ RUN_COLS = """r.id, r.workflow, coalesce(p.name, r.project_id) as project, r.sta
   jsonb_array_length(coalesce(r.graph->'nodes', '[]')) as nodes_total"""
 RUN_FROM = "wf_runs r left join projects p on p.user_id = %(u)s and p.id = r.project_id"
 STEP_COLS = """s.id, s.node_id, s.visit, s.kind, s.status, s.input, s.output, s.error, s.session_id, s.num_turns, s.usage,
-  s.cost_usd, s.permission_denials, s.overage, s.files, s.diff, s.log_path, s.started_at, s.ended_at"""
+  s.cost_usd, s.permission_denials, s.overage, s.files, s.diff, s.log_path, s.started_at, s.ended_at, s.marker"""
 
 
 async def _scope(request: Request) -> tuple:
@@ -81,16 +82,25 @@ async def submit_run(st, u: str, o: str, cap_id: str, text: str = "", project: s
     """Queue a run of the workflow file as it is now (POST /runs, MCP run_workflow, CLI); with head (schedules only) a
     project's workflow as committed at the project's HEAD, 422 not_committed when it has no committed version.
     422 invalid_graph / project_required."""
-    c = _known(st, cap_id)
-    if c["kind"] != "workflow":
-        fail(422, "invalid", f"{cap_id} is a {c['kind']}, not a workflow")
+    c, g, sha = await _workflow(st, cap_id, head)
     if c["namespace"].startswith("project@"):  # a project's workflow runs in that project (its file is in its git)
         repo, pid = _cap_root(st, c).parent, c["namespace"].removeprefix("project@")
     elif project and (p := await st.store.fetchrow("select id, path from projects where user_id = %s and name = %s", (u, project))):
         repo, pid = p["path"], p["id"]
     else:
         fail(422, "project_required", "a user or plugin workflow needs a project to run in: pass project (its name)")
-    if head and c["namespace"].startswith("project@"):  # user-scope files have no history: they run as saved
+    return await engine.submit(st, o, cap_id, g, sha, str(repo), pid, trigger, text)
+
+
+async def _workflow(st, cap_id: str, head: bool = False) -> tuple[dict, dict, str]:
+    """(capability, validated graph, file sha) of a workflow: its file as saved now; with head a project's workflow as
+    committed at the project's HEAD (user-scope files have no history: they run as saved). 404 not_found, 422 invalid /
+    not_committed / invalid_graph."""
+    c = _known(st, cap_id)
+    if c["kind"] != "workflow":
+        fail(422, "invalid", f"{cap_id} is a {c['kind']}, not a workflow")
+    if head and c["namespace"].startswith("project@"):
+        repo = _cap_root(st, c).parent
         if not (got := await schedule.committed(str(repo), c["path"])):
             fail(422, "not_committed", f"{c['path']} has no committed version at HEAD of {repo}: commit it so its schedule can run")
         g, sha = got
@@ -99,8 +109,7 @@ async def submit_run(st, u: str, o: str, cap_id: str, text: str = "", project: s
             g, sha = load(c["path"]), hashlib.sha256(Path(c["path"]).read_bytes()).hexdigest()
         except OSError:
             fail(404, "not_found", f"{c['path']} is gone; reindex")
-    check_graph(g)
-    return await engine.submit(st, o, cap_id, g, sha, str(repo), pid, trigger, text)
+    return c, check_graph(g), sha
 
 
 @router.put("/workflows/{cap_id}/schedule", response_model=Schedule)
@@ -171,7 +180,7 @@ async def compare_runs(request: Request, a: int, b: int, node: str | None = None
 @router.get("/runs/{rid}", response_model=RunDetail)
 async def run(rid: int, request: Request):
     st, u, o = await _scope(request)
-    r = await _run(st, u, o, rid, ", r.graph, r.file_sha, r.auth")
+    r = await _run(st, u, o, rid, ", r.graph, r.file_sha, r.auth, r.parent_run_id, r.from_node, r.to_node")
     steps = await st.store.fetch(f"select {STEP_COLS} from wf_steps s where s.run_id = %s order by s.id", (rid,))
     return {**r, "steps": [s | {"tokens": engine.usage_tokens(s["usage"]) if s["usage"] else None} for s in steps]}
 
@@ -251,6 +260,19 @@ async def continue_run(rid: int, b: RunContinue, request: Request):
     if not await engine.resume(st, rid, o, b.when == "now"):
         fail(409, "not_quota", f"run {rid} is not stopped at a usage limit")
     return await _run(st, u, o, rid)
+
+
+@router.post("/runs/{rid}/retry", response_model=RunRef, status_code=202)
+async def retry_run(rid: int, b: RunRetry, request: Request):
+    """A new run linked to this one, walking the workflow as saved now: from its failed step (retry), from_node, or the
+    start, reusing the earlier steps' outputs; to_node stops it with done after that node. 422 not_retryable."""
+    st, u, o = await _scope(request)
+    p = await _run(st, u, o, rid)
+    _, g, sha = await _workflow(st, p["workflow"])
+    try:
+        return {"run_id": await engine.retry(st, o, rid, g, sha, b.from_node, b.to_node, b.trigger)}
+    except ValueError as e:
+        fail(422, "not_retryable", str(e))
 
 
 @router.post("/workflows/{cap_id}/export", response_model=WorkflowExport)

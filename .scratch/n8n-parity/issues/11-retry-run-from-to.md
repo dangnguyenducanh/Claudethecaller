@@ -1,6 +1,6 @@
 # 11 — retry-run-from-to
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01
 Spec: `.scratch/n8n-parity/spec.md` (read it first; this ticket implements part of it)
 Touches: src/ctc/runner/engine.py, src/ctc/server/runs.py, src/ctc/server/schemas.py, src/ctc/storage/schema.sql, src/ctc/cli.py (`retry`), dashboard/src/Runs.tsx, dashboard/src/types.ts, tests/test_retry_run_from_to.py (engine-seam cases using the ticket 01 fixtures from tests/conftest.py)
@@ -22,3 +22,5 @@ New run linked to a parent run with optional `from_node` and `to_node`. Retry = 
 Engine-seam cases + API test.
 
 ## Comments
+
+2026-10-26 — resolved on branch `n8n-11-retry-run-from-to`, merged into `m5-n8n-parity` (tasks T008–T019, T021; T020 browser QC deferred to the final QC pass). `engine.retry()` queues a child run linked by `parent_run_id` (+ `from_node`, `to_node`, `base_sha`); parent steps before the from step are copied as `marker='reused'` and completed by execute() through the `canned` job path (no process, 0 tokens); the child's worktree starts at the from step's pre_sha; run-to ends `done` after its node. API `POST /api/runs/{id}/retry`, CLI `ctc retry <id> [--from] [--to]`, run page Retry / Run from here / Run to here + parent link. Schema (additive): wf_runs.parent_run_id (on delete set null), from_node, to_node; wf_steps.marker check (reused|pinned|disabled). Open risk: a reused agent node's session_id belongs to the parent's worktree, so `resume_from` on it may miss. Supabase gets these alters when the daemon next opens the store with this code (owner deploy).

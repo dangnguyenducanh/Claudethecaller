@@ -167,6 +167,7 @@ export const api = {
   cancelRun: (id: number) => req<Run>('POST', `/runs/${id}/cancel`),
   approveRun: (id: number, body: { approve: boolean; note?: string }) => req<Run>('POST', `/runs/${id}/approve`, body), // 409 not_waiting
   continueRun: (id: number, when: 'now' | 'reset') => req<Run>('POST', `/runs/${id}/continue`, { when }), // 409 not_quota
+  retryRun: (id: number, body: { from_node?: string; to_node?: string; trigger?: RunTrigger }) => req<{ run_id: number }>('POST', `/runs/${id}/retry`, body), // 422 not_retryable
   compareRuns: (a: number, b: number, node?: string) => req<Diff>('GET', '/runs/compare' + qs({ a, b, node })), // 422 unless same owner + repo
   setSchedule: (capId: string, body: { cron: string; input?: string; enabled: boolean }) => req<Schedule>('PUT', `/workflows/${seg(capId)}/schedule`, body), // 422 bad_cron
   deleteSchedule: (capId: string) => req<Ok>('DELETE', `/workflows/${seg(capId)}/schedule`),
