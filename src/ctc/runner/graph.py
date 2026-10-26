@@ -266,7 +266,7 @@ def validate(g: dict) -> list[dict]:
         if (v := n.get("disabled")) is not None and type(v) is not bool:
             err("disabled must be true or false", nid)
         elif v and t in ("trigger", "if", "switch", "foreach"):  # FR-016: a branching node has no one handle to pass through on
-            err(f"a {t} node cannot be disabled: delete it or rewire its branches", nid)
+            err(f"{'an' if t[0] in 'aeiou' else 'a'} {t} node cannot be disabled: delete it or rewire its branches", nid)
         if (v := n.get("idempotent")) is not None and type(v) is not bool:
             err("idempotent must be true or false", nid)
         elif v and t != "shell":
@@ -433,7 +433,7 @@ def warnings(g: dict) -> list[dict]:
                 elif field and (t := src.get("type")) in OUT_KEYS and field not in OUT_KEYS[t] | (
                         set(src["pin"]["output"]) if isinstance(src.get("pin"), dict) and isinstance(src["pin"].get("output"), dict)
                         else set()) | ({"error", "output_tail", "exit_code"} if src.get("on_error") == "error_output" else set()):
-                    msg = f"a {t} node has no field {field}"
+                    msg = f"{'an' if t[0] in 'aeiou' else 'a'} {t} node has no field {field}"
                 else:
                     continue
                 out.append({"message": f"{ref}: {msg}", "node_id": nid})

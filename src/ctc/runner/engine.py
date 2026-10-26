@@ -424,7 +424,8 @@ async def _spawn(node: dict, text: str, argv: list[str] | None, ctx: dict, wt: s
                 break
         if bad and res["status"] == "done":
             o = res["output"]
-            res |= {"status": "failed", "error": f"exit {code} on try {k}/{n}: {(o['stderr_tail'] or o['stdout_tail'])[-1000:]}"}
+            tail = (o["stderr_tail"] or o["stdout_tail"])[-1000:].strip()
+            res |= {"status": "failed", "error": f"exit {code} on try {k}/{n}" + (f": {tail}" if tail else "")}
         res["tries"] = k
     async with LOCK:  # pre read here too: a batch sibling may have committed while this node ran
         pre = (await git(wt, "rev-parse", "HEAD", gd=gd)).strip()

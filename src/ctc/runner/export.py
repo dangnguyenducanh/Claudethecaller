@@ -74,7 +74,7 @@ const retry = async (id, cmd, n, wait, cont) => {  // as engine._spawn: until ex
   for (let k = 1; ; k++) {
     const r = await sh(id, k > 1 && wait ? `sleep ${wait}; ` + cmd : cmd)
     if (r.exit_code === 0 || (k === n && cont)) return r
-    if (k === n) throw new Error(`exit ${r.exit_code} on try ${k}/${n}: ${r.stdout_tail}`)
+    if (k === n) throw new Error(`exit ${r.exit_code} on try ${k}/${n}` + ((r.stdout_tail || '').trim() ? `: ${r.stdout_tail.trim()}` : ''))
   }
 }
 """.replace("NUM_PATTERN", J(f"^(?:{NUM.pattern})$"))

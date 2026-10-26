@@ -122,8 +122,8 @@ def test_no_warnings_for_refs_that_resolve():
     ({"fix": {"prompt": "Shipped? {{ship.stdout_tail}}"}}, ("fix", "ship.stdout_tail: ship cannot run before fix")),
     ({"ship": {"command": "echo {{ship.stdout_tail}}"}}, ("ship", "ship.stdout_tail: ship cannot run before ship")),
     ({"ship": {"command": "echo {{test.stdout}}"}}, ("ship", "test.stdout: a shell node has no field stdout")),
-    ({"ship": {"command": "echo {{green.result}}"}}, ("ship", "green.result: a if node has no field result")),
-    ({"ship": {"command": "echo {{fix.nope}}"}}, ("ship", "fix.nope: a agent node has no field nope")),
+    ({"ship": {"command": "echo {{green.result}}"}}, ("ship", "green.result: an if node has no field result")),
+    ({"ship": {"command": "echo {{fix.nope}}"}}, ("ship", "fix.nope: an agent node has no field nope")),
     ({"ship": {"command": "echo {{run.nope}}"}}, ("ship", "run.nope: run has no field nope (branch, id, trigger, visit)")),
     ({"ship": {"command": "echo {{vars.missing}}"}}, ("ship", "vars.missing: no vars entry missing")),
     ({"green": {"path": "test.stdout"}}, ("green", "test.stdout: a shell node has no field stdout")),  # IF paths

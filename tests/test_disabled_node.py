@@ -42,6 +42,7 @@ def test_trigger_if_and_switch_cannot_be_disabled():
     errs = errors_at(g_of(BRANCHING))
     assert [nid for nid, _ in errs] == ["start", "gate", "verdict"], errs
     assert all("disabled" in m for _, m in errs), errs
+    assert dict(errs)["gate"].startswith("an if node cannot be disabled"), errs  # QC D5: "an", not "a if"
     assert errors_at(g_of(BRANCHING.replace("disabled: true", "disabled: false"))) == []
 
 

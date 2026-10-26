@@ -37,7 +37,9 @@ function NodeView({ id, type, data, selected }: NodeProps<FlowNode>) {
   const { bad, status, runs } = useContext(NodeCtx)
   const inbound = useNodeConnections({ handleType: 'target' }).length
   const cases = data.cases ?? []
-  const errOut = (type === 'agent' || type === 'shell') && data.on_error === 'error_output' // 'ok' = the id-less default handle
+  // an error edge written without on_error: error_output still gets its handle, so it shows and can be deleted (QC D4)
+  const errEdge = useNodeConnections({ handleType: 'source', handleId: 'error' }).length > 0
+  const errOut = (type === 'agent' || type === 'shell') && (data.on_error === 'error_output' || errEdge) // 'ok' = the id-less default handle
   const outs = type === 'if' ? ['true', 'false'] : type === 'switch' ? [...cases.map(c => c.name), 'default'] : type === 'foreach' ? ['body', 'done'] : errOut ? ['ok', 'error'] : null
   const updateInternals = useUpdateNodeInternals()
   const outKey = outs?.join('\n')
@@ -61,7 +63,8 @@ function NodeView({ id, type, data, selected }: NodeProps<FlowNode>) {
       <div className="wf-sub mono">{sub || '—'}</div>
       {outs
         ? outs.map(h => <div key={h} className="wf-out">{h}<Handle type="source" position={Position.Right} id={errOut && h === 'ok' ? undefined : h}
-          style={errOut && h === 'error' ? { background: 'var(--bad)' } : undefined} /></div>)
+          style={errOut && h === 'error' ? { background: 'var(--bad)' } : undefined}
+          title={h === 'error' && data.on_error !== 'error_output' ? 'This error edge needs On error: error_output' : undefined} /></div>)
         : type !== 'stop' && <Handle type="source" position={Position.Right} />}
     </div>
   )
@@ -156,8 +159,9 @@ function BlurField({ label, init, commit, area }: { label: string; init: string;
   }
   return (
     <label>{label}
-      {area ? <textarea value={s} onChange={e => setS(e.target.value)} onBlur={done} />
-        : <input value={s} onChange={e => setS(e.target.value)} onBlur={done} onKeyDown={e => e.key === 'Enter' && done()} />}
+      {/* aria-invalid: save() refuses while a field holds a value it could not apply (QC D3) */}
+      {area ? <textarea value={s} aria-invalid={err ? true : undefined} onChange={e => setS(e.target.value)} onBlur={done} />
+        : <input value={s} aria-invalid={err ? true : undefined} onChange={e => setS(e.target.value)} onBlur={done} onKeyDown={e => e.key === 'Enter' && done()} />}
       {err && <span className="err">{err}</span>}
     </label>
   )
@@ -481,6 +485,8 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
   }
   const save = async (overwrite = false) => { // overwrite: no base_hash, so the daemon writes over an on-disk edit
     setOk(''); setBad(null); setConflict(false); setWarns([])
+    // a rejected field (e.g. a pin that is not a JSON object) was never applied: saving would silently drop it (QC D3)
+    if (document.querySelector('[aria-invalid="true"]')) return setErr('A field shows an error and was not applied: fix or clear it, then save.')
     if (!loaded && (!name || nameErr)) return setErr(nameErr || 'Name the workflow.')
     if (!desc.trim()) return setErr('Add a description (what Claude matches against).')
     if (scope === 'project' && !project && !loaded) return setErr('Select a project in the sidebar first, or save to user scope.')

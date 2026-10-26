@@ -1,5 +1,5 @@
-import { Background, Controls, ReactFlow } from '@xyflow/react'
-import { Fragment, useEffect, useState } from 'react'
+import { Background, Controls, ReactFlow, useNodesInitialized, useReactFlow } from '@xyflow/react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { NEED_DAEMON, api, errText, usingMock } from './api'
 import type { Diff, RunDetail, RunStatus, Step } from './types'
 import { Header, Segmented, fmtMs, fmtTime, fmtTokens } from './ui'
@@ -79,6 +79,21 @@ function RunList({ onOpen }: { onOpen: (id: number) => void }) {
   )
 }
 
+/** The fitView prop can fire before the custom nodes are measured, leaving the run graph off-screen (QC D1): fit once
+ * when React Flow reports every node measured. */
+function FitOnce() {
+  const measured = useNodesInitialized()
+  const { fitView } = useReactFlow()
+  const done = useRef(false)
+  useEffect(() => {
+    if (measured && !done.current) {
+      done.current = true
+      void fitView({ maxZoom: 1 })
+    }
+  }, [measured, fitView])
+  return null
+}
+
 function RunPage({ id, theme, onBack }: { id: number; theme: string; onBack: () => void }) {
   const [rev, setRev] = useState(0)
   const [run, err] = usePoll(() => api.run(id), r => ACTIVE.includes(r.status), [id, rev])
@@ -91,7 +106,12 @@ function RunPage({ id, theme, onBack }: { id: number; theme: string; onBack: () 
 
   const visits: Record<string, Step[]> = {} // every visit per node, in visit order
   for (const s of [...run.steps].sort((a, b) => a.visit - b.visit)) (visits[s.node_id] ??= []).push(s)
-  const status = Object.fromEntries(Object.entries(visits).map(([n, vs]) => [n, vs[vs.length - 1].marker ?? vs[vs.length - 1].status])) // reused / pinned label the node
+  // the latest visit that ran (a trailing skip, e.g. a loop's or for-each's last pass, is not the node's outcome; QC D2),
+  // else the latest one; reused / pinned / disabled label the node
+  const status = Object.fromEntries(Object.entries(visits).map(([n, vs]) => {
+    const s = [...vs].reverse().find(v => v.status !== 'skipped') ?? vs[vs.length - 1]
+    return [n, s.marker ?? s.status]
+  }))
   const runs = Object.fromEntries(Object.entries(visits).map(([n, vs]) => [n, vs.filter(s => s.status !== 'skipped').length]))
   const f = toFlow(run.graph) // read once by the uncontrolled canvas below
   const vs = sel ? visits[sel] ?? [] : []
@@ -152,6 +172,7 @@ function RunPage({ id, theme, onBack }: { id: number; theme: string; onBack: () 
               proOptions={{ hideAttribution: true }}>
               <Background gap={20} />
               <Controls showInteractive={false} />
+              <FitOnce />
             </ReactFlow>
           </NodeCtx.Provider>
         </div>

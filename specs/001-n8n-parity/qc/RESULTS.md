@@ -25,3 +25,13 @@ Run on an isolated QC daemon built from `m5-n8n-parity` (after the review fixes,
 - **D3 (low, Workflows.tsx pin editor):** an invalid pin (`[1,2]`) shows the inline error, but Save still says "Saved" and silently drops the pin.
 - **D4 (low, US8):** an error edge hand-written without `on_error: error_output` is invisible on the canvas, so it can't be seen or deleted there; only the 422 names it.
 - **D5 (cosmetic):** "a if node" / "a agent node" grammar in validator messages; the retry error reads "exit 1 on try 1/1:" with an empty tail when stderr is empty.
+
+## Fixes after QC (2026-10-26)
+
+- **D2:** fixed in `Runs.tsx`. A node's canvas status is now its latest visit that ran (a trailing skip is ignored), else its latest visit.
+- **D1:** fixed in `Runs.tsx`. `FitOnce` fits the run canvas once React Flow reports every node measured (`useNodesInitialized`).
+- **D3:** fixed in `Workflows.tsx`. A `BlurField` that rejected its value sets `aria-invalid`, and Save refuses with a message until it is fixed or cleared.
+- **D4:** fixed in `Workflows.tsx`. A node with an outgoing `error` edge gets its red error handle even without `on_error: error_output`, with a tooltip saying what is missing, so the edge shows and can be deleted.
+- **D5:** fixed. Validator messages say "an if node" / "an agent node", and the retry error drops the colon when there is no output tail (engine and native export). Covered by tests/test_graph_templates.py, tests/test_disabled_node.py and tests/test_retry_on_fail.py.
+
+D1–D4 are UI changes checked by `tsc` and the dashboard build only; they have not been re-checked in a browser yet.

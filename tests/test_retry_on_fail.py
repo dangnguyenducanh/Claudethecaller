@@ -95,6 +95,12 @@ def test_always_failing_shell_fails_after_max_tries_with_the_last_error(run_yaml
     assert "boom" in run["error"], run["error"]
 
 
+def test_a_silent_failure_has_no_dangling_colon(run_yaml):
+    run, steps = run_yaml(one_shell("{id: x, type: shell, command: 'exit 3', idempotent: true, retry: {max_tries: 1, wait_s: 0}}"))
+    assert step_x(steps)["error"] == "exit 3 on try 1/1", step_x(steps)["error"]  # QC D5: no "...1/1:" with nothing after
+    assert run["error"].endswith("exit 3 on try 1/1"), run["error"]
+
+
 def test_shell_without_retry_keeps_a_non_zero_exit_as_data(run_yaml):
     run, steps = run_yaml(one_shell("{id: x, type: shell, command: 'exit 1'}"))
     x = step_x(steps)
