@@ -23,4 +23,7 @@ db_pool: {min: 3, max: 5}   # a route runs up to 3 queries at once; a cold Supab
 #   notify-send "ctc run $CTC_RUN_ID $CTC_RUN_STATUS" "$CTC_RUN_WORKFLOW"
 #   curl -s -m 5 -H 'content-type: application/json' -d "{\"text\": \"$CTC_RUN_WORKFLOW $CTC_RUN_STATUS $CTC_RUN_URL\"}" "$CHAT_WEBHOOK_URL"
 # (the webhook URL comes from the daemon's env, never a token written here)
-runner: {claude_version: "2.1.306", idle_wait_min: 15, poll_s: 1.5, notify: ""}   # workflow runner (PLAN.md m5); runs refuse any other `claude --version`
+# runner.shutdown_grace_s: on a planned stop (SIGTERM / ctc daemon stop) the runner claims no new batch, waits up to this
+# many seconds for the running batch to land and be saved, then re-queues the run with its walker state; a batch still
+# running after that is killed and the run fails ('daemon stopped mid-run').
+runner: {claude_version: "2.1.306", idle_wait_min: 15, poll_s: 1.5, notify: "", shutdown_grace_s: 300}   # workflow runner (PLAN.md m5); runs refuse any other `claude --version`
