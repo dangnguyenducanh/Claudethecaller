@@ -489,6 +489,103 @@ def history_import(no_process: bool = typer.Option(False, "--no-process", help="
     if j["status"] != "done":
         err.print(f"[{BAD}]●[/] {j['error']}")
         raise typer.Exit(1)
+
+
+# ---- graph (PLAN.md m6) -------------------------------------------------------
+
+graph = typer.Typer(no_args_is_help=True, help="Context + coding graph (m6).")
+app.add_typer(graph, name="graph")
+CONFIDENCE = {"CONFIRMED": GREEN, "EXTRACTED": BLUE, "INFERRED": PURPLE, "DROPPED": FAINT}
+
+
+def _git_head(repo: Path) -> str:
+    return subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=False, capture_output=True, text=True).stdout.strip()
+
+
+def _ago(t: datetime) -> str:
+    s = (datetime.now(UTC) - t).total_seconds()
+    return next((f"{s // n:.0f}{u} ago" for u, n in (("d", 86400), ("h", 3600), ("m", 60)) if s >= n), "just now")
+
+
+@graph.command("import")
+def graph_import() -> None:
+    """Import graphify-out/graph.json (code + rationale nodes, their links) as the coding graph; skipped when its
+    built_at_commit is already imported."""
+    from ctc.graph import importer
+    from ctc.ingestion.scanner import project_id
+
+    repo = Path.cwd()
+
+    async def go() -> dict:
+        s = await Store.open(cfg()["database_url"], pool_max=1)
+        try:
+            return await importer.import_graphify(s, "local", project_id(repo), repo)
+        finally:
+            await s.close()
+    try:
+        r = _run(go())
+    except (FileNotFoundError, ValueError) as e:
+        err.print(f"[{BAD}]●[/] {e}")
+        raise typer.Exit(1) from None
+    head = _git_head(repo)
+    out.print(f"{dot(FAINT if r['skipped'] else GREEN)} coding: {r['nodes']} nodes, {r['edges']} edges · built_at {r['built_at'][:8]}"
+              f" · HEAD {head[:8]}" + (f"  {tag('skipped')}" if r["skipped"] else "") + (f"  {tag('stale', WARN)}" if head != r["built_at"] else ""))
+
+
+@graph.command("status")
+def graph_status() -> None:
+    """Node and edge counts, graphify built_at vs HEAD, each source's age, share of tasks linked to code."""
+    from ctc.graph import db as gdb
+    from ctc.ingestion.scanner import project_id
+
+    repo = Path.cwd()
+    pid = project_id(repo)
+
+    async def go() -> tuple[dict, list[dict]]:
+        s = await Store.open(cfg()["database_url"], pool_max=1)
+        try:
+            return await gdb.counts(s, "local", pid), await s.fetch(
+                "select source, version, updated_at from graph_sources where user_id = 'local' and project_id = %s order by source", (pid,))
+        finally:
+            await s.close()
+
+    c, sources = _run(go())
+    n = {k: sum(t.values()) for k, t in c["nodes"].items()}
+    tl = c["tasks_linked"]
+    out.print(header("Graph", "Context + coding graph", f"{repo} · project {pid}"))
+    out.print(Columns([
+        kpi("Coding", BLUE, f"{n.get('coding', 0)}", "nodes from graphify"),
+        kpi("Context", PURPLE, f"{n.get('context', 0)}", "nodes from specs + docs"),
+        kpi("Edges", GREEN, f"{sum(c['edges'].values())}", f"{c['edges'].get('DROPPED', 0)} dropped in review"),
+        kpi("Tasks linked", GREEN if tl else FAINT, "n/a" if tl is None else f"{tl:.0%}", "tasks with a code link"),
+    ]))
+    head = _git_head(repo)
+    built = next((r["version"] for r in sources if r["source"] == "graphify"), "")
+    out.print(f"{dot(GREEN if built == head else WARN)} graphify built_at {built[:8] or 'none'} · HEAD {head[:8]}  "
+              + (tag("current", GREEN) if built == head else tag("stale", WARN)) + f"  [{FAINT}]tasks linked: {'n/a' if tl is None else f'{tl:.0%}'}[/]")
+    nodes = grid(("kind", "l:9"), ("type", "l:*2"), ("nodes", "r:7"))
+    for kind, types in sorted(c["nodes"].items()):
+        for t, k in sorted(types.items(), key=lambda x: -x[1]):
+            nodes.add_row(f"{dot(BLUE if kind == 'coding' else PURPLE)} [{MUTED}]{kind}[/]", t, f"[{TEXT}]{k}[/]")
+    edges = grid(("confidence", "l:*2"), ("edges", "r:7"))
+    for conf, k in sorted(c["edges"].items(), key=lambda x: -x[1]):
+        edges.add_row(f"{dot(CONFIDENCE.get(conf, MUTED))} [{MUTED}]{conf.lower()}[/]", f"[{TEXT}]{k}[/]")
+    srcs = grid(("source", "l:*2"), ("rows", "r:5"), ("version", "l:10"), ("updated", "l:*2"))
+    groups: dict[str, list[dict]] = {}  # parse:<file> and extract:<file>#<chunk> rows grouped: one line per source kind
+    for r in sources:
+        groups.setdefault(r["source"].split(":")[0], []).append(r)
+    for name, rs in groups.items():
+        at = sorted(r["updated_at"] for r in rs)
+        srcs.add_row(name, f"{len(rs)}", f"[{FAINT}]{rs[0]['version'][:8] if len(rs) == 1 else ''}[/]",
+                     _ago(at[-1]) + (f" [{FAINT}]· oldest {_ago(at[0])}[/]" if len(rs) > 1 else ""))
+    row = Table.grid(expand=True, padding=(0, 1))
+    row.add_column(ratio=3)
+    row.add_column(ratio=2)
+    row.add_row(card(nodes, "Nodes"), card(edges, "Edges"))
+    out.print(row)
+    out.print(card(srcs, "Sources", "graph_sources"))
+
+
 # ---- workflow runs (PLAN.md m5) -----------------------------------------------
 
 STATUS = {"done": GREEN, "skipped": FAINT, "cancelled": FAINT, "failed": BAD, "timeout": BAD, "quota": WARN,
