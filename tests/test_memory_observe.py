@@ -302,6 +302,115 @@ def test_run_job_caps_calls_and_drops_overflow(tmp_path, monkeypatch, in_store):
     assert "PROGRESS SUMMARY" in sent[-1] and not any("PROGRESS SUMMARY" in p for p in sent[:-1])  # the turn's last kept chunk asks for it
 
 
+def _turns(n):
+    rows = []
+    for i in range(n):
+        rows += [row("user", f"turn {i}", 1), use(f"t{i}", "Read", {"file_path": f"{P}/f{i}.py"}, 2), res(f"t{i}", "small", 3),
+                 row("assistant", [{"type": "text", "text": "ok"}], 4)]
+    return rows
+
+
+def _replies(tag, n=20):
+    return [f"<observation><type>change</type><title>{tag} {i}</title></observation>" for i in range(n)]
+
+
+def test_run_job_stalls_at_the_first_unplanned_turn_and_the_next_job_continues(tmp_path, monkeypatch, in_store):
+    rows = _turns(5)
+    _, ends = write(tmp_path / "ref.jsonl", rows)
+    sent, _ = _fake(monkeypatch, replies=_replies("First"))
+    packed, real = [], observe._pack
+    monkeypatch.setattr(observe, "_pack", lambda *a: packed.append(1) or real(*a))
+
+    async def go(s):
+        payload, size = await _seed(s, tmp_path, rows)
+        st = _st(s, tmp_path, max_calls_per_job=3)
+        a = await observe.run_job(st, payload, _prog)
+        packs = len(packed)
+        q = "select observed_bytes, observed_prompts from sessions where id = %s"
+        mid = await s.fetchrow(q, (payload["session_id"],))
+        sent2, _ = _fake(monkeypatch, replies=_replies("Second"))
+        b = await observe.run_job(st, payload, _prog)
+        nums = [r["prompt_number"] for r in await s.fetch("select prompt_number from observations where session_id = %s order by id", (payload["session_id"],))]
+        return a, packs, mid, b, sent2, await s.fetchrow(q, (payload["session_id"],)), nums, size
+
+    a, packs, mid, b, sent2, end, nums, size = in_store(go)
+    assert (a["calls"], a["observations"], a["dropped_chunks"]) == (3, 3, 0) and len(sent) == 3 and packs == 3  # no _pack past the cap
+    assert mid == {"observed_bytes": ends[4 * 3 - 1], "observed_prompts": 3}  # at the start of turn 4, not past the whole file
+    assert (b["calls"], b["observations"]) == (2, 2) and "turn 3" in sent2[0] and "turn 4" in sent2[1] and not any("turn 2" in p for p in sent2)
+    assert end == {"observed_bytes": size, "observed_prompts": 5} and nums == [1, 2, 3, 4, 5]
+
+
+def test_run_job_first_read_skips_what_is_older_than_the_window(tmp_path, monkeypatch, in_store):
+    rows = [row("user", "old turn", 1), use("o", "Read", {"file_path": f"{P}/o.py"}, 2), res("o", "x" * 2_100_000, 3),
+            row("assistant", [{"type": "text", "text": "ok"}], 4), *_turns(1)]
+    sent, _ = _fake(monkeypatch, replies=_replies("Window"))
+
+    async def go(s):
+        payload, size = await _seed(s, tmp_path, rows)
+        a = await observe.run_job(_st(s, tmp_path), payload, _prog)
+        return a, await s.fetchrow("select observed_bytes, observed_prompts from sessions where id = %s", (payload["session_id"],)), size
+
+    a, sess, size = in_store(go)
+    assert a["turns"] == 1 and len(sent) == 1 and "turn 0" in sent[0] and "old turn" not in sent[0]  # the cut falls inside the big result row
+    assert sess == {"observed_bytes": size, "observed_prompts": 1}
+
+
+def test_run_job_embeds_in_slices_of_32_after_one_ping(tmp_path, monkeypatch, in_store):
+    class Tei:
+        def __init__(self):
+            self.sizes = []
+
+        async def embed(self, texts, kind):
+            assert len(texts) <= 32, "TEI max_client_batch_size"
+            self.sizes.append(len(texts))
+            return np.zeros((len(texts), 1024), dtype="float32")
+
+    _fake(monkeypatch, replies=["".join(f"<observation><type>change</type><title>Finding {i}</title></observation>" for i in range(40))])
+
+    async def go(s):
+        payload, _ = await _seed(s, tmp_path, _turns(1))
+        st = _st(s, tmp_path)
+        st.embedder = Tei()
+        a = await observe.run_job(st, payload, _prog)
+        return a, st.embedder.sizes
+
+    a, sizes = in_store(go)
+    assert a["observations"] == 40 and sizes == [1, 32, 8]  # one ping, then 40 rows in slices
+
+
+def test_run_job_skips_before_any_claude_call_when_the_embedder_is_down(tmp_path, monkeypatch, in_store):
+    class Down:
+        async def embed(self, texts, kind):
+            raise ConnectionError("TEI is down")
+
+    sent, _ = _fake(monkeypatch)
+
+    async def go(s):
+        payload, _ = await _seed(s, tmp_path)
+        st = _st(s, tmp_path)
+        st.embedder = Down()
+        a = await observe.run_job(st, payload, _prog)
+        return a, await s.fetchrow("select observed_bytes, observed_prompts from sessions where id = %s", (payload["session_id"],)), \
+            await db.get_source(s, "local", payload["project_id"], extract.QUOTA), await s.fetchval("select count(*) from observations where session_id = %s", (payload["session_id"],))
+
+    a, sess, quota, n = in_store(go)
+    assert a["skipped"] == "embedder down" and sent == [] and a["calls"] == 0  # no claude call: no quota spent
+    assert sess == {"observed_bytes": 0, "observed_prompts": 0} and not quota and n == 0
+
+
+def test_run_job_is_a_no_op_when_memory_is_off(tmp_path, monkeypatch, in_store):
+    sent, _ = _fake(monkeypatch)
+
+    async def go(s):
+        payload, _ = await _seed(s, tmp_path)
+        a = await observe.run_job(_st(s, tmp_path, enabled=False), payload, _prog)
+        return a, await s.fetchrow("select observed_bytes, observed_prompts from sessions where id = %s", (payload["session_id"],)), \
+            await s.fetchval("select count(*) from observations where session_id = %s", (payload["session_id"],))
+
+    a, sess, n = in_store(go)
+    assert a == {"skipped": "off"} and sent == [] and sess == {"observed_bytes": 0, "observed_prompts": 0} and n == 0
+
+
 def test_run_job_retries_then_drops_and_never_stores_reply_text(tmp_path, monkeypatch, in_store):
     async def go(s, replies, status="done"):
         sent, _ = _fake(monkeypatch, replies=replies, status=status)

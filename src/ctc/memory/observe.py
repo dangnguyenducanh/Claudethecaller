@@ -16,6 +16,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+import httpx
 import orjson
 import yaml
 
@@ -96,7 +97,8 @@ def read_turns(path: str, start: int, upto: int) -> tuple[list[dict], int, int]:
     last line is left for the next job and a file shorter than `start` restarts at 0. A turn opens at a main-chain user row with text
     and no tool_result that typed_prompt() accepts or that starts with a memory tag (so a <private>-only prompt still opens one):
     {prompt (strip_tags'd; "" = fully private: no events, still counted), events [{tool, input, output, ts}] (gated, tool_use paired
-    with its tool_result by id), text (the last assistant text), ts (the last row's timestamp)}. isMeta and sidechain rows are skipped.
+    with its tool_result by id), text (the last assistant text), ts (the last row's timestamp), start (byte offset of the opening row)}.
+    isMeta and sidechain rows are skipped.
     ponytail: rows before the first boundary of a read (a Stop that landed mid-turn) are dropped; a first read holds the file in memory."""
     o = cfg()["memory"]["observe"]
     bash = [re.compile(x) for x in o["skip_bash_patterns"]]
@@ -107,8 +109,9 @@ def read_turns(path: str, start: int, upto: int) -> tuple[list[dict], int, int]:
         f.seek(start)
         data = f.read(max(0, min(upto, size) - start))
     data = data[: data.rfind(b"\n") + 1]
-    turns, cur, pending, seen = [], None, {}, 0
-    for line in data.splitlines():
+    turns, cur, pending, seen, pos = [], None, {}, 0, start
+    for line in data.splitlines(keepends=True):
+        at, pos = pos, pos + len(line)
         try:
             r = orjson.loads(line)
         except ValueError:
@@ -124,7 +127,7 @@ def read_turns(path: str, start: int, upto: int) -> tuple[list[dict], int, int]:
             results = [x for x in parts if x.get("type") == "tool_result"]
             if texts and not results and (typed_prompt(r) or any(t.lstrip().startswith(OPEN) for t in texts)):
                 raw = "\n".join(t for t in texts if t.strip() and (not t.strip().startswith(("<", "[Request interrupted")) or t.lstrip().startswith(OPEN)))
-                cur = {"prompt": strip_tags(raw), "events": [], "text": "", "ts": ts}
+                cur = {"prompt": strip_tags(raw), "events": [], "text": "", "ts": ts, "start": at}
                 turns.append(cur)
                 pending, seen = {}, seen + 1
                 continue
@@ -401,6 +404,8 @@ async def run_job(st, payload: dict, progress) -> dict:
     and jobs.error live in Supabase). A quota hit stores nothing and leaves the watermark, so the same turns are read again later.
     ponytail: observe:pending and extract:quota are per project, so a session waits for the next job of its own project;
     `model` is the alias 'haiku' because proc.run_agent returns no model id."""
+    if not st.cfg["memory"]["enabled"]:
+        return {"skipped": "off"}
     if st.cfg["mode"] != "local":  # the observer spends the owner's own claude.ai login and reads files on this host
         return {"skipped": "mode"}
     sid, u, p = payload["session_id"], payload.get("user_id", "local"), payload["project_id"]
@@ -426,18 +431,28 @@ async def run_job(st, payload: dict, progress) -> dict:
         await db.set_source(st.store, u, p, PENDING, "", {"sessions": []})
         waiting = []
     size = path.stat().st_size
+    upto = payload.get("upto") or size
     start, base = (0, 0) if size < s["observed_bytes"] else (s["observed_bytes"], s["observed_prompts"])  # a shrunk file restarts both
-    turns, end, seen = await asyncio.to_thread(read_turns, str(path), start, payload.get("upto") or size)
+    if not s["observed_bytes"]:
+        # ponytail: a first read takes the last 2 MB; read_turns drops the cut line and the rows up to the next turn boundary, so a session
+        # that predates m7 is not back-captured (spec Assumptions)
+        start = max(0, upto - 2_000_000)
+    turns, end, seen = await asyncio.to_thread(read_turns, str(path), start, upto)
     res = {"turns": len(turns), "calls": 0, "observations": 0, "summaries": 0, "dropped_chunks": 0, "failed_chunks": 0}
     fmax, cap = o["field_max_chars"], o["max_calls_per_job"]
     plan = []  # [turn, chunk, asks for the summary]
     for i, t in enumerate(turns, 1):
+        if len(plan) >= cap:  # full: this turn and the rest wait for the next job, the watermark stops at its first byte
+            end, seen = t["start"], i - 1
+            break
         t["n"] = base + i
-        for c in _pack(t["events"], fmax, o["chunk_chars"]):
-            if len(plan) < cap:
-                plan.append([t, c, False])
-            else:
-                res["dropped_chunks"] += 1  # ponytail: a very long turn loses its tail; raise max_calls_per_job or split jobs
+        chunks = _pack(t["events"], fmax, o["chunk_chars"])
+        if plan and len(plan) + len(chunks) > cap:  # does not fit whole: the next job takes it whole
+            end, seen = t["start"], i - 1
+            break
+        for c in chunks[:cap - len(plan)]:
+            plan.append([t, c, False])
+        res["dropped_chunks"] += max(0, len(chunks) - cap)  # ponytail: a turn with more than max_calls_per_job chunks loses its tail; raise it or split jobs
     for k in {id(t): k for k, (t, _, _) in enumerate(plan)}.values():
         plan[k][2] = True  # each turn's last kept chunk carries its summary request
     if not plan:  # chat-only, private or fully skipped turns: nothing to call, only the watermark moves
@@ -451,6 +466,11 @@ async def run_job(st, payload: dict, progress) -> dict:
     if not pre["ok"]:
         log.warning("observe: claude is not usable: %s", pre["error"])
         return res | {"skipped": "claude not usable"}
+    try:  # before the first claude call: a down embedder would fail the write after the quota is spent
+        await st.embedder.embed(["ping"], "doc")
+    except (httpx.HTTPError, OSError) as e:
+        log.warning("observe: embedder is down: %s", type(e).__name__)
+        return res | {"skipped": "embedder down"}
     mode, cmd = load_mode(), extract.argv("haiku")
     wd = Path(st.cfg["graph_extract"]["dir"]).expanduser()
     wd.mkdir(parents=True, exist_ok=True)
@@ -488,7 +508,8 @@ async def run_job(st, payload: dict, progress) -> dict:
             sums[t["n"]] = summ | {"at": t["ts"], "tok": 0 if obs else got[2]}
         prior = [*prior, *(x["title"] for x in obs)][-o["prior_titles"]:]
         await progress((k + 1) / len(plan))
-    vecs = await st.embedder.embed(["\n".join([x["title"], x["subtitle"], x["narrative"], *x["facts"]]) for x in rows], "doc") if rows else []
+    docs = ["\n".join([x["title"], x["subtitle"], x["narrative"], *x["facts"]]) for x in rows]
+    vecs = [v for i in range(0, len(docs), 32) for v in await st.embedder.embed(docs[i:i + 32], "doc")]  # TEI max_client_batch_size = 32
     a = {"u": u, "p": p, "s": sid}
 
     async def go(conn):
@@ -534,6 +555,7 @@ if __name__ == "__main__":
         size = f.stat().st_size
         turns, off, seen = read_turns(str(f), 0, size)
     assert seen == 2 and off == size - len('{"type": "us') and [t["prompt"] for t in turns] == ["fix it", ""]
+    assert [t["start"] for t in turns] == [0, len("".join(json.dumps(r) + "\n" for r in rows[:3]))]
     assert turns[0]["events"] == [{"tool": "Edit", "input": {"file_path": "/p/a.py"}, "output": "done", "ts": "2026-10-26T10:00:02Z"}] and turns[1]["events"] == []
     m = load_mode()
     p = build_prompt(m, turns[0], ["Earlier"], turns[0]["events"], True)
