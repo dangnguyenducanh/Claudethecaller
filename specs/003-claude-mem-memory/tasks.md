@@ -40,7 +40,7 @@ description: "Task list for m7 claude-mem memory in the Memories feature"
   3. `git worktree add .worktrees/m7 m7-memory` (the repo's existing `.worktrees/<name>` convention).
   4. In `.worktrees/m7`: `uv sync` and `pnpm -C dashboard install --frozen-lockfile`.
   5. From here on, every builder and lead step runs in `.worktrees/m7`. The isolated daemon is started with `CTC_DASHBOARD_DIST=<worktree>/dashboard/dist`.
-- [ ] T001 (lead) Verify the scratch stack without editing `.env`:
+- [x] T001 (lead) Verify the scratch stack without editing `.env`:
   - `docker ps --filter name=ctc-dev-pg` shows 127.0.0.1:18304.
   - With the scratch URL exported, `uv run python -c "import os,psycopg; print(psycopg.connect(os.environ['CTC_DATABASE_URL']).execute(\"select count(*) from pg_available_extensions where name in ('vector','unaccent')\").fetchone())"` prints `(2,)`.
   - `curl -s 127.0.0.1:18300/health` answers.
@@ -386,7 +386,7 @@ description: "Task list for m7 claude-mem memory in the Memories feature"
 
 **Lead after wave 2**
 
-- [ ] T036 (lead) Re-run T029 and T035, then an end-to-end check on scratch:
+- [x] T036 (lead) Re-run T029 and T035, then an end-to-end check on scratch:
   1. Seed a project and session pointing at `tests/fixtures/transcript-m7.jsonl` copied under a temp claude home.
   2. Run `observe.run_job` inline with `CTC_CLAUDE_BIN=tests/fixtures/fake-claude-observe.sh`, `CTC_DATABASE_URL` on the scratch DB and `CTC_REDIS_URL=redis://127.0.0.1:18395/0`, and `memory.enabled` set true for the run.
   3. Print `observations.context_text(...)`.
@@ -530,8 +530,8 @@ description: "Task list for m7 claude-mem memory in the Memories feature"
   - **Self-check:** a `--self-check` flag that seeds nothing and only validates the parser on an inline 2-line sample.
   - **Questions file:** `data/processed/memory-questions.jsonl` is written by the owner (H5) and is not created here.
 - [x] T053 Done-when (builder H): `uv run ruff check evaluation` is clean, `uv run python evaluation/observation_eval.py --self-check` exits 0, `git diff --stat evaluation/memory_eval.py` is empty, and `PLAN.md`/`CLAUDE.md` diffs are additive only. Do not commit.
-- [ ] T054 (lead) Commit `docs(m7): PLAN m7 section, decisions and memory eval script (m7 O8)`. Tick O1–O7 in the PLAN m7 section with a one-line result each.
-- [ ] T055 (lead) Run one reviewer agent over `git diff m6-graph...m7-memory`. Critical/high defects only:
+- [x] T054 (lead) Commit `docs(m7): PLAN m7 section, decisions and memory eval script (m7 O8)`. Tick O1–O7 in the PLAN m7 section with a one-line result each.
+- [x] T055 (lead) Run one reviewer agent over `git diff m6-graph...m7-memory`. Critical/high defects only:
   - raw data reaching Supabase;
   - `<private>` or secret leaks;
   - hooks that can block or exceed their budget;
