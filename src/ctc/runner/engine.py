@@ -368,7 +368,7 @@ def _input(node: dict, ctx: dict, resume: str | None) -> tuple[str, list[str] | 
         return "", None
     if node["type"] == "foreach":
         return f"{node['items']} (max_items {node.get('max_items', MAX_ITEMS)})", None
-    return ctx["input"], None
+    return ctx["input"] if isinstance(ctx["input"], str) else json.dumps(ctx["input"]), None  # wf_steps.input is text
 
 
 def _exit_fails(node: dict) -> bool:
@@ -382,8 +382,8 @@ async def _spawn(node: dict, text: str, argv: list[str] | None, ctx: dict, wt: s
     """Run one node -> a proc-style result. Agent and shell nodes are committed (empty or not) after they run.
     A shell with retry (graph.validate: idempotent only) re-runs in the same worktree, before the one commit, until it
     exits 0 or max_tries; alive() (the run is still `running`) is asked after each wait. Agents never loop."""
-    if node["type"] == "trigger":
-        return {"status": "done", "output": {"input": text}}
+    if node["type"] == "trigger":  # typed inputs stay a dict, so {{<trigger>.input.<name>}} resolves too
+        return {"status": "done", "output": {"input": ctx["input"]}}
     if node["type"] == "if":
         return {"status": "done", "output": {"value": eval_if(node, ctx)}}
     if node["type"] == "switch":
@@ -433,8 +433,11 @@ async def execute(st, run: dict) -> None:
     nodes = {n["id"]: (g.get("defaults") or {}) | n for n in g["nodes"]}
     trig = next(n for n in g["nodes"] if n["type"] == "trigger")
     # FR-033 template roots; each node renders with its own nctx (run.visit, now) over this shared ctx of node outputs
-    ctx = {"input": run["input"] or trig.get("input") or "", "run": {"branch": run["branch"], "id": rid, "trigger": run["trigger"]},
-           "vars": g.get("vars") or {}}
+    inp = run["input"] or trig.get("input") or ""
+    if trig.get("inputs"):  # FR-036: the JSON object submit_run coerced, so {{input.<name>}} resolves
+        with contextlib.suppress(ValueError):  # ponytail: free text (a retry of a run from before the inputs) stays text
+            inp = json.loads(run["input"] or "{}")
+    ctx = {"input": inp, "run": {"branch": run["branch"], "id": rid, "trigger": run["trigger"]}, "vars": g.get("vars") or {}}
     env, sessions, total, seen = child_env() | {"CTC_RUN": str(rid)}, {}, run["tokens"], len(wst.get("skipped", []))
     # FR-035 wall clock from the first claim. ponytail: killed steps keep the status their process returned; quota and
     # approval waits count toward the wall clock

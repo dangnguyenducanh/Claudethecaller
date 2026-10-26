@@ -159,7 +159,7 @@ export const api = {
   importHistory: (o: { process?: boolean; projects?: string[] } = {}) => req<{ job_id: string }>('POST', '/history/import', o),
   historyFiles: (status?: string) => req<HistoryFile[]>('GET', '/history/files' + qs({ status })),
   // Workflow runs (PLAN.md "Workflow runner (m5)" → API; M1 + M2 endpoints). The daemon only: the mock has no runs.
-  startRun: (capId: string, body: { input?: string; project?: string; trigger?: RunTrigger; pinned?: boolean }) => req<{ run_id: number }>('POST', `/workflows/${seg(capId)}/runs`, body), // 422 pinned_not_allowed
+  startRun: (capId: string, body: { input?: string; project?: string; trigger?: RunTrigger; pinned?: boolean; inputs?: Record<string, unknown> }) => req<{ run_id: number }>('POST', `/workflows/${seg(capId)}/runs`, body), // 422 pinned_not_allowed, 422 bad_input
   exportWorkflow: (capId: string) => req<{ path: string }>('POST', `/workflows/${seg(capId)}/export`), // M6: 422 has_approval, 409 a different file exists
   runs: (o: { workflow?: string; status?: RunStatus; trigger?: RunTrigger } & Page = {}) => req<Run[]>('GET', '/runs' + qs(o)),
   run: (id: number) => req<RunDetail>('GET', `/runs/${id}`),

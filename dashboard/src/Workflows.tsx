@@ -8,7 +8,7 @@ import { createContext, useContext, useEffect, useRef, useState, type DragEvent 
 import { ApiError, NEED_DAEMON, api, errText, usingMock } from './api'
 import type { ViewProps } from './App'
 import { parseSteps } from './parts'
-import type { Capability, CapabilityDetail, Condition, Graph, GraphIssue, Kind, NodeType, Op, RunDetail, Schedule, SwitchCase, WfNode, WorkflowSettings, WorkflowStep } from './types'
+import type { Capability, CapabilityDetail, Condition, Graph, GraphIssue, Kind, NodeType, Op, RunDetail, RunInput, Schedule, SwitchCase, WfNode, WorkflowSettings, WorkflowStep } from './types'
 import { Header, Search, fmtTime } from './ui'
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
@@ -42,7 +42,7 @@ function NodeView({ id, type, data, selected }: NodeProps<FlowNode>) {
   const updateInternals = useUpdateNodeInternals()
   const outKey = outs?.join('\n')
   useEffect(() => updateInternals(id), [id, outKey, updateInternals]) // React Flow caches handle positions
-  const sub = type === 'trigger' ? (data.input ? `input: ${data.input}` : 'run input → {{input}}')
+  const sub = type === 'trigger' ? (data.inputs?.length ? `inputs: ${data.inputs.map(i => i.name).join(', ')}` : data.input ? `input: ${data.input}` : 'run input → {{input}}')
     : type === 'agent' ? data.cap ?? data.agent ?? firstLine(data.prompt)
     : type === 'shell' ? firstLine(data.command)
     : type === 'approval' || type === 'stop' ? firstLine(data.message)
@@ -375,6 +375,9 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
   const [last, setLast] = useState<RunDetail | null>(null) // the loaded workflow's latest run, for 'Pin output of run #N'
   const [conflict, setConflict] = useState(false) // a save hit 409 changed_on_disk: Reload or Overwrite
   const [warns, setWarns] = useState<GraphIssue[]>([]) // the last save's graph warnings (refs that would render empty)
+  const dlg = useRef<HTMLDialogElement>(null) // the run dialog, for a trigger that declares inputs
+  const [vals, setVals] = useState<Record<string, string>>({}) // its fields, sent as strings: the daemon coerces them
+  const [dlgErr, setDlgErr] = useState('') // a 422 bad_input, shown in the dialog
   // Undo/redo history: JSON of toGraph() (no selection, settings or description); cur = the last recorded canvas
   const hist = useRef({ past: [] as string[], future: [] as string[], cur: JSON.stringify(toGraph([TRIGGER], [])) })
   const [, setTick] = useState(0) // re-renders Undo/Redo after a history change
@@ -498,13 +501,25 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
     }
   }
   const reload = () => { if (loaded && confirm('Drop your unsaved canvas edits?')) open(loaded.id) }
-  const run = async () => {
+  const decl = (nodes.find(n => n.type === 'trigger')?.data.inputs ?? []) as RunInput[]
+  const run = async (inputs?: Record<string, string>) => {
     if (!loaded) return
+    if (decl.length && !inputs) { // typed inputs: ask for them first, starting from their defaults
+      setVals(Object.fromEntries(decl.map(i => [i.name, i.type === 'bool' ? String(i.default ?? false)
+        : i.default == null ? '' : typeof i.default === 'string' ? i.default : JSON.stringify(i.default)])))
+      setDlgErr('')
+      return dlg.current?.showModal()
+    }
     try {
       setErr(''); setOk(''); setBad(null); setWarns([])
-      const r = await api.startRun(loaded.id, { input, project: project ?? undefined, trigger: 'button', pinned })
+      const r = await api.startRun(loaded.id, { ...(inputs ? { inputs } : { input }), project: project ?? undefined, trigger: 'button', pinned })
+      dlg.current?.close()
       location.hash = `run/${r.run_id}`
-    } catch (e) { if (usingMock()) setErr(NEED_DAEMON); else fail(e) }
+    } catch (e) {
+      if (inputs) setDlgErr(usingMock() ? NEED_DAEMON : errText(e))
+      else if (usingMock()) setErr(NEED_DAEMON)
+      else fail(e)
+    }
   }
   const exportWf = async () => {
     if (!loaded) return
@@ -586,10 +601,27 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
         <button className="btn" onClick={undo} title="Undo (Ctrl+Z)" disabled={locked || !(hist.current.past.length || graphJson !== hist.current.cur)}>Undo</button>
         <button className="btn" onClick={redo} title="Redo (Ctrl+Shift+Z)" disabled={locked || !hist.current.future.length || graphJson !== hist.current.cur}>Redo</button>
         <button className="btn" onClick={async () => setExisting(existing ? null : await api.capabilities({ project, kind: 'workflow' }))}>Open existing</button>
-        <input className="inline-input" placeholder="Run input, fills {{input}}" aria-label="Run input" value={input} onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && canRun && run()} />
+        {!decl.length && <input className="inline-input" placeholder="Run input, fills {{input}}" aria-label="Run input" value={input} onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && canRun && run()} />}
         <label className="toggle" title="Pinned nodes return their pinned output: no agent runs, no commit"><input type="checkbox" checked={pinned} onChange={e => setPinned(e.target.checked)} />Use pins</label>
-        <button className="btn" onClick={run} disabled={!canRun} title={canRun ? 'Run on its own git branch and worktree' : 'Save the workflow first'}>Run</button>
+        <button className="btn" onClick={() => run()} disabled={!canRun} title={canRun ? 'Run on its own git branch and worktree' : 'Save the workflow first'}>Run</button>
+        <dialog ref={dlg} className="card pad" style={{ color: 'inherit', minWidth: 360 }} aria-label={`Run ${loaded?.name ?? ''}`}>
+          <form className="form" noValidate onSubmit={e => { e.preventDefault(); run(vals) }}>
+            <div className="card-title">Run {loaded?.name}</div>
+            {decl.map(i => {
+              const v = vals[i.name] ?? '', put = (x: string) => setVals(o => ({ ...o, [i.name]: x }))
+              const label = <span className="mono">{i.name}{i.required ? ' *' : ''}</span>
+              const hint = i.description && <span className="muted">{i.description}</span>
+              return i.type === 'bool'
+                ? <label key={i.name} className="toggle"><input type="checkbox" checked={/^(true|1|yes|on)$/i.test(v)} onChange={e => put(String(e.target.checked))} />{label}{hint}</label>
+                : <label key={i.name}>{label}{i.type === 'json'
+                  ? <textarea className="mono" value={v} onChange={e => put(e.target.value)} />
+                  : <input type={i.type === 'number' ? 'number' : 'text'} step="any" value={v} onChange={e => put(e.target.value)} />}{hint}</label>
+            })}
+            {dlgErr && <span className="err">{dlgErr}</span>}
+            <div className="actions"><button type="button" className="btn" onClick={() => dlg.current?.close()}>Cancel</button><button className="btn" style={{ borderColor: 'var(--accent)' }}>Run</button></div>
+          </form>
+        </dialog>
         <button className="btn" onClick={exportWf} disabled={!canRun} title={canRun ? 'Write .claude/workflows/<name>.js in Claude Code\'s native format' : 'Save the workflow first'}>Export</button>
         <div className="wf-msg">
           {nameErr && <span className="err">{nameErr}</span>}

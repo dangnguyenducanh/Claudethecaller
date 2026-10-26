@@ -1,0 +1,24 @@
+name: inputs-demo
+description: Typed run inputs demo - take a topic, a count and a dry_run flag, echo them, then branch on dry_run (no claude)
+settings: {permission: worktree, allow_extra_usage: false, auto_resume: true, max_run_tokens: null}
+nodes:
+  - id: start
+    type: trigger
+    pos: [0, 160]
+    inputs:
+      - {name: topic, type: string, required: true, description: What to echo}
+      - {name: count, type: number, default: 2, description: How many}
+      - {name: dry_run, type: bool, default: true, description: Only say what would happen}
+  - {id: say, type: shell, command: "echo {{input.topic}} x {{input.count}}", timeout_s: 30, pos: [200, 160]}
+  - id: dry
+    type: if
+    conditions: [{path: input.dry_run, op: truthy}]
+    pos: [400, 160]
+  - {id: preview, type: shell, command: "echo dry run: would do {{input.topic}} {{input.count}} times", timeout_s: 30, pos: [600, 80]}
+  - {id: real, type: shell, command: "echo doing {{input.topic}} {{input.count}} times", timeout_s: 30, pos: [600, 240]}
+edges:
+  - {from: start, to: say}
+  - {from: say, to: dry}
+  - {from: dry, to: preview, handle: "true"}
+  - {from: dry, to: real, handle: "false"}
+steps: []

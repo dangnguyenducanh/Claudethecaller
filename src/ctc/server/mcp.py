@@ -8,12 +8,14 @@ import contextlib
 import json
 from typing import Any, Literal
 
+import yaml
 from fastapi import HTTPException
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import CallToolResult, TextContent
 
 from ctc.decision.bundle import plan_text
+from ctc.runner.graph import load
 from ctc.server import runs
 from ctc.server.hooks import cached_bundle, route
 from ctc.server.library import _caps
@@ -56,10 +58,13 @@ def _api_errors():
 
 
 @mcp.tool()
-async def run_workflow(workflow: str, input: str = "", project: str | None = None, ctx: Context | None = None) -> dict[str, Any]:
+async def run_workflow(workflow: str, input: str = "", project: str | None = None, inputs: dict[str, Any] | None = None,
+                       ctx: Context | None = None) -> dict[str, Any]:
     """Start a saved ctc workflow on this machine's Claude login, in its own git worktree and branch. `workflow` is its
-    capability id or its unique name; `input` fills {{input}}; `project` (a project name) is where a user or plugin
-    workflow runs, by default the project of your latest prompt. Returns {run_id} at once; then call workflow_status."""
+    capability id or its unique name; `inputs` {name: value} for a workflow whose trigger declares inputs (see
+    list_workflows; values are checked and coerced), `input` the free text that fills {{input}} for one that declares
+    none; `project` (a project name) is where a user or plugin workflow runs, by default the project of your latest
+    prompt. Returns {run_id} at once; then call workflow_status."""
     with _api_errors():
         st, u, o = await runs.scope(state, _user(ctx))
         ids = [workflow] if workflow in st.store.catalog else sorted(
@@ -72,13 +77,14 @@ async def run_workflow(workflow: str, input: str = "", project: str | None = Non
             project = await st.store.fetchval(
                 "select p.name from decisions d join projects p on p.user_id = d.user_id and p.id = d.project_id"
                 " where d.user_id = %s order by d.at desc limit 1", (u,))
-        return {"run_id": await runs.submit_run(st, u, o, ids[0], input, project, "mcp")}
+        return {"run_id": await runs.submit_run(st, u, o, ids[0], input, project, "mcp", inputs=inputs)}
 
 
 @mcp.tool()
 async def list_workflows(ctx: Context | None = None) -> dict[str, Any]:
     """The saved ctc workflows: {workflows: [{id, name, scope (user, project, plugin), project (its name, for a project's
-    workflow), description, has_schedule (this login's schedule is on)}]}."""
+    workflow), description, has_schedule (this login's schedule is on), inputs (the trigger's declared [{name, type,
+    required, default, description}] to pass as run_workflow's inputs; [] = it takes free-text input)}]}."""
     with _api_errors():
         st, u, o = await runs.scope(state, _user(ctx))
         rows = await _caps(st, u, None, kind="workflow", detail=True, n=500)
@@ -87,8 +93,17 @@ async def list_workflows(ctx: Context | None = None) -> dict[str, Any]:
     return {"workflows": [{
         "id": r["id"], "name": r["name"], "description": r["description"], "has_schedule": r["id"] in sched,
         "scope": "user" if r["namespace"] == "user" else "project" if r["namespace"].startswith("project@") else "plugin",
-        "project": names.get(r["namespace"].removeprefix("project@")) if r["namespace"].startswith("project@") else None}
-        for r in rows]}
+        "project": names.get(r["namespace"].removeprefix("project@")) if r["namespace"].startswith("project@") else None,
+        "inputs": _inputs(r["path"])} for r in rows]}
+
+
+def _inputs(path: str) -> list:
+    """A workflow file's trigger inputs; [] when it declares none or the file is gone or unreadable."""
+    try:
+        g = load(path)
+    except (OSError, yaml.YAMLError):
+        return []
+    return next((n.get("inputs") or [] for n in g["nodes"] if isinstance(n, dict) and n.get("type") == "trigger"), [])
 
 
 def _cut(v):

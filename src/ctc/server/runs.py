@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import gzip
 import hashlib
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from fastapi import APIRouter, Query, Request
 
 from ctc.runner import engine, schedule
 from ctc.runner.export import to_js
-from ctc.runner.graph import load
+from ctc.runner.graph import coerce_inputs, load
 from ctc.server.api import ctx, fail
 from ctc.server.library import _cap_root, _inside, _known, _local_only, check_graph
 from ctc.server.schemas import (
@@ -74,18 +75,37 @@ async def _step(st, o: str, rid: int, sid: int) -> dict:
 @router.post("/workflows/{cap_id}/runs", response_model=RunRef, status_code=202)
 async def start_run(cap_id: str, b: RunStart, request: Request):
     st, u, o = await _scope(request)
-    return {"run_id": await submit_run(st, u, o, cap_id, b.input, b.project, b.trigger, pinned=b.pinned)}
+    return {"run_id": await submit_run(st, u, o, cap_id, b.input, b.project, b.trigger, pinned=b.pinned, inputs=b.inputs)}
 
 
 async def submit_run(st, u: str, o: str, cap_id: str, text: str = "", project: str | None = None, trigger: str = "api",
-                     head: bool = False, pinned: bool = False) -> int:
-    """Queue a run of the workflow file as it is now (POST /runs, MCP run_workflow, CLI); with head (schedules only) a
-    project's workflow as committed at the project's HEAD, 422 not_committed when it has no committed version. pinned
-    (editor and CLI only): pinned nodes return their pin.output. 422 pinned_not_allowed (a schedule or MCP start with
-    pinned) / invalid_graph / project_required."""
+                     head: bool = False, pinned: bool = False, inputs: dict | None = None) -> int:
+    """Queue a run of the workflow file as it is now (POST /runs, MCP run_workflow, CLI, schedules); with head
+    (schedules only) a project's workflow as committed at the project's HEAD, 422 not_committed when it has no committed
+    version. pinned (editor and CLI only): pinned nodes return their pin.output. A trigger declaring `inputs` takes
+    inputs {name: value} (or text holding that JSON object), checked and coerced (graph.coerce_inputs) and stored as
+    JSON text in wf_runs.input; one declaring none takes the free text. 422 pinned_not_allowed (a schedule or MCP start
+    with pinned) / invalid_graph / bad_input / project_required."""
     if pinned and trigger in ("schedule", "mcp"):
         fail(422, "pinned_not_allowed", "pins apply only to editor and CLI runs; schedule and MCP runs always execute for real")
     c, g, sha = await _workflow(st, cap_id, head)
+    trig = next(n for n in g["nodes"] if n["type"] == "trigger")
+    if decl := trig.get("inputs"):
+        given = inputs
+        if given is None:  # ponytail: a schedule's input is text, so it passes typed inputs as a JSON object in it
+            try:
+                given = json.loads(text) if text.strip() else {}
+            except ValueError:
+                pass
+        if not isinstance(given, dict):
+            names = ", ".join(i["name"] for i in decl)
+            fail(422, "bad_input", f"{cap_id} declares inputs ({names}): pass inputs as {{name: value}}")
+        try:
+            text = json.dumps(coerce_inputs(trig, given))
+        except ValueError as e:
+            fail(422, "bad_input", str(e))
+    elif inputs:
+        fail(422, "bad_input", f"{cap_id} declares no inputs: pass input text")
     if c["namespace"].startswith("project@"):  # a project's workflow runs in that project (its file is in its git)
         repo, pid = _cap_root(st, c).parent, c["namespace"].removeprefix("project@")
     elif project and (p := await st.store.fetchrow("select id, path from projects where user_id = %s and name = %s", (u, project))):
