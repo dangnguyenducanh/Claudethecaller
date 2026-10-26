@@ -67,6 +67,18 @@ def test_workflow_status_reads_the_run_page_with_outputs_cut(run_yaml, tool):
     assert s["start"]["output"] == '{"input": ""}'
 
 
+def test_workflow_status_shows_a_retried_shells_tries(run_yaml, tool):
+    run, _ = run_yaml("""
+nodes:
+- {id: start, type: trigger}
+- {id: flaky, type: shell, command: 'exit 1', idempotent: true, retry: {max_tries: 2}, on_error: continue}
+edges:
+- {from: start, to: flaky}
+""")
+    s = {x["node_id"]: x for x in tool("workflow_status", run_id=run["id"])["steps"]}
+    assert s["flaky"]["tries"] == 2 and "tries" not in s["start"], s  # like marker: only when it says something
+
+
 def test_approve_run_walks_a_waiting_run_on(run_yaml, tool):
     run, _ = run_yaml(GATE, input="v2")
     assert run["status"] == "waiting"

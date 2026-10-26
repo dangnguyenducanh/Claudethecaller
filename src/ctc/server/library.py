@@ -9,6 +9,7 @@ invalid_graph) and `settings`, plus the `steps:` the router reads, derived from 
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import os
@@ -291,7 +292,18 @@ async def update_capability(cap_id: str, b: CapabilityPatch, request: Request):
             meta["settings"] = old | b.settings.model_dump()
         if b.steps is not None and not b.graph:
             meta["steps"] = [s.model_dump(exclude_none=True) for s in b.steps]
-    path.write_text(_yaml(meta) if plain else _render(meta, body if b.body is None else b.body), encoding="utf-8")
+    # write a temp file beside the real one, re-check the hash, then rename: an edit that landed since the first check
+    # is refused, never overwritten. ponytail: an edit in the microseconds between re-check and rename still loses
+    # (a lock on the file if several writers ever share one)
+    real = path.resolve()  # a symlinked file stays a symlink
+    tmp = real.with_name(f".{real.name}.{uuid.uuid4().hex[:8]}.tmp")
+    tmp.write_text(_yaml(meta) if plain else _render(meta, body if b.body is None else b.body), encoding="utf-8")
+    with contextlib.suppress(OSError):
+        shutil.copymode(real, tmp)
+    if b.base_hash is not None and _sha(real) != b.base_hash:
+        tmp.unlink()
+        fail(409, "changed_on_disk", f"{path} changed on disk while saving: reload it, or save without base_hash to overwrite")
+    os.replace(tmp, real)
     await _reindex(st, path, c["kind"], c["namespace"])
     return {**await _cap(st, u, cap_id), "file_hash": _sha(path), "warnings": warns}
 

@@ -12,9 +12,8 @@ Only the engine's committed transitions call fire(); cancel, reject and a re-que
 from __future__ import annotations
 
 import logging
-import os
-import signal
 import subprocess
+import sys
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
@@ -44,19 +43,27 @@ def fire(run: dict, status: str, error: str | None) -> threading.Thread | None:
     return t
 
 
+# The timeout lives in a watchdog process of its own (python, not coreutils `timeout`: missing on macOS), so a hanging
+# command is killed at TIMEOUT_S even when the daemon (and the thread waiting on it) exits first.
+WATCHDOG = """import os, signal, subprocess, sys
+p = subprocess.Popen(["bash", "-c", sys.argv[2]], stdin=subprocess.DEVNULL, start_new_session=True)
+try:
+    sys.exit(p.wait(float(sys.argv[1])))
+except subprocess.TimeoutExpired:
+    os.killpg(p.pid, signal.SIGKILL)
+    print(f"timeout after {sys.argv[1]} s", flush=True)
+    sys.exit(124)
+"""
+
+
 def _run(cmd: str, env: dict, d: Path) -> None:
     try:
         d.mkdir(parents=True, exist_ok=True)
         with (d / "notify.log").open("a") as f:
             f.write(f"--- {datetime.now(UTC).isoformat()} {env['CTC_RUN_STATUS']}\n")
             f.flush()
-            p = subprocess.Popen(["bash", "-c", cmd], cwd=d, env=env, stdin=subprocess.DEVNULL, stdout=f,
-                                 stderr=subprocess.STDOUT, start_new_session=True)
-            try:
-                f.write(f"exit {p.wait(TIMEOUT_S)}\n")
-            except subprocess.TimeoutExpired:  # stdlib, not coreutils `timeout` (missing on macOS)
-                os.killpg(p.pid, signal.SIGKILL)
-                p.wait()
-                f.write(f"timeout after {TIMEOUT_S} s\n")
+            p = subprocess.Popen([sys.executable, "-c", WATCHDOG, str(TIMEOUT_S), cmd], cwd=d, env=env,
+                                 stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT, start_new_session=True)
+            f.write(f"exit {p.wait()}\n")  # bounded: the watchdog exits by TIMEOUT_S
     except OSError as e:
         log.warning("notify for run %s failed: %s", env["CTC_RUN_ID"], e)
