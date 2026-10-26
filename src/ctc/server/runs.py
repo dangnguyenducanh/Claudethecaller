@@ -182,7 +182,11 @@ async def compare_runs(request: Request, a: int, b: int, node: str | None = None
 
 @router.get("/runs/{rid}", response_model=RunDetail)
 async def run(rid: int, request: Request):
-    st, u, o = await _scope(request)
+    return await detail(*(await _scope(request)), rid)
+
+
+async def detail(st, u: str, o: str, rid: int) -> dict:
+    """GET /runs/{rid} and MCP workflow_status: the run with its graph and every step (tokens per step)."""
     r = await _run(st, u, o, rid, ", r.graph, r.file_sha, r.auth, r.parent_run_id, r.from_node, r.to_node")
     steps = await st.store.fetch(f"select {STEP_COLS} from wf_steps s where s.run_id = %s order by s.id", (rid,))
     return {**r, "steps": [s | {"tokens": engine.usage_tokens(s["usage"]) if s["usage"] else None} for s in steps]}
@@ -239,7 +243,10 @@ async def run_diff(rid: int, request: Request):
 
 @router.post("/runs/{rid}/cancel", response_model=Run)
 async def cancel_run(rid: int, request: Request):
-    st, u, o = await _scope(request)
+    return await cancel(*(await _scope(request)), rid)
+
+
+async def cancel(st, u: str, o: str, rid: int) -> dict:
     await _run(st, u, o, rid)
     await engine.cancel(st, rid, o)
     return await _run(st, u, o, rid)
@@ -248,9 +255,12 @@ async def cancel_run(rid: int, request: Request):
 @router.post("/runs/{rid}/approve", response_model=Run)
 async def approve_run(rid: int, b: RunApprove, request: Request):
     """A run waiting at an approval node: approve -> it walks on (queued); reject -> cancelled."""
-    st, u, o = await _scope(request)
+    return await approve(*(await _scope(request)), rid, b.approve, b.note)
+
+
+async def approve(st, u: str, o: str, rid: int, ok: bool, note: str | None) -> dict:
     await _run(st, u, o, rid)
-    if not await engine.approve(st, rid, o, b.approve, b.note):
+    if not await engine.approve(st, rid, o, ok, note):
         fail(409, "not_waiting", f"run {rid} is not waiting for an approval")
     return await _run(st, u, o, rid)
 
@@ -258,9 +268,12 @@ async def approve_run(rid: int, b: RunApprove, request: Request):
 @router.post("/runs/{rid}/continue", response_model=Run)
 async def continue_run(rid: int, b: RunContinue, request: Request):
     """A run out of usage (quota): now -> queued at once; reset -> it goes on by itself once its usage window resets."""
-    st, u, o = await _scope(request)
+    return await resume(*(await _scope(request)), rid, b.when == "now")
+
+
+async def resume(st, u: str, o: str, rid: int, now: bool) -> dict:
     await _run(st, u, o, rid)
-    if not await engine.resume(st, rid, o, b.when == "now"):
+    if not await engine.resume(st, rid, o, now):
         fail(409, "not_quota", f"run {rid} is not stopped at a usage limit")
     return await _run(st, u, o, rid)
 

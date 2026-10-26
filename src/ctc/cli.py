@@ -619,6 +619,25 @@ def continue_cmd(run_id: int = typer.Argument(..., help="Run id, from ctc runs."
     out.print(f"{_status(r['status'])}  [{FAINT}]run #{r['id']} · {r['workflow']}{when}[/]")
 
 
+def _approve(run_id: int, ok: bool, note: str | None) -> None:
+    r = _api("POST", f"/runs/{run_id}/approve", json={"approve": ok, "note": note})  # not waiting: 409 not_waiting
+    out.print(f"{_status(r['status'])}  [{FAINT}]run #{r['id']} · {r['workflow']}[/]")
+
+
+@app.command("approve")
+def approve_cmd(run_id: int = typer.Argument(..., help="Run id, from ctc runs."),
+                note: str | None = typer.Option(None, "--note", "-m", help="Saved on the approval step.")) -> None:
+    """Approve a run waiting at an approval node: it walks on."""
+    _approve(run_id, True, note)
+
+
+@app.command("reject")
+def reject_cmd(run_id: int = typer.Argument(..., help="Run id, from ctc runs."),
+               note: str | None = typer.Option(None, "--note", "-m", help="Saved on the approval step.")) -> None:
+    """Reject a run waiting at an approval node: it ends cancelled."""
+    _approve(run_id, False, note)
+
+
 @app.command("retry")
 def retry_cmd(run_id: int = typer.Argument(..., help="Run id, from ctc runs."),
               from_node: str | None = typer.Option(None, "--from", help="Start at this node, reusing the earlier nodes' outputs (default: the failed step, else the start)."),
