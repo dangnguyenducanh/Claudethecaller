@@ -76,36 +76,50 @@ async def start_run(cap_id: str, b: RunStart, request: Request):
     return {"run_id": await submit_run(st, u, o, cap_id, b.input, b.project, b.trigger)}
 
 
-async def submit_run(st, u: str, o: str, cap_id: str, text: str = "", project: str | None = None, trigger: str = "api") -> int:
-    """Queue a run of the workflow file as it is now (POST /runs, schedules, MCP run_workflow); 422 invalid_graph /
-    project_required."""
+async def submit_run(st, u: str, o: str, cap_id: str, text: str = "", project: str | None = None, trigger: str = "api",
+                     head: bool = False) -> int:
+    """Queue a run of the workflow file as it is now (POST /runs, MCP run_workflow, CLI); with head (schedules only) a
+    project's workflow as committed at the project's HEAD, 422 not_committed when it has no committed version.
+    422 invalid_graph / project_required."""
     c = _known(st, cap_id)
     if c["kind"] != "workflow":
         fail(422, "invalid", f"{cap_id} is a {c['kind']}, not a workflow")
-    try:
-        g, sha = load(c["path"]), hashlib.sha256(Path(c["path"]).read_bytes()).hexdigest()
-    except OSError:
-        fail(404, "not_found", f"{c['path']} is gone; reindex")
-    check_graph(g)
     if c["namespace"].startswith("project@"):  # a project's workflow runs in that project (its file is in its git)
         repo, pid = _cap_root(st, c).parent, c["namespace"].removeprefix("project@")
     elif project and (p := await st.store.fetchrow("select id, path from projects where user_id = %s and name = %s", (u, project))):
         repo, pid = p["path"], p["id"]
     else:
         fail(422, "project_required", "a user or plugin workflow needs a project to run in: pass project (its name)")
+    if head and c["namespace"].startswith("project@"):  # user-scope files have no history: they run as saved
+        if not (got := await schedule.committed(str(repo), c["path"])):
+            fail(422, "not_committed", f"{c['path']} has no committed version at HEAD of {repo}: commit it so its schedule can run")
+        g, sha = got
+    else:
+        try:
+            g, sha = load(c["path"]), hashlib.sha256(Path(c["path"]).read_bytes()).hexdigest()
+        except OSError:
+            fail(404, "not_found", f"{c['path']} is gone; reindex")
+    check_graph(g)
     return await engine.submit(st, o, cap_id, g, sha, str(repo), pid, trigger, text)
 
 
 @router.put("/workflows/{cap_id}/schedule", response_model=Schedule)
 async def set_schedule(cap_id: str, b: ScheduleSet, request: Request):
-    """This login's cron for a project workflow (it runs in that project); the runner fires it (trigger `schedule`)
-    and holds a fire while you work (ctc.runner.schedule)."""
+    """This login's cron for a project workflow (it runs in that project, as committed at HEAD); the runner fires it
+    (trigger `schedule`) and holds a fire while you work (ctc.runner.schedule). Enabling validates the saved graph:
+    422 invalid_graph."""
     st, _, o = await _scope(request)
     c = _known(st, cap_id)
     if c["kind"] != "workflow" or not c["namespace"].startswith("project@"):
         fail(422, "project_required", f"{cap_id} is not a project's workflow: only those can be scheduled")
     if not schedule.valid(b.cron):
         fail(422, "bad_cron", f"{b.cron!r} is not a cron: 5 fields, min hour dom mon dow")
+    if b.enabled:  # a broken workflow can't be scheduled; turning a schedule off always works
+        try:
+            g = load(c["path"])
+        except OSError:
+            fail(404, "not_found", f"{c['path']} is gone; reindex")
+        check_graph(g)
     r = await st.store.fetchrow(
         "insert into wf_schedules (owner, workflow, cron, input, enabled) values (%s, %s, %s, %s, %s)"
         " on conflict (owner, workflow) do update set cron = excluded.cron, input = excluded.input, enabled = excluded.enabled"
