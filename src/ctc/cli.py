@@ -383,11 +383,13 @@ def daemon_stop() -> None:
         out.print(f"{dot(FAINT)} daemon not running" + (f"  [{FAINT}]but something answers on {cfg()['socket']} (started by hand?)[/]" if _health() else ""))
         return
     os.kill(pid, signal.SIGTERM)
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline and _alive():
-        time.sleep(0.1)
+    grace = cfg()["runner"]["shutdown_grace_s"] + 60  # + stop()'s SIGINT -> SIGTERM -> SIGKILL (~20 s) and the sweep
+    deadline = time.monotonic() + grace
+    with out.status(f"[{MUTED}]stopping the daemon (a running batch may take up to {grace} s)…[/]", spinner_style=BLUE):
+        while time.monotonic() < deadline and _alive():
+            time.sleep(0.1)
     if _alive():
-        err.print(f"[{BAD}]●[/] pid {pid} still running after 15 s  [{FAINT}]kill -9 {pid}[/]")
+        err.print(f"[{BAD}]●[/] pid {pid} still running after {grace} s  [{FAINT}]kill -9 {pid}[/]")
         raise typer.Exit(1)
     pid_file.unlink(missing_ok=True)
     out.print(f"{dot(FAINT)} daemon stopped  [{FAINT}]pid {pid}[/]")

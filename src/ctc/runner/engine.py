@@ -4,7 +4,8 @@ One runner task per daemon (`run_runner`) claims this login's oldest queued run 
 one batch at a time (rule 7: ready readonly nodes together, else one writer). Each node gets a wf_steps row inserted
 `running` before it spawns (ctc.runner.proc) in the run's
 git worktree (~/.claudethecaller/runs/<id>/wt on branch ctc/<wf>-<id>, kept after the run), is committed, and its
-outcome lands in the same transaction as the walker state. A crash fails the run and re-runs nothing; a usage limit
+outcome lands in the same transaction as the walker state. A crash fails the run and re-runs nothing; a planned stop
+(stop_runner()) lets the running batch land within runner.shutdown_grace_s, then re-queues the run; a usage limit
 parks it as `quota` and an approval node as `waiting`, both off the lane: approve() and resume() (or the runner at the
 usage reset) put the run back in the queue, and the next claim walks on from its saved state. A hand-started retry
 or run-from (retry()) is a new run whose worktree starts at the from step's pre_sha; a crash still re-runs nothing.
@@ -59,6 +60,7 @@ SETTINGS = {"permission": "worktree", "allow_extra_usage": False, "auto_resume":
 DIFF_MAX = 65536
 PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
 WAKE = asyncio.Event()  # submit() -> run_runner
+STOPPING = asyncio.Event()  # stop_runner(): a planned stop, claim no new batch
 LOCK = asyncio.Lock()  # rule 7: one node's commit + diff at a time
 CONTINUE = "Continue where you left off."  # the prompt of a node resumed after a usage limit
 _owner: str | None = None
@@ -413,6 +415,9 @@ async def execute(st, run: dict) -> None:
                 notify.fire(run, "done", None)
             return
         while r:
+            if STOPPING.is_set():  # a planned stop: _save() kept the walker state, the next claim walks on from here
+                await st.store.execute("update wf_runs set status = 'queued' where id = %s and status = 'running'", (rid,))
+                return  # no notify: queued is not a notify event
             b = batch(g, r)
             if s["max_run_tokens"] and total >= s["max_run_tokens"]:  # checked before a batch, so finished work is never failed
                 await _fail(st, [rid], f"max_run_tokens reached before {', '.join(b)}: {total} >= {s['max_run_tokens']}")
@@ -554,8 +559,8 @@ async def resume(st, rid: int, owner: str, now: bool) -> bool:
 
 
 async def sweep(st, error: str = "daemon stopped mid-run") -> None:
-    """No runner walks this owner's `running` runs now (daemon start, or shutdown after the runner task stopped): stop
-    what their nodes left running, then fail them and their running steps."""
+    """No runner walks this owner's `running` runs now (daemon start after a crash, or stop_runner() after the grace ran
+    out; a clean drain leaves none): stop what their nodes left running, then fail them and their running steps."""
     if not (o := await owner()):
         return
     ids = [r["id"] for r in await st.store.fetch("select id from wf_runs where owner = %s and status = 'running'", (o,))]
@@ -564,23 +569,37 @@ async def sweep(st, error: str = "daemon stopped mid-run") -> None:
     await _fail(st, ids, error)
 
 
+async def stop_runner(st, runner: asyncio.Task, grace_s: float) -> None:
+    """A planned stop (SIGTERM, `ctc daemon stop`): the runner claims no new batch and its running batch gets grace_s
+    to land and be saved (execute() then re-queues the run); past that the runner is cancelled (proc stop()s the
+    batch's process groups). sweep() then fails whatever is still `running` with 'daemon stopped mid-run'."""
+    STOPPING.set()
+    WAKE.set()
+    done, _ = await asyncio.wait({runner}, timeout=grace_s)
+    if not done:
+        runner.cancel()
+        await asyncio.gather(runner, return_exceptions=True)
+    await sweep(st)
+
+
 async def run_runner(st) -> None:
     """Daemon task (local mode): sweep() what a dead daemon left, then walk queued runs one at a time. submit(),
     approve() and resume() wake it; a 30 s poll catches runs queued by another process and quota runs whose usage
-    window reset (REQUEUE_SQL), and fires due schedules (ctc.runner.schedule.tick)."""
-    while True:
+    window reset (REQUEUE_SQL), and fires due schedules (ctc.runner.schedule.tick). It returns once stop_runner() set
+    STOPPING and the run it walks re-queued itself at its next batch."""
+    while not STOPPING.is_set():
         try:
             await sweep(st)
             break
         except Exception:
             log.exception("runner: startup sweep failed; retrying in 30 s")
             await asyncio.sleep(30)
-    while True:
+    while not STOPPING.is_set():
         wait = 30.0
         try:
             await st.store.execute(REQUEUE_SQL, (await owner(),))
             wait = await tick(st, await owner())  # WB12: fire due schedules; wake just after the next cron slot
-            while run := await claim(st):
+            while not STOPPING.is_set() and (run := await claim(st)):
                 await execute(st, run)
         except Exception:
             log.exception("runner: claim failed")

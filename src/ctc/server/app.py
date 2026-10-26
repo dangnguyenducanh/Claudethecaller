@@ -26,7 +26,7 @@ from starlette.exceptions import HTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from ctc.config import ROOT, cfg
-from ctc.runner.engine import run_runner, sweep
+from ctc.runner.engine import run_runner, stop_runner
 from ctc.server import api, hooks, library, runs
 from ctc.server.jobs import run_worker, submit
 from ctc.server.mcp import mcp, mcp_app
@@ -76,13 +76,13 @@ async def lifespan(app: FastAPI):
         async with mcp.session_manager.run():
             yield
     finally:
-        if runner:  # stop the walker (its node's process group goes with it), then fail what it was running
-            runner.cancel()
-            await asyncio.gather(runner, return_exceptions=True)
+        # a planned stop lets the running batch land (up to runner.shutdown_grace_s), then re-queues the run; uvicorn
+        # closes the listeners before the lifespan exits, so no new run arrives during the grace
+        if runner:
             try:
-                await sweep(st)
+                await stop_runner(st, runner, st.cfg["runner"]["shutdown_grace_s"])
             except Exception:
-                log.exception("runner: shutdown sweep failed; the next start sweeps")
+                log.exception("runner: shutdown failed; the next start sweeps")
         await close_state(st)
 
 
