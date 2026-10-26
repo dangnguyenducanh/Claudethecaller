@@ -29,7 +29,16 @@ from pathlib import Path
 import psycopg
 from psycopg.types.json import Jsonb
 
-from ctc.runner.graph import batch, complete, eval_if, merge_output, ready, render
+from ctc.runner.graph import (
+    batch,
+    complete,
+    conditions,
+    eval_if,
+    eval_switch,
+    merge_output,
+    ready,
+    render,
+)
 from ctc.runner.proc import (
     RUNS,
     agent_argv,
@@ -244,15 +253,19 @@ def _reopen(p: Path, argv: list[str]) -> None:
 
 
 def _input(node: dict, ctx: dict, resume: str | None) -> tuple[str, list[str] | None]:
-    """(step input, agent argv): the rendered prompt or command, what an IF tests, an approval's message, or the
+    """(step input, agent argv): the rendered prompt or command, what an IF or switch tests, an approval's message, or the
     trigger's input."""
     if node["type"] == "agent":
         argv, text = agent_argv(node, ctx, str(uuid.uuid4()), resume=resume)
         return text, argv
     if node["type"] == "shell":
         return render(node["command"], ctx, shell=True), None
-    if node["type"] == "if":
-        return f"{node.get('path')} {node.get('op')} {node.get('value')!r}", None
+    if node["type"] in ("if", "switch"):
+        def conds(n: dict) -> str:
+            return f" {n.get('combine') or 'and'} ".join(f"{c.get('path')} {c.get('op')} {c.get('value')!r}" for c in conditions(n))
+        if node["type"] == "if":
+            return conds(node), None
+        return "; ".join([*(f"{c.get('name')}: {conds(c)}" for c in node.get("cases") or []), "else default"]), None
     if node["type"] == "approval":
         return render(node.get("message") or "", ctx), None
     if node["type"] == "merge":  # its inputs are the joined nodes' outputs, shown as the step's output
@@ -267,6 +280,8 @@ async def _spawn(node: dict, text: str, argv: list[str] | None, ctx: dict, wt: s
         return {"status": "done", "output": {"input": text}}
     if node["type"] == "if":
         return {"status": "done", "output": {"value": eval_if(node, ctx)}}
+    if node["type"] == "switch":
+        return {"status": "done", "output": {"case": eval_switch(node, ctx)}}
     if node["type"] == "approval":  # nothing runs: the run waits off the lane for approve()
         return {"status": "waiting"}
     timeout = node.get("timeout_s") or 1800

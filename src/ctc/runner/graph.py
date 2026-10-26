@@ -1,7 +1,10 @@
 """Workflow walker (PLAN.md m5 "Walker rules"): pure functions over a graph dict and a JSON-able state dict, no I/O.
 
-Graph = {nodes: [{id, type, pos, ...}], edges: [{from, to, handle?}]}. Types: trigger|agent|shell|if|approval|merge,
-loops (back-edges, rule 5), ready readonly nodes in one batch (rule 7).
+Graph = {nodes: [{id, type, pos, ...}], edges: [{from, to, handle?}]}. Types: trigger|agent|shell|if|switch|approval|
+merge, loops (back-edges, rule 5), ready readonly nodes in one batch (rule 7). An IF tests `conditions: [{path, op,
+value}]` (or the old single path/op/value) joined by `combine: and|or`; ops: eq ne gt ge lt le contains not_contains
+regex exists truthy. A switch has `cases: [{name, conditions, combine}]`; its out-edges' handles are case names or
+default, and the first matching case's handle fires.
 State (wf_runs.state, `{}` = not started): {inbox: {node: {"<edge#>": "data"|"skip"}}, deferred: [edge#], ready: [node],
 visits: {node: n}, execs: n, skipped: [node]}; edge# is the edge's index in graph["edges"]. visits counts runs and skips.
 Engine loop: `while (r := ready(g, st)): run batch(g, r) together (visit = visits.get(id, 0) + 1; a merge's output is
@@ -19,11 +22,14 @@ from pathlib import Path
 
 import yaml
 
-TYPES = {"trigger", "agent", "shell", "if", "approval", "merge"}
-OPS = {"eq", "ne", "contains", "truthy"}
+TYPES = {"trigger", "agent", "shell", "if", "switch", "approval", "merge"}
+OPS = {"eq", "ne", "gt", "ge", "lt", "le", "contains", "not_contains", "regex", "exists", "truthy"}
+NUM = re.compile(r"\s*-?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][-+]?[0-9]+)?\s*")  # [0-9], not \d: export.py reuses it in JS
+REGEX_MAX = 10_000  # chars of a value a regex condition searches
 PERMS = (None, "acceptEdits", "dontAsk", "plan")  # never bypassPermissions/auto on the host (Permissions decision)
 PUSH = re.compile(r"\b(git\s+push|gh\s+pr\s+(create|merge))\b")
 SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+CASE = re.compile(r"[a-z0-9][a-z0-9_-]*")  # switch case names: lowercase, so they compare to _handle() as-is
 TPL = re.compile(r"\{\{\s*([\w.-]+)\s*\}\}")
 ROOTS = {"input", "run"}  # template roots that are not node ids, so not allowed as ids
 _MISSING = object()
@@ -95,6 +101,29 @@ def _open_quote(prefix: str) -> bool:
     return False
 
 
+def _conds_errors(conds, combine) -> list[str]:
+    """What is wrong with an IF's (or a switch case's) conditions list and combine; [] when they can run."""
+    if not isinstance(conds, list) or not conds:
+        return ["conditions must be a non-empty list of {path, op, value}"]
+    errs = [] if combine in (None, "and", "or") else [f"combine must be and or or, not {combine!r}"]
+    for i, c in enumerate(conds, 1):
+        if not isinstance(c, dict):
+            errs.append(f"condition {i} must be a mapping with path, op and value")
+            continue
+        if not isinstance(c.get("path"), str) or not c["path"]:
+            errs.append(f"condition {i} needs a path")
+        if (op := c.get("op")) not in OPS:
+            errs.append(f"condition {i}: unknown op {op!r}, use one of {sorted(OPS)}")
+        elif op == "regex" and c.get("value") is None:
+            errs.append(f"condition {i}: a regex needs a value")
+        elif op == "regex":
+            try:
+                re.compile(str(c["value"]))
+            except re.error as e:
+                errs.append(f"bad regex {c['value']!r}: {e}")
+    return errs
+
+
 def validate(g: dict) -> list[dict]:
     """Rules 1 and 6: [{message, node_id}], empty when the graph can run."""
     errs: list[dict] = []
@@ -129,13 +158,38 @@ def validate(g: dict) -> list[dict]:
         cmd = str(n.get("command") or "")
         if t == "shell" and any(_open_quote(cmd[:m.start()]) for m in TPL.finditer(cmd)):
             err("leave {{...}} unquoted in a shell command: the runner shell-quotes it", nid)
+        conds = []  # every condition of an IF or switch: its path is a template ref
         if t == "if":
-            if n.get("op") not in OPS or not n.get("path"):
-                err(f"an if node needs a path and an op in {sorted(OPS)}", nid)
+            if "conditions" not in n:
+                if n.get("op") not in OPS or not n.get("path"):
+                    err(f"an if node needs a path and an op in {sorted(OPS)}", nid)
+            elif any(k in n for k in ("path", "op", "value")):
+                err("use either path/op/value or conditions, not both", nid)
+            else:
+                for m in _conds_errors(n["conditions"], n.get("combine")):
+                    err(m, nid)
             if {_handle(e) for e in g["edges"] if e.get("from") == nid} != {"true", "false"}:
                 err("an if node needs exactly its true and false edges", nid)
-        refs = TPL.findall(f"{n.get('prompt') or ''} {n.get('command') or ''} {n.get('message') or ''}") + (
-            [n["path"]] if t == "if" and n.get("path") else [])
+            conds = conditions(n)
+        if t == "switch":
+            cases = n.get("cases")
+            if not isinstance(cases, list) or not cases or not all(isinstance(c, dict) for c in cases):
+                err("a switch node needs cases: [{name, conditions, combine}]", nid)
+                cases = []
+            names = [c.get("name") for c in cases]
+            for c in cases:
+                name = c.get("name")
+                if not isinstance(name, str) or not CASE.fullmatch(name) or name == "default":
+                    err(f"bad case name {name!r}: use lowercase letters, digits, - or _ (not default)", nid)
+                elif names.count(name) > 1:
+                    err(f"duplicate case name {name}", nid)
+                for m in _conds_errors(c.get("conditions"), c.get("combine")):
+                    err(f"case {name}: {m}", nid)
+                conds += c["conditions"] if isinstance(c.get("conditions"), list) else []
+            for h in sorted({_handle(e) for e in g["edges"] if e.get("from") == nid} - {*map(str, names), "default"}):
+                err(f"switch edge handle {h} is not a case name or default", nid)
+        refs = TPL.findall(f"{n.get('prompt') or ''} {n.get('command') or ''} {n.get('message') or ''}") + [
+            c["path"] for c in (conds if isinstance(conds, list) else []) if isinstance(c, dict) and isinstance(c.get("path"), str)]
         for ref in refs:
             if ref.split(".")[0] not in known | ROOTS:
                 err(f"{ref} names no node", nid)
@@ -157,14 +211,14 @@ def validate(g: dict) -> list[dict]:
                 t = byid.get(nid, {}).get("type")
                 if t in ("merge", "approval"):
                     err(f"no {t} node inside a loop ({loop})", nid)
-                elif t != "if" and sum(e.get("from") == nid for e in g["edges"]) > 1:
-                    err(f"only an IF may branch inside a loop ({loop})", nid)
+                elif t not in ("if", "switch") and sum(e.get("from") == nid for e in g["edges"]) > 1:
+                    err(f"only an IF or Switch may branch inside a loop ({loop})", nid)
     return errs
 
 
 def ready(g: dict, st: dict) -> list[str]:
     """Rules 2 and 4. Nodes that may run now; call when nothing is running. Starts a fresh state (`{}`) and, when
-    nothing is ready, turns deferred IF edges into skip tokens (quiescence; never on a back-edge). [] means the run is
+    nothing is ready, turns deferred IF/switch edges into skip tokens (quiescence; never on a back-edge). [] means the run is
     done. Mutates st."""
     if not st:
         trig = next(n["id"] for n in g["nodes"] if n["type"] == "trigger")
@@ -194,18 +248,20 @@ def merge_output(g: dict, st: dict, node_id: str, ctx: dict) -> dict:
 
 
 def complete(g: dict, st: dict, node_id: str, output: dict | None) -> str | None:
-    """Record a finished node: data on every out-edge; an IF ({value}) sends data on the taken handle and defers
-    the rest (rule 3); a back-edge fires last (rule 5). Returns the run's error when a loop passes its cap. Mutates st."""
+    """Record a finished node: data on every out-edge; an IF ({value}: handle true/false) or a switch ({case}: handle
+    = case name or default) sends data on the taken handle and defers the rest (rule 3); a back-edge fires last (rule 5).
+    Returns the run's error when a loop passes its cap. Mutates st."""
     st["ready"].remove(node_id)
     st["inbox"].pop(node_id, None)
     st["visits"][node_id] = st["visits"].get(node_id, 0) + 1
     st["execs"] += 1
     back = back_edges(g)
-    is_if = next(n for n in g["nodes"] if n["id"] == node_id)["type"] == "if"
-    taken = str(bool((output or {}).get("value"))).lower()
+    t = next(n for n in g["nodes"] if n["id"] == node_id)["type"]
+    taken = (str(bool((output or {}).get("value"))).lower() if t == "if"
+             else str((output or {}).get("case")) if t == "switch" else None)  # None: no handle, nothing deferred
     outs = [i for i, e in enumerate(g["edges"]) if e["from"] == node_id]
     for i in sorted(outs, key=lambda i: i in back):  # defer before a fire, so the fire clears this pass's deferrals
-        if is_if and _handle(g["edges"][i]) != taken:
+        if taken is not None and _handle(g["edges"][i]) != taken:
             st["deferred"].append(i)
         elif i not in back:
             _send(g, st, i, "data", back)
@@ -275,21 +331,56 @@ def render(tpl: str, ctx: dict, shell: bool = False) -> str:
     return TPL.sub(one, tpl or "")
 
 
-def eval_if(node: dict, ctx: dict) -> bool:
-    """IF node {path, op, value}; eq/ne also match by rendered text (0 == "0", True == "true"). Missing path = False."""
-    v, want, op = lookup(ctx, str(node.get("path") or "")), node.get("value"), node.get("op")
+def conditions(node: dict) -> list:
+    """An IF's conditions: node["conditions"] when set, else the old single {path, op, value} form."""
+    if node.get("conditions") is not None:
+        return node["conditions"]
+    return [{"path": node.get("path"), "op": node.get("op"), "value": node.get("value")}]
+
+
+def _num(v) -> float | None:
+    """A number, or a string that reads as one (" 3 ", "1e3"); None for anything else, booleans included."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    return float(v) if isinstance(v, str) and NUM.fullmatch(v) else None
+
+
+def _test(c: dict, ctx: dict) -> bool:
+    """One condition {path, op, value}; eq/ne also match by rendered text (0 == "0", True == "true"). Missing path =
+    False for every op."""
+    v, want, op = lookup(ctx, str(c.get("path") or "")), c.get("value"), c.get("op")
     if v is _MISSING:
         return False
     try:
         if op == "truthy":
             return bool(v)
+        if op == "exists":
+            return v is not None
         if op in ("eq", "ne"):
             return (v == want or _text(v) == _text(want)) == (op == "eq")
-        if op == "contains":
-            return want in v if isinstance(v, (list, dict)) else _text(want) in _text(v)
-    except TypeError:  # e.g. an unhashable value tested against a dict
+        if op in ("contains", "not_contains"):
+            return (want in v if isinstance(v, (list, dict)) else _text(want) in _text(v)) == (op == "contains")
+        if op in ("gt", "ge", "lt", "le"):
+            a, b = _num(v), _num(want)
+            return a is not None and b is not None and {"gt": a > b, "ge": a >= b, "lt": a < b, "le": a <= b}[op]
+        if op == "regex":
+            # ponytail: input cap is the catastrophic-regex guard; a time limit would need a thread
+            return re.search(str(want), _text(v)[:REGEX_MAX]) is not None
+    except (TypeError, re.error):  # e.g. an unhashable value tested against a dict
         pass
     return False
+
+
+def eval_if(node: dict, ctx: dict) -> bool:
+    """IF node: all of its conditions(), or any of them with combine: or."""
+    return (any if node.get("combine") == "or" else all)(_test(c, ctx) for c in conditions(node))
+
+
+def eval_switch(node: dict, ctx: dict) -> str:
+    """Switch node: the name of the first case whose conditions match (all, or any with combine: or), else "default"."""
+    return next((c["name"] for c in node["cases"] if eval_if(c, ctx)), "default")
 
 
 def derived_steps(g: dict) -> list[dict]:
@@ -389,7 +480,7 @@ if __name__ == "__main__":
     assert "no merge node inside a loop (join -> test)" in bad_ft(lambda x: x["edges"].append({"from": "join", "to": "test"}))
     assert "no approval node inside a loop" in bad_ft(lambda x: x["edges"][5].update(to="gate") or x["edges"].append(
         {"from": "gate", "to": "test"}))  # fix -> gate -> test: an approval in the loop body
-    assert "only an IF may branch inside a loop" in bad_ft(lambda x: x["edges"].append({"from": "fix", "to": "review-a"}))
+    assert "only an IF or Switch may branch inside a loop" in bad_ft(lambda x: x["edges"].append({"from": "fix", "to": "review-a"}))
     assert "max_visits" in bad_ft(lambda x: x["nodes"][1].update(max_visits="3"))
     assert "nobody.x names no node" in bad_ft(lambda x: x["nodes"][7].update(message="Push {{nobody.x}}?"))  # approval message
     root = Path(__file__).resolve().parents[3] / ".claude" / "ctc-workflows"
@@ -414,7 +505,7 @@ if __name__ == "__main__":
     assert "true and false" in bad(lambda x: x["edges"].pop(4))
     assert "approval" in bad(lambda x: x["nodes"][4].update(command="git push -u origin HEAD"))
     assert "approval" in bad(lambda x: x["nodes"][4].update(command="gh  pr create --draft"))
-    assert "only an IF may branch" in bad(lambda x: x["edges"].append({"from": "blame", "to": "test"}))
+    assert "only an IF or Switch may branch" in bad(lambda x: x["edges"].append({"from": "blame", "to": "test"}))
     # a merge after an IF: ready once both in-edges hold a token (the untaken side's skip arrives at quiescence), and
     # its output holds only the data inputs; with every input skipped it is skipped too
     gm = load(copy.deepcopy(good) | {"nodes": good["nodes"] + [{"id": "join", "type": "merge"}],
