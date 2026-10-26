@@ -6,7 +6,8 @@ import { Header, Segmented, fmtTime, fmtTokens } from './ui'
 import { NodeCtx, dashBack, nodeTypes, toFlow } from './Workflows'
 
 const PILL: Record<string, string> = { running: 'warn', waiting: 'warn', quota: 'warn', done: 'good', failed: 'bad', timeout: 'bad' } // run and step statuses
-const ACTIVE: RunStatus[] = ['queued', 'running', 'waiting']
+// ponytail: polls every 1.5 s through a quota window (can be hours); slow quota polling if DB load shows, SSE is the upgrade path (PLAN.md:505)
+const ACTIVE: RunStatus[] = ['queued', 'running', 'waiting', 'quota']
 const POLL_MS = 1500 // config/server.yaml runner.poll_s
 const MAX_ROWS = 1000
 const TABS = ['output', 'log', 'diff', 'meta'] as const
@@ -97,7 +98,7 @@ function RunPage({ id, theme, onBack }: { id: number; theme: string; onBack: () 
   const retry = async (body: RetryBody) => { // a new run linked to this one; open it
     try { setMsg(''); const r = await api.retryRun(run.id, { ...body, trigger: 'button' }); location.hash = `run/${r.run_id}` } catch (e) { setMsg(errText(e)) }
   }
-  const ended = !ACTIVE.includes(run.status) && run.status !== 'quota'
+  const ended = !ACTIVE.includes(run.status)
   const wait = run.steps.find(s => s.status === 'waiting')
 
   return (

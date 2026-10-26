@@ -547,7 +547,7 @@ steps: [{cap: "user:tdd-fix"}, {agent: security-reviewer}]   # derived on save, 
 ```
 - **Node fields:**
   - Agent: `prompt cap agent model effort permission_mode allowed_tools mcp_config json_schema resume_from max_turns timeout_s readonly on_error`. `cap` prefixes the prompt with `/<invoke>`.
-  - Shell: `command timeout_s readonly`.
+  - Shell: `command timeout_s`.
   - Every node: `max_visits`, `pos`.
 - **Templates:** `{{input}}`, `{{<node>.<dotted.path>}}`, `{{run.branch}}`. Filled by one regex plus a dotted lookup; missing or skipped values become `""`.
 - **Outputs:**
@@ -577,7 +577,7 @@ steps: [{cap: "user:tdd-fix"}, {agent: security-reviewer}]   # derived on save, 
    - The push/PR gate rule holds.
    - Errors are `{message, node_id}`.
 7. **Batches (M3).**
-   - Ready `readonly` nodes run together under `asyncio.gather`; otherwise only the first ready writer runs.
+   - Ready `readonly` agent nodes run together under `asyncio.gather` (shells never batch); otherwise only the first ready writer runs.
    - Each node's commit and diff happen under one `asyncio.Lock`.
 
 ### Constraints

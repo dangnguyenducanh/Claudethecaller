@@ -228,7 +228,7 @@ function NodeForm({ n, ids, agents, set, rename, renameHandle, dropHandle, lastO
         {text('cap', 'Capability (prefixes the prompt with /<invoke>)')}
         {pick('agent', 'Agent', agents, 'none')}
         <div className="row2">{text('model', 'Model')}{text('effort', 'Effort')}</div>
-        <div className="row2">{pick('permission_mode', 'Permission mode', ['acceptEdits', 'dontAsk'])}{pick('on_error', 'On error', ['fail', 'continue'])}</div>
+        <div className="row2">{pick('permission_mode', 'Permission mode', ['acceptEdits', 'dontAsk', 'plan'])}{pick('on_error', 'On error', ['fail', 'continue'])}</div>
         <BlurField area label="Allowed tools (one per line)" init={(d.allowed_tools ?? []).join('\n')}
           commit={s => { const t = s.split('\n').map(x => x.trim()).filter(Boolean); set('allowed_tools', t.length ? t : undefined) }} />
         <BlurField area label="JSON schema (structured output)" init={json(d.json_schema)} commit={s => set('json_schema', parseJson(s))} />
@@ -241,7 +241,7 @@ function NodeForm({ n, ids, agents, set, rename, renameHandle, dropHandle, lastO
       {n.type === 'shell' && <>
         {area('command', 'Command (bash -c; template values are shell-quoted)')}
         {num('timeout_s', 'Timeout (s)')}
-        {check('readonly', 'Read-only')}
+        {d.readonly && check('readonly', 'Read-only (not allowed on shells: untick to save)')}
         {pin}
       </>}
       {n.type === 'approval' && area('message', 'Message (shown on the run page while it waits)')}
