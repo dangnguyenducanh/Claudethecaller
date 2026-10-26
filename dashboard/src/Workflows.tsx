@@ -263,6 +263,15 @@ function NodeForm({ n, ids, agents, set, rename, renameHandle, dropHandle, lastO
         {area('command', 'Command (bash -c; template values are shell-quoted)')}
         {num('timeout_s', 'Timeout (s)')}
         {d.readonly && check('readonly', 'Read-only (not allowed on shells: untick to save)')}
+        <label className="toggle"><input type="checkbox" checked={!!d.idempotent} onChange={e => {
+          set('idempotent', e.target.checked || undefined); if (!e.target.checked) set('retry', undefined)
+        }} />Idempotent: safe to re-run (allows automatic retry)</label>
+        {d.idempotent && <div className="row2">
+          <label>Retry tries (1-5)<input type="number" min={1} max={5} value={d.retry?.max_tries ?? ''}
+            onChange={e => set('retry', e.target.value === '' ? undefined : { ...d.retry, max_tries: Number(e.target.value) })} /></label>
+          <label>Wait between tries (s, 0-300)<input type="number" min={0} max={300} disabled={!d.retry} value={d.retry?.wait_s ?? ''}
+            onChange={e => d.retry && set('retry', { ...d.retry, wait_s: e.target.value === '' ? undefined : Number(e.target.value) })} /></label>
+        </div>}
         {pin}
       </>}
       {n.type === 'approval' && area('message', 'Message (shown on the run page while it waits)')}

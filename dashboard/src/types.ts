@@ -108,6 +108,7 @@ export interface WfNode {
   allowed_tools?: string[]; mcp_config?: unknown; json_schema?: unknown; resume_from?: string; max_turns?: number; on_error?: 'fail' | 'continue'
   readonly?: boolean // agent only: read tools + dontAsk; ready readonly agents batch in parallel
   command?: string // shell
+  idempotent?: boolean; retry?: { max_tries: number; wait_s?: number } // shell only: max_tries 1..5, wait_s 0..300
   timeout_s?: number // agent and shell
   pin?: { output: Record<string, unknown> } // agent and shell; used only by runs started with pinned
   path?: string; op?: Op; value?: unknown // if, the old single-condition form
@@ -139,6 +140,7 @@ export interface Step {
   session_id: string | null; num_turns: number | null; tokens: Record<string, number> | null; cost_usd: number | null // cost is notional
   permission_denials: unknown[] | null; overage: boolean | null; files: DiffFile[] | null; started_at: string; ended_at: string | null
   marker: 'reused' | 'pinned' | 'disabled' | null // completed without executing
+  tries: number // shell retry-on-fail tries
 }
 export interface RunDetail extends Run {
   graph: Graph; file_sha: string; auth: { authMethod: string; email: string; claude_version: string } | null; steps: Step[]

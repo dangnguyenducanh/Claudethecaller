@@ -7,7 +7,8 @@ regex exists truthy. A switch has `cases: [{name, conditions, combine}]`; its ou
 default, and the first matching case's handle fires. An agent or shell node may carry `pin: {output: {...}}`: a run
 started with pinned completes it with that output instead of running it (the engine applies it, not the walker).
 `disabled: true` on any node but trigger, IF and switch: the engine completes it without running it, its output the
-upstream output (passthrough()).
+upstream output (passthrough()). A shell with `idempotent: true` may carry `retry: {max_tries: 1..5, wait_s: 0..300}`:
+the engine re-runs it while it exits non-zero or times out (agents never auto-retry).
 State (wf_runs.state, `{}` = not started): {inbox: {node: {"<edge#>": "data"|"skip"}}, deferred: [edge#], ready: [node],
 visits: {node: n}, execs: n, skipped: [node]}; edge# is the edge's index in graph["edges"]. visits counts runs and skips.
 Engine loop: `while (r := ready(g, st)): run batch(g, r) together (visit = visits.get(id, 0) + 1; a merge's output is
@@ -167,6 +168,19 @@ def validate(g: dict) -> list[dict]:
             err("disabled must be true or false", nid)
         elif v and t in ("trigger", "if", "switch"):  # FR-016: a branching node has no one handle to pass through on
             err(f"a {t} node cannot be disabled: delete it or rewire its branches", nid)
+        if (v := n.get("idempotent")) is not None and type(v) is not bool:
+            err("idempotent must be true or false", nid)
+        elif v and t != "shell":
+            err("idempotent is for shell nodes only", nid)
+        if (rt := n.get("retry")) is not None:  # FR-013: re-running is safe only for a shell the author marked so
+            if t != "shell":
+                err("retry is for idempotent shell nodes only: agents never auto-retry", nid)
+            elif n.get("idempotent") is not True:
+                err("retry needs idempotent: true: the command is re-run as is", nid)
+            elif not (isinstance(rt, dict) and set(rt) <= {"max_tries", "wait_s"}
+                      and type(rt.get("max_tries")) is int and 1 <= rt["max_tries"] <= 5
+                      and type(w := rt.get("wait_s", 0)) in (int, float) and 0 <= w <= 300):
+                err("retry must be {max_tries: 1-5, wait_s: 0-300 (seconds)}", nid)
         if "pin" in n:
             pin = n["pin"]
             if t not in ("agent", "shell"):

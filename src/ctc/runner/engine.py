@@ -89,7 +89,7 @@ returning id, session_id"""
 DONE_SQL = """update wf_steps set status = %(status)s, output = %(output)s, error = %(error)s, session_id = %(session_id)s,
   num_turns = %(num_turns)s, usage = %(usage)s, cost_usd = %(cost_usd)s, permission_denials = %(permission_denials)s,
   overage = %(overage)s, pre_sha = %(pre)s, post_sha = %(post)s, files = %(files)s, diff = %(diff)s, marker = %(marker)s,
-  ended_at = case when %(status)s::text = 'waiting' then null else now() end
+  tries = %(tries)s, ended_at = case when %(status)s::text = 'waiting' then null else now() end
 where id = %(sid)s"""
 SKIP_SQL = """insert into wf_steps (run_id, node_id, visit, kind, status, ended_at) values (%s, %s, %s, %s, 'skipped', now())
 on conflict do nothing"""
@@ -351,9 +351,16 @@ def _input(node: dict, ctx: dict, resume: str | None) -> tuple[str, list[str] | 
     return ctx["input"], None
 
 
+def _exit_fails(node: dict) -> bool:
+    """A shell's non-zero exit fails the step (with retry set); otherwise the exit code is data in a done step."""
+    return bool(node.get("retry"))
+
+
 async def _spawn(node: dict, text: str, argv: list[str] | None, ctx: dict, wt: str, gd: str, log_path: Path | None,
-                 env: dict, s: dict) -> dict:
-    """Run one node -> a proc-style result. Agent and shell nodes are committed (empty or not) after they run."""
+                 env: dict, s: dict, *, alive) -> dict:
+    """Run one node -> a proc-style result. Agent and shell nodes are committed (empty or not) after they run.
+    A shell with retry (graph.validate: idempotent only) re-runs in the same worktree, before the one commit, until it
+    exits 0 or max_tries; alive() (the run is still `running`) is asked after each wait. Agents never loop."""
     if node["type"] == "trigger":
         return {"status": "done", "output": {"input": text}}
     if node["type"] == "if":
@@ -367,7 +374,21 @@ async def _spawn(node: dict, text: str, argv: list[str] | None, ctx: dict, wt: s
         res = await run_agent(argv, text, wt, str(log_path), timeout, env, bool(s["allow_extra_usage"]),
                               f"ctc-run-{env['CTC_RUN']}-{node['id']}-{node['visit']}" if s["permission"] == "container" else None)
     else:
-        res = await run_shell(text, wt, timeout, env)
+        retry = node.get("retry") or {}
+        n = retry.get("max_tries", 1)
+        for k in range(1, n + 1):
+            res = await run_shell(text, wt, timeout, env)
+            code = res["output"]["exit_code"]
+            bad = res["status"] == "timeout" or (_exit_fails(node) and code != 0)
+            if not bad or k == n:
+                break
+            await asyncio.sleep(retry.get("wait_s", 0))
+            if not await alive():  # ponytail: a cancel during wait_s is noticed when the wait ends
+                break
+        if bad and res["status"] == "done":
+            o = res["output"]
+            res |= {"status": "failed", "error": f"exit {code} on try {k}/{n}: {(o['stderr_tail'] or o['stdout_tail'])[-1000:]}"}
+        res["tries"] = k
     async with LOCK:  # pre read here too: a batch sibling may have committed while this node ran
         pre = (await git(wt, "rev-parse", "HEAD", gd=gd)).strip()
         await git(wt, "add", "-A", gd=gd)
@@ -400,7 +421,8 @@ async def execute(st, run: dict) -> None:
             return canned
         if node["type"] == "merge":  # its inputs are the data tokens in its inbox, which complete() clears
             return {"status": "done", "output": merge_output(g, wst, node["id"], ctx)}
-        return await _spawn(node, text, argv, ctx, wt, gd, log_path, env, s)
+        return await _spawn(node, text, argv, ctx, wt, gd, log_path, env, s, alive=lambda: st.store.fetchval(
+            "select status = 'running' from wf_runs where id = %s", (rid,)))
 
     try:
         gd = await wt_git_dir(run["repo"], wt)
@@ -475,7 +497,7 @@ async def execute(st, run: dict) -> None:
                               "usage": _j(res.get("usage")), "cost_usd": res.get("cost_usd"),
                               "permission_denials": _j(res.get("permission_denials")), "overage": res.get("overage"),
                               "pre": res.get("pre_sha"), "post": res.get("post_sha"), "files": _j(res.get("files")),
-                              "diff": res.get("diff"), "marker": res.get("marker")})
+                              "diff": res.get("diff"), "marker": res.get("marker"), "tries": res.get("tries", 1)})
             total += tok
             fails = [f"{nid}: {res.get('error') or res['status']}" for nid, res in stops if res["status"] != "quota"]
             quota = next((res for _, res in stops if res["status"] == "quota"), None)

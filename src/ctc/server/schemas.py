@@ -444,6 +444,7 @@ class RunStep(BaseModel):  # types.ts `Step` (that name is the router's bundle s
     started_at: datetime
     ended_at: datetime | None
     marker: Literal["reused", "pinned", "disabled"] | None = None  # completed without executing
+    tries: int = 1  # shell retry-on-fail tries (US7)
 
 
 class RunDetail(Run):
