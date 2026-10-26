@@ -12,7 +12,7 @@
 - **Evidence:** owner's history (319 sessions, 2026-10-20): ~10,000 tool calls, 52 `Skill` calls (~0.5%), 17 distinct skills of 300+ installed. SRA-Bench (2026) sees the same.
 - **Users:** coders with large skill libraries. Portfolio project, so built from scratch (ratel, MCPGateway, metamcp are references only).
 - **Success:** after install, the Skill/Agent share of tool calls rises well above 0.5%; Recall@5 ≥ 0.90; latency targets hold.
-- **In scope (Claude Code only):** index, hybrid search + rerank, decider, prefetch, cache, long-term memory, MCP tool + suggest-only hook, CLI, dashboard, benchmark; local mode and self-hosted shared mode (API keys, rate limits) for coders anywhere; workflow runner (m5): run saved workflows locally, one at a time, on each user's own Claude login.
+- **In scope (Claude Code only):** index, hybrid search + rerank, decider, prefetch, cache, long-term memory, MCP tool + suggest-only hook, CLI, dashboard, benchmark; local mode and self-hosted shared mode (API keys, rate limits) for coders anywhere; workflow runner (m5): run saved workflows locally, one at a time, on each user's own Claude login; context + coding graph (m6): specs, tasks and decisions linked to graphify's code graph and pushed into the session.
 - **Out of scope:** other agents, blocking the agent, billing / sign-up SaaS, marketplace, training models from scratch; running workflows on someone else's subscription or as a hosted service (Anthropic terms).
 
 ## Stack
@@ -138,7 +138,7 @@ Four tracks. H = owner step. Commit after each step.
 
 **Order:** F3 → F4 (done first, on mock data) → H0 → B3 → B4 → K1 → F1 → H1 → K2 → H2 → B4b → B5 → B6 → F2 → H3 → K3 → A1, A2 → B7 → B8 → A3 → B9 → H4 → K4 → F3 → F4 → H6 → F5.
 
-**Branches:** `m1-retrieval-core` (B1–B4, K1–K2, F1), `m2-agent-integration` (B4b, B5–B6, F2, K3), `m3-memory` (B7–B8, A3, K4), `m4-dashboard` (F3–F5), `m5-runner-core` (all of m5, one commit per milestone; see "Workflow runner (m5)"), `ai-<name>` per AI step; PR into `staging` at the end of each (see Git workflow and CI/CD).
+**Branches:** `m1-retrieval-core` (B1–B4, K1–K2, F1), `m2-agent-integration` (B4b, B5–B6, F2, K3), `m3-memory` (B7–B8, A3, K4), `m4-dashboard` (F3–F5), `m5-runner-core` (all of m5, one commit per milestone; see "Workflow runner (m5)"), `m6-graph` (G1–G7; see "Context + coding graph (m6)"), `ai-<name>` per AI step; PR into `staging` at the end of each (see Git workflow and CI/CD).
 
 ### Done
 
@@ -821,3 +821,26 @@ Tracks: WB = backend, WF = frontend, WH = owner. Each milestone branch is cut fr
 - Container mode: mounting `~/.claude` credentials into Docker.
 - Whether `--setting-sources` and similar reducers lower the ~44k startup tokens. Measure only if WH3 shows quota pressure.
 - Library versions from the design pass: croniter 6.2.4, FastAPI 0.156.4, React Flow 12.12.0.
+
+---
+
+## Context + coding graph (m6)
+
+Design (intent, goals, anti-goals, data model, eval): `specs/002-context-coding-graph/design.md`. Spec, plan and tasks sit beside it.
+
+- **Goal:** the agent coding here sees which task, story, requirement and decision it works under and which code implements them, without anyone pasting it in.
+- **Context graph:** features, stories, FR/SC, tasks, tickets, decisions, constraints, PLAN.md steps, claude-mem observations. Built by a parser (no LLM) plus a claude-mem-style background extractor (`claude -p --model haiku`, changed chunks only), triggered by speckit `extensions.yml` hooks and doc saves.
+- **Coding graph:** graphify's code + rationale nodes (imported from `graphify-out/graph.json` when `built_at_commit` changes) plus context→code links: EXTRACTED (paths in tasks, ticket commits, claude-mem files), INFERRED (embedding similarity), CONFIRMED (Claude's own edits and review).
+- **Surfaces:** a push line on each prompt (abstains under a tuned floor), a PreToolUse by-file note on Read/Edit, MCP `graph_search`/`graph_explain`/`graph_affected`/`graph_path`, CLI `ctc graph import|build|status|export|confirm`.
+- **Data:** Supabase `graph_nodes`, `graph_edges`, `graph_sources`; RAM copy per worker; nothing generated is committed.
+
+### Build order (m6, branch `m6-graph`)
+- [ ] **G1 — tables + graphify import.** Done when: `uv run ctc graph import` prints node/edge counts matching graph.json's code + rationale subset, and `ctc graph status` shows built_at_commit vs HEAD.
+- [ ] **G2 — context parser.** Done when: `uv run ctc graph build` prints 16 stories for `specs/001-n8n-parity` plus FR/SC/task/ticket/decision counts.
+- [ ] **G3 — embeddings + links + claude-mem import.** Done when: build prints the % of tasks with ≥ 1 code link.
+- [ ] **G4 — extractor, `/ctc-context` skill, speckit hooks, re-parse on save.** Done when: editing a spec.md section changes nodes with no manual run, and an unchanged re-run makes 0 Claude calls.
+- [ ] **G5 — MCP pull tools + `ctc graph export`.** Done when: `graph_search("retry a failed run from a node")` returns engine.py symbols and the export loads in `graphify query --graph`.
+- [ ] **G6 — push line + `/v1/hook/pre` + install.** Done when: `CTC_CLAUDE_HOME=<tmp> uv run ctc install --dry-run` shows the PreToolUse hook and both hooks return their lines on curl.
+- [ ] **G7 — eval** (`evaluation/graph_eval.py`). Done when: it prints dev (tickets 01–08) and test (09–16) Recall@3, MetaTool false-trigger rate and hook p95; pass = test Recall@3 ≥ 0.8, false triggers ≤ 10%, prompt p95 ≤ 150 ms, PreToolUse p95 ≤ 50 ms.
+
+Order: G1, G2 → G3 → G5, G6; G4 alongside G3; G7 last.
