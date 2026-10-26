@@ -21,7 +21,7 @@ function parseHash(): { view: View; decision: number | null; run: number | null;
   const h = location.hash.slice(1)
   const m = /^(decision|run)\/(\d+)$/.exec(h)
   if (m) return m[1] === 'run' ? { view: 'runs', decision: null, run: Number(m[2]), compare: null } : { view: 'overview', decision: Number(m[2]), run: null, compare: null }
-  const c = /^compare\/(\d+\/\d+(?:\/[a-z0-9-]+)?)$/.exec(h)
+  const c = /^compare\/(\d+\/\d+(?:\/[A-Za-z0-9][A-Za-z0-9_-]*)?)$/.exec(h) // node: graph.py SLUG
   if (c) return { view: 'runs', decision: null, run: null, compare: c[1] }
   return { view: VIEWS.includes(h as View) ? (h as View) : 'overview', decision: null, run: null, compare: null }
 }

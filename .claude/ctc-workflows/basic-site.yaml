@@ -22,18 +22,15 @@ nodes:
   pos: [564, -404]
   command: 'grep -q ''<html lang='' site/index.html && grep -q viewport site/index.html
     && echo ''html: lang + viewport ok'''
-  readonly: true
 - id: css-ok
   type: shell
   pos: [575, 0]
   command: 'grep -q ''640px'' site/styles.css && grep -q -- ''--'' site/styles.css
     && echo ''css: variables + 640px breakpoint ok'''
-  readonly: true
 - id: link-ok
   type: shell
   pos: [594, 408]
   command: grep -q 'styles.css' site/index.html && echo 'html links styles.css'
-  readonly: true
 - id: checks
   type: merge
   pos: [1200, 0]

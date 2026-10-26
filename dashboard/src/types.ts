@@ -98,10 +98,11 @@ export interface SwitchCase { name: string; conditions: Condition[]; combine?: '
 export interface WfNode {
   id: string; type: NodeType; pos: [number, number]; max_visits?: number
   input?: string // trigger
-  prompt?: string; cap?: string; agent?: string; model?: string; effort?: string; permission_mode?: 'acceptEdits' | 'dontAsk' // agent
+  prompt?: string; cap?: string; agent?: string; model?: string; effort?: string; permission_mode?: 'acceptEdits' | 'dontAsk' | 'plan' // agent
   allowed_tools?: string[]; mcp_config?: unknown; json_schema?: unknown; resume_from?: string; max_turns?: number; on_error?: 'fail' | 'continue'
+  readonly?: boolean // agent only: read tools + dontAsk; ready readonly agents batch in parallel
   command?: string // shell
-  timeout_s?: number; readonly?: boolean // agent and shell
+  timeout_s?: number // agent and shell
   pin?: { output: Record<string, unknown> } // agent and shell; used only by runs started with pinned
   path?: string; op?: Op; value?: unknown // if, the old single-condition form
   conditions?: Condition[]; combine?: 'and' | 'or' // if

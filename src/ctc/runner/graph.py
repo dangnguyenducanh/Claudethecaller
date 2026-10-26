@@ -1,7 +1,7 @@
 """Workflow walker (PLAN.md m5 "Walker rules"): pure functions over a graph dict and a JSON-able state dict, no I/O.
 
 Graph = {nodes: [{id, type, pos, ...}], edges: [{from, to, handle?}]}. Types: trigger|agent|shell|if|switch|approval|
-merge, loops (back-edges, rule 5), ready readonly nodes in one batch (rule 7). An IF tests `conditions: [{path, op,
+merge, loops (back-edges, rule 5), ready readonly agents in one batch (rule 7). An IF tests `conditions: [{path, op,
 value}]` (or the old single path/op/value) joined by `combine: and|or`; ops: eq ne gt ge lt le contains not_contains
 regex exists truthy. A switch has `cases: [{name, conditions, combine}]`; its out-edges' handles are case names or
 default, and the first matching case's handle fires. An agent or shell node may carry `pin: {output: {...}}`: a run
@@ -154,6 +154,8 @@ def validate(g: dict) -> list[dict]:
             err("permission_mode must be acceptEdits, dontAsk or plan: no bypass on the host", nid)
         if t == "shell" and not n.get("command"):
             err("a shell node needs a command", nid)
+        if t == "shell" and n.get("readonly"):
+            err("readonly is for agent nodes only: shells never batch in parallel", nid)
         if (v := n.get("max_visits")) is not None and not (type(v) is int and v >= 1):
             err("max_visits must be a whole number >= 1", nid)
         if "pin" in n:
@@ -217,6 +219,11 @@ def validate(g: dict) -> list[dict]:
             if byid.get(nid, {}).get("type") == "shell" and PUSH.search(str(byid[nid].get("command"))):
                 err("git push / gh pr create|merge must sit behind an approval node", nid)
         back = back_edges(g)
+        fwd = [(e.get("from"), e.get("to")) for i, e in enumerate(g["edges"]) if i not in back]
+        for nid, n in byid.items():  # a session to resume exists only when that agent ran earlier in this pass
+            if (rf := n.get("resume_from")) and not (isinstance(rf, str) and byid.get(rf, {}).get("type") == "agent"
+                                                     and rf != nid and nid in _reach(rf, fwd)):
+                err(f"resume_from {rf!r} must name an agent node that runs before {nid}", nid)
         for i in sorted(back):
             loop = f"{g['edges'][i].get('from')} -> {g['edges'][i].get('to')}"
             for nid in sorted(loop_body(g, i, back)):
@@ -245,10 +252,10 @@ def ready(g: dict, st: dict) -> list[str]:
 
 
 def batch(g: dict, r: list[str]) -> list[str]:
-    """Rule 7: which of the ready nodes r run together: every readonly agent or shell node, else only the first by id
-    (a writer, IF, merge, approval or trigger runs alone)."""
+    """Rule 7: which of the ready nodes r run together: every readonly agent, else only the first by id (a writer,
+    shell, IF, merge, approval or trigger runs alone)."""
     byid = {n["id"]: n for n in g["nodes"]}
-    return sorted(n for n in r if byid[n]["type"] in ("agent", "shell") and byid[n].get("readonly")) or [min(r)]
+    return sorted(n for n in r if byid[n]["type"] == "agent" and byid[n].get("readonly")) or [min(r)]
 
 
 def merge_output(g: dict, st: dict, node_id: str, ctx: dict) -> dict:
@@ -500,7 +507,7 @@ if __name__ == "__main__":
         assert validate(load(root / f"{name}.yaml")) == [], (name, validate(load(root / f"{name}.yaml")))
     ctx3, b3 = {"input": "", "run": {"branch": "ctc/three-1"}}, []
     ran, _, e = walk(load(root / "three-reviewers.yaml"), lambda _: 0, ctx3, b3)
-    assert e is None and b3 == [["start"], ["r1", "r2", "r3"], ["join"], ["merged"]], b3  # the 3 shells run together
+    assert e is None and b3 == [["start"], ["r1"], ["r2"], ["r3"], ["join"], ["merged"]], b3  # shells run one by one
     assert ctx3["join"] == {"inputs": {n: {"exit_code": 0, "stdout_tail": n} for n in ("r1", "r2", "r3")}}, ctx3["join"]
     assert "approval" in validate(load(root / "bad-push.yaml"))[0]["message"]
     checks = iter([1, 1, 0])  # loop-demo: the counter reaches 3 on its third visit
