@@ -586,6 +586,65 @@ def graph_status() -> None:
     out.print(card(srcs, "Sources", "graph_sources"))
 
 
+@graph.command("build")
+def graph_build(no_commits: bool = typer.Option(False, "--no-commits", help="Leave out (and clear) commit-derived links."),
+                no_embed: bool = typer.Option(False, "--no-embed", help="No embedder: skip by-meaning links.")) -> None:
+    """Import graphify if stale, parse every context source, read claude-mem, then link context to code (named paths,
+    ticket commits, meaning)."""
+    from ctc.graph import build as gbuild
+
+    repo, c = Path.cwd(), cfg()
+
+    async def go() -> dict:
+        s, e = await Store.open(c["database_url"], pool_max=1), Embedder(c["embed_url"], c["batch_timeout_s"])
+        try:
+            return await gbuild.build(s, e, repo, commits=not no_commits, embed=not no_embed)
+        finally:
+            await s.close()
+            await e.aclose()
+
+    with out.status(f"[{MUTED}]building the context + coding graph…[/]", spinner_style=BLUE):
+        r = _run(go())
+    s, ln, tl = r["summary"], r["links"], r["tasks_linked"]
+    keys = ("stories", "requirements", "criteria", "tasks", "tickets", "decisions", "plan_steps", "prds")
+    out.print(f"{dot(PURPLE)} context: " + " · ".join(f"[bold]{s[k]}[/] {k.replace('_', ' ')}" for k in keys))
+    feats = grid(("feature", "l:*3"), *((k, "r:12") for k in keys[:5]))
+    for f, n in sorted(s["by_feature"].items()):
+        feats.add_row(f, *(f"[{TEXT}]{n[k]}[/]" if n.get(k) else f"[{FAINT}]·[/]" for k in keys[:5]))
+    out.print(card(feats, "Per feature"))
+    out.print(f"{dot(GREEN)} links: [bold]{ln['extracted']}[/] extracted, [bold]{ln['inferred']}[/] inferred, "
+              f"[bold]{ln['confirmed']}[/] confirmed  [{FAINT}]{ln['unresolved']} unresolved paths dropped[/]")
+    out.print(f"{dot(GREEN if tl else FAINT)} tasks linked: [bold]{'n/a' if tl is None else f'{tl:.0%}'}[/]  "
+              f"[{FAINT}]" + " · ".join(f"{k.replace('_', '-')} {v}" for k, v in r["info"].items()) + "[/]")
+
+
+@graph.command("confirm")
+def graph_confirm(src: str = typer.Argument(..., help="Context node id, e.g. ctx:specs/001-n8n-parity:T012."),
+                  dst: str = typer.Argument(..., help="Code node id, e.g. code:src_ctc_runner_engine_retry."),
+                  relation: str = typer.Argument(..., help="implemented_in | tested_by | mentions"),
+                  verdict: str = typer.Argument(..., help="keep | drop")) -> None:
+    """Review one link: keep makes it CONFIRMED, drop makes it DROPPED (left out of pushes and searches); rebuilds keep both."""
+    from ctc.graph import db as gdb
+    from ctc.ingestion.scanner import project_id
+
+    if verdict not in ("keep", "drop"):
+        err.print(f"[{BAD}]●[/] verdict must be keep or drop, not {verdict!r}")
+        raise typer.Exit(2)
+
+    async def go() -> bool:
+        s = await Store.open(cfg()["database_url"], pool_max=1)
+        try:
+            return await gdb.set_confidence(s, "local", project_id(Path.cwd()), src, dst, relation,
+                                            "CONFIRMED" if verdict == "keep" else "DROPPED", "review")
+        finally:
+            await s.close()
+
+    if not _run(go()):
+        err.print(f"[{BAD}]●[/] no {relation} link {src} → {dst} in this project")
+        raise typer.Exit(1)
+    out.print(f"{dot(GREEN if verdict == 'keep' else FAINT)} {'kept' if verdict == 'keep' else 'dropped'}")
+
+
 # ---- workflow runs (PLAN.md m5) -----------------------------------------------
 
 STATUS = {"done": GREEN, "skipped": FAINT, "cancelled": FAINT, "failed": BAD, "timeout": BAD, "quota": WARN,

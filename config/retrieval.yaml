@@ -12,3 +12,10 @@ blend: {prompt: 0.6, session: 0.25, project: 0.15}   # B7 query vector
 memory_weight: 0.1                 # B8 recall() weight on the query vector
 memory_in_query: false             # K4 2026-10-21: blending recalled memories into the query lowered own-eval dev Recall@5 by 0.051 (test +0.005); memories still ride along in the bundle. Re-measure after H1/H4.
 topic_shift_below: 0.55            # B7: cosine(turn, session mean) below this clears the session
+graph_links:                       # m6 G3: context -> code links (src/ctc/graph/build.py)
+  inferred_floor: 0.45             # cosine a by-meaning (INFERRED) link must reach
+  inferred_k: 3                    # at most this many by-meaning links per context node
+  embed_batch: 32                  # texts per embedder call when graph nodes are (re-)embedded
+  claudemem_url: http://127.0.0.1:37707   # claude-mem worker, read-only; down -> the build skips it
+  claudemem_project: null          # claude-mem's project name; null = <owner>/<Repo> of `git remote get-url origin`
+  commit_tags: {".scratch/n8n-parity": '\(n8n parity (\d{2})\)$'}   # feature -> commit-subject regex, group 1 = ticket number
