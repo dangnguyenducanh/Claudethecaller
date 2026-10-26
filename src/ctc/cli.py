@@ -795,8 +795,9 @@ def runner_upgrade() -> None:
 # ---- install ------------------------------------------------------------------
 
 # event -> (route, curl max seconds); ours are recognised by the socket name in the command
-HOOKS = {"UserPromptSubmit": ("prompt", "0.15"), "PostToolUse": ("tool", "0.05"), "Stop": ("stop", "0.05"),
-         "SessionEnd": ("stop", "0.05")}  # same endpoint: it reads hook_event_name
+HOOKS = {"UserPromptSubmit": ("prompt", "0.15"), "PreToolUse": ("pre", "0.05"), "PostToolUse": ("tool", "0.05"),
+         "Stop": ("stop", "0.05"), "SessionEnd": ("stop", "0.05")}  # same endpoint: it reads hook_event_name
+MATCHERS = {"PostToolUse": "*", "PreToolUse": "Read|Edit|Write|MultiEdit"}  # tool events only; the others take none
 MCP = "claudethecaller"
 
 
@@ -850,7 +851,7 @@ def install(dry_run: bool = typer.Option(False, "--dry-run", help="Print the set
     for event, (route, t) in HOOKS.items():
         groups = hooks.get(event, [])
         if not any(_ours(h) for g in groups for h in g.get("hooks", [])):
-            hooks[event] = [*groups, {**({"matcher": "*"} if event == "PostToolUse" else {}),
+            hooks[event] = [*groups, {**({"matcher": MATCHERS[event]} if event in MATCHERS else {}),
                                       "hooks": [{"type": "command", "command": _hook_cmd(route, t)}]}]
             added.append(event)
     out.print(header("Install", "Claude Code hooks", f"{p}" + ("  · dry run" if dry_run else "")))

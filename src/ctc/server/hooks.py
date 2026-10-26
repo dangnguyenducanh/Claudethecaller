@@ -19,11 +19,12 @@ import httpx
 import numpy as np
 import orjson
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
-from fastapi.responses import PlainTextResponse, Response
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel
 
 from ctc.config import cfg
 from ctc.decision.bundle import Bundle, decide, followed, stage_rows, suggestion_line
+from ctc.graph import core, push
 from ctc.graph.extract import SOURCE, prose
 from ctc.ingestion.scanner import project_id
 from ctc.memory.longterm import recall
@@ -153,12 +154,17 @@ async def _prompt(st: State, body: dict, user_id: str) -> str:
         await write(st, "session", {"id": sid, "user_id": user_id, "project_id": pid, "title": prompt[:200], "turns": 1})
         t = time.perf_counter()
         b = await route(st, prompt, sid, cwd, user_id)
+        ms, line = round((time.perf_counter() - t) * 1000, 1), None
+        try:  # m6 FR-022: the graph line; the prompt's vector is an emb: cache hit from route() (same first MAX_Q chars)
+            if g := await core.graph_for(st, cwd, user_id):
+                line = push.prompt_line(g, (await _embed(st, [prompt[:MAX_Q]]))[0], st.cfg) or None
+        except Exception:
+            log.exception("hook/prompt: graph line failed; suggestion only")
         await write(st, "decision", {
             "user_id": user_id, "session_id": sid, "project_id": pid, "ref": b.ref, "prompt": prompt[:MAX_Q],
             "abstained": b.abstained, "confidence": b.confidence, "difficulty": b.difficulty, "model_tier": b.model_tier,
-            "latency_ms": round((time.perf_counter() - t) * 1000, 1), "bundle": b.model_dump(),
-            "stages": [s.model_dump() for s in b.stages]})
-        return suggestion_line(b)
+            "latency_ms": ms, "bundle": b.model_dump(), "stages": [s.model_dump() for s in b.stages], "graph_line": line})
+        return "\n".join(s for s in (suggestion_line(b), line) if s)
     except Exception:
         log.exception("hook/prompt failed; empty suggestion")
         return ""
@@ -177,6 +183,31 @@ async def hook_prompt(request: Request) -> PlainTextResponse:
     except Exception:
         log.exception("hook/prompt failed; empty suggestion")
     return PlainTextResponse(line)
+
+
+PRE_BUDGET_S = 0.04  # curl -m 0.05 (contracts/hooks.md); RAM only, no DB, no embedder
+
+
+async def _note(st: State, body: dict, user_id: str) -> str:
+    tin, cwd = body.get("tool_input"), str(body.get("cwd") or "")
+    path = str((tin if isinstance(tin, dict) else {}).get("file_path") or "")
+    if not (path and cwd) or _in_run(body) or not (g := await core.graph_for(st, cwd, user_id)):
+        return ""
+    return push.file_note(g, Path(path).relative_to(cwd).as_posix() if Path(path).is_relative_to(cwd) else path, st.cfg)
+
+
+@router.post("/v1/hook/pre")
+async def hook_pre(request: Request) -> Response:
+    """PreToolUse on Read|Edit|Write|MultiEdit (m6 FR-024): the file's tasks/requirements/decision as additional context.
+    Never a permissionDecision; nothing to say or any error = empty 200."""
+    try:
+        if note := await asyncio.wait_for(_note(_st(request), await _body(request), _user(request)), PRE_BUDGET_S):
+            return JSONResponse({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": note}})
+    except TimeoutError:
+        log.info("hook/pre over its %.0f ms budget: no note", PRE_BUDGET_S * 1000)
+    except Exception:
+        log.exception("hook/pre failed; no note")
+    return Response(status_code=200)
 
 
 EDIT_TOOLS = ("Write", "Edit", "MultiEdit")
