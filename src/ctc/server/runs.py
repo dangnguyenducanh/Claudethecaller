@@ -74,14 +74,17 @@ async def _step(st, o: str, rid: int, sid: int) -> dict:
 @router.post("/workflows/{cap_id}/runs", response_model=RunRef, status_code=202)
 async def start_run(cap_id: str, b: RunStart, request: Request):
     st, u, o = await _scope(request)
-    return {"run_id": await submit_run(st, u, o, cap_id, b.input, b.project, b.trigger)}
+    return {"run_id": await submit_run(st, u, o, cap_id, b.input, b.project, b.trigger, pinned=b.pinned)}
 
 
 async def submit_run(st, u: str, o: str, cap_id: str, text: str = "", project: str | None = None, trigger: str = "api",
-                     head: bool = False) -> int:
+                     head: bool = False, pinned: bool = False) -> int:
     """Queue a run of the workflow file as it is now (POST /runs, MCP run_workflow, CLI); with head (schedules only) a
-    project's workflow as committed at the project's HEAD, 422 not_committed when it has no committed version.
-    422 invalid_graph / project_required."""
+    project's workflow as committed at the project's HEAD, 422 not_committed when it has no committed version. pinned
+    (editor and CLI only): pinned nodes return their pin.output. 422 pinned_not_allowed (a schedule or MCP start with
+    pinned) / invalid_graph / project_required."""
+    if pinned and trigger in ("schedule", "mcp"):
+        fail(422, "pinned_not_allowed", "pins apply only to editor and CLI runs; schedule and MCP runs always execute for real")
     c, g, sha = await _workflow(st, cap_id, head)
     if c["namespace"].startswith("project@"):  # a project's workflow runs in that project (its file is in its git)
         repo, pid = _cap_root(st, c).parent, c["namespace"].removeprefix("project@")
@@ -89,7 +92,7 @@ async def submit_run(st, u: str, o: str, cap_id: str, text: str = "", project: s
         repo, pid = p["path"], p["id"]
     else:
         fail(422, "project_required", "a user or plugin workflow needs a project to run in: pass project (its name)")
-    return await engine.submit(st, o, cap_id, g, sha, str(repo), pid, trigger, text)
+    return await engine.submit(st, o, cap_id, g, sha, str(repo), pid, trigger, text, pinned=pinned)
 
 
 async def _workflow(st, cap_id: str, head: bool = False) -> tuple[dict, dict, str]:

@@ -363,6 +363,8 @@ class RunStart(BaseModel):
     input: str = ""
     project: str | None = None  # a user or plugin workflow runs in this project (name); a project workflow in its own
     trigger: RunTrigger = "api"
+    # pinned nodes return their pin.output; editor and CLI only (422 pinned_not_allowed for schedule and mcp)
+    pinned: bool = False
 
 
 class RunRef(BaseModel):

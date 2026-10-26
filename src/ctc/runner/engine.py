@@ -63,10 +63,11 @@ CONTINUE = "Continue where you left off."  # the prompt of a node resumed after 
 _owner: str | None = None
 
 # A queued run: submit() leaves the retry columns null; retry() sets them (base_sha = the commit its worktree starts at).
+# pinned: its nodes with a pin complete with pin.output (editor and CLI starts only; ctc.server.runs.submit_run refuses the rest)
 SUBMIT_SQL = """insert into wf_runs (owner, workflow, project_id, file_sha, graph, trigger, input, repo, auto_resume,
-  parent_run_id, from_node, to_node, base_sha)
+  parent_run_id, from_node, to_node, base_sha, pinned)
 values (%(owner)s, %(workflow)s, %(project_id)s, %(file_sha)s, %(graph)s, %(trigger)s, %(input)s, %(repo)s, %(auto_resume)s,
-  %(parent_run_id)s, %(from_node)s, %(to_node)s, %(base_sha)s) returning id"""
+  %(parent_run_id)s, %(from_node)s, %(to_node)s, %(base_sha)s, %(pinned)s) returning id"""
 # The claim (PLAN.md m5 Queue); wf_runs_one_running rejects a second running run of one owner if two claimers race.
 CLAIM_SQL = """update wf_runs set status = 'running', started_at = coalesce(started_at, now())
 where id = (select id from wf_runs r where status = 'queued' and owner = %(o)s and (%(id)s::bigint is null or id = %(id)s)
@@ -172,12 +173,13 @@ async def _fail(st, ids: list[int], error: str) -> None:
 
 
 async def submit(st, owner: str, workflow: str, g: dict, file_sha: str, repo: str, project_id: str | None = None,
-                 trigger: str = "api", text: str = "") -> int:
-    """Queue a run of a validated graph (the snapshot it will walk) and wake the runner."""
+                 trigger: str = "api", text: str = "", pinned: bool = False) -> int:
+    """Queue a run of a validated graph (the snapshot it will walk) and wake the runner. pinned: nodes with a pin
+    complete with pin.output, no process and no commit (execute())."""
     rid = await st.store.fetchval(SUBMIT_SQL, {
         "owner": owner, "workflow": workflow, "project_id": project_id, "file_sha": file_sha, "graph": Jsonb(g),
         "trigger": trigger, "input": text, "repo": repo, "auto_resume": _auto_resume(g), "parent_run_id": None,
-        "from_node": None, "to_node": None, "base_sha": None})
+        "from_node": None, "to_node": None, "base_sha": None, "pinned": pinned})
     WAKE.set()
     return rid
 
@@ -227,7 +229,8 @@ async def retry(st, owner: str, parent_id: int, g: dict, file_sha: str, from_nod
             rid = (await (await conn.execute(SUBMIT_SQL, {
                 "owner": owner, "workflow": p["workflow"], "project_id": p["project_id"], "file_sha": file_sha,
                 "graph": Jsonb(g), "trigger": trigger, "input": p["input"], "repo": p["repo"], "auto_resume": _auto_resume(g),
-                "parent_run_id": parent_id, "from_node": from_node, "to_node": to_node, "base_sha": sha})).fetchone())["id"]
+                "parent_run_id": parent_id, "from_node": from_node, "to_node": to_node, "base_sha": sha,
+                "pinned": False})).fetchone())["id"]
             # usage and cost_usd stay null: reused nodes cost 0 tokens
             await conn.execute(
                 "insert into wf_steps (run_id, node_id, visit, kind, status, input, output, error, session_id, num_turns,"
@@ -414,8 +417,12 @@ async def execute(st, run: dict) -> None:
                     jobs.append((row["id"], node, None, None, None, {"status": "done", "output": row["output"],
                                                                       "session_id": row["session_id"], "marker": "reused"}))
                     continue
-                log_path = RUNS / str(rid) / f"{nid}-{node['visit']}.jsonl" if node["type"] == "agent" else None
+                # a pinned run completes a pinned node with its pin: its input is kept, no argv, log, process or commit
+                pin = {"status": "done", "output": node["pin"]["output"], "marker": "pinned"} if (
+                    run.get("pinned") and node.get("pin")) else None
+                log_path = RUNS / str(rid) / f"{nid}-{node['visit']}.jsonl" if node["type"] == "agent" and not pin else None
                 text, argv = _input(node, ctx, sessions.get(node.get("resume_from")))
+                argv = None if pin else argv
                 row = await st.store.fetchrow(STEP_SQL, {"rid": rid, "nid": nid, "visit": node["visit"], "kind": node["type"],
                                                          "input": text, "log": str(log_path) if log_path else None})
                 if not row:
@@ -425,7 +432,7 @@ async def execute(st, run: dict) -> None:
                 if argv and row["session_id"]:  # WB9: this visit stopped at a usage limit; go on in its own session
                     argv, text = agent_argv(node, ctx, None, resume=row["session_id"])[0], CONTINUE
                     await asyncio.to_thread(_reopen, log_path, argv)
-                jobs.append((row["id"], node, text, argv, log_path, None))
+                jobs.append((row["id"], node, text, argv, log_path, pin))
             # ponytail: a cancel landing between the row inserts and the spawns misses these processes; they run to their end
             ress = await asyncio.gather(*(spawn(*j[1:]) for j in jobs), return_exceptions=True)
             if exc := next((x for x in ress if isinstance(x, BaseException)), None):

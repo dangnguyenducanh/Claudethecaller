@@ -8,7 +8,7 @@ import { createContext, useContext, useEffect, useState, type DragEvent } from '
 import { ApiError, NEED_DAEMON, api, errText, usingMock } from './api'
 import type { ViewProps } from './App'
 import { parseSteps } from './parts'
-import type { Capability, CapabilityDetail, Condition, Graph, Kind, NodeType, Op, Schedule, SwitchCase, WfNode, WorkflowSettings, WorkflowStep } from './types'
+import type { Capability, CapabilityDetail, Condition, Graph, Kind, NodeType, Op, RunDetail, Schedule, SwitchCase, WfNode, WorkflowSettings, WorkflowStep } from './types'
 import { Header, Search, fmtTime } from './ui'
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
@@ -52,7 +52,7 @@ function NodeView({ id, type, data, selected }: NodeProps<FlowNode>) {
   return (
     <div className={`wfnode${selected ? ' sel' : ''}${bad === id ? ' bad' : ''}${status[id] ? ' st-' + status[id] : ''}`}>
       {type !== 'trigger' && <Handle type="target" position={Position.Left} />}
-      <div className="mono wf-id"><span className="dot" style={{ background: TYPE_COLOR[type] }} />{id}<span className="wf-kind">{status[id] ?? type}</span>{(runs?.[id] ?? 0) > 1 && <span className="tag warn">×{runs![id]}</span>}</div>
+      <div className="mono wf-id"><span className="dot" style={{ background: TYPE_COLOR[type] }} />{id}<span className="wf-kind">{status[id] ?? type}</span>{(runs?.[id] ?? 0) > 1 && <span className="tag warn">×{runs![id]}</span>}{data.pin && <span className="tag" title="Pinned output: used by runs started with Use pins">pin</span>}</div>
       <div className="wf-sub mono">{sub || '—'}</div>
       {outs
         ? outs.map(h => <div key={h} className="wf-out">{h}<Handle type="source" position={Position.Right} id={h} /></div>)
@@ -191,8 +191,9 @@ type SetField = (k: keyof WfData, v: unknown) => void
 type NodeFormProps = {
   n: FlowNode; ids: string[]; agents: string[]; set: SetField; rename: (to: string) => void
   renameHandle: (from: string, to: string) => void; dropHandle: (h: string) => void // this node's out-edges, by handle
+  lastOut?: { run: number; output: Record<string, unknown> } // this node's output in the workflow's latest run
 }
-function NodeForm({ n, ids, agents, set, rename, renameHandle, dropHandle }: NodeFormProps) {
+function NodeForm({ n, ids, agents, set, rename, renameHandle, dropHandle, lastOut }: NodeFormProps) {
   const d = n.data
   const str = (k: keyof WfData) => (d[k] as string | undefined) ?? ''
   const text = (k: keyof WfData, label: string) => <label>{label}<input value={str(k)} onChange={e => set(k, e.target.value)} /></label>
@@ -204,6 +205,15 @@ function NodeForm({ n, ids, agents, set, rename, renameHandle, dropHandle }: Nod
     <label>{label}<select value={str(k)} onChange={e => set(k, e.target.value)}><option value="">{none}</option>{opts.map(o => <option key={o}>{o}</option>)}</select></label>
   )
   const check = (k: keyof WfData, label: string) => <label className="toggle"><input type="checkbox" checked={!!d[k]} onChange={e => set(k, e.target.checked || undefined)} />{label}</label>
+  const pin = <>
+    <BlurField area label="Pinned output (JSON object; used only when Use pins is on)" init={json(d.pin?.output)} commit={s => {
+      if (!s.trim()) return set('pin', undefined)
+      const output = JSON.parse(s)
+      if (!output || typeof output !== 'object' || Array.isArray(output)) throw new Error('Pin a JSON object, e.g. {"result": "ok"}')
+      set('pin', { output })
+    }} />
+    {lastOut && <div className="actions"><button type="button" className="btn" onClick={() => set('pin', { output: lastOut.output })}>Pin output of run #{lastOut.run}</button></div>}
+  </>
   return (
     <>
       <div className="card-title"><span className="dot" style={{ background: TYPE_COLOR[n.type!] }} />{n.type} node</div>
@@ -226,11 +236,13 @@ function NodeForm({ n, ids, agents, set, rename, renameHandle, dropHandle }: Nod
         {text('resume_from', 'Resume the session of node')}
         <div className="row2">{num('max_turns', 'Max turns')}{num('timeout_s', 'Timeout (s)')}</div>
         {check('readonly', 'Read-only (read tools, dontAsk)')}
+        {pin}
       </>}
       {n.type === 'shell' && <>
         {area('command', 'Command (bash -c; template values are shell-quoted)')}
         {num('timeout_s', 'Timeout (s)')}
         {check('readonly', 'Read-only')}
+        {pin}
       </>}
       {n.type === 'approval' && area('message', 'Message (shown on the run page while it waits)')}
       {n.type === 'merge' && <div className="muted">Runs once every inbound edge has arrived and at least one input ran (skipped branches count as arrived); output {'{inputs: {node: output}}'} over the inputs that ran. Not allowed inside a loop.</div>}
@@ -307,11 +319,18 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
   const [err, setErr] = useState('')
   const [ok, setOk] = useState('')
   const [readOnly, setReadOnly] = useState('') // why Save is off, shown instead of an error
+  const [pinned, setPinned] = useState(false) // Run with pins: pinned nodes return their pinned output
+  const [last, setLast] = useState<RunDetail | null>(null) // the loaded workflow's latest run, for 'Pin output of run #N'
   const flow = useReactFlow()
+  const loadedId = loaded?.id
 
   useEffect(() => { api.capabilities({ project, q }).then(setPalette).catch(e => setErr(errText(e))) }, [project, q])
   useEffect(() => { api.capabilities({ project, kind: 'agent' }).then(rows => setAgents(rows.map(r => r.id))).catch(() => {}) }, [project])
   useEffect(() => { if (!loaded) setScope(project ? 'project' : 'user') }, [project]) // eslint-disable-line react-hooks/exhaustive-deps -- a new workflow follows the sidebar
+  useEffect(() => {
+    setLast(null)
+    if (loadedId) api.runs({ workflow: loadedId, limit: 1 }).then(rs => (rs[0] ? api.run(rs[0].id) : null)).then(setLast).catch(() => {})
+  }, [loadedId])
 
   const add = (type: NodeType, data: WfData, at?: { x: number; y: number }) => {
     const pos = at ?? { x: Math.max(0, ...nodes.map(n => n.position.x)) + 240, y: 0 }
@@ -399,7 +418,7 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
     if (!loaded) return
     try {
       setErr(''); setOk(''); setBad(null)
-      const r = await api.startRun(loaded.id, { input, project: project ?? undefined, trigger: 'button' })
+      const r = await api.startRun(loaded.id, { input, project: project ?? undefined, trigger: 'button', pinned })
       location.hash = `run/${r.run_id}`
     } catch (e) { if (usingMock()) setErr(NEED_DAEMON); else fail(e) }
   }
@@ -417,6 +436,8 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
   }
   const locked = !!readOnly
   const sel = nodes.find(n => n.selected)
+  const lastStep = last?.steps.filter(s => s.node_id === sel?.id && s.status === 'done' && s.output && s.marker !== 'pinned').at(-1)
+  const lastOut = last && lastStep?.output ? { run: last.id, output: lastStep.output } : undefined
 
   return (
     <div className="wf">
@@ -435,6 +456,7 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
         <button className="btn" onClick={async () => setExisting(existing ? null : await api.capabilities({ project, kind: 'workflow' }))}>Open existing</button>
         <input className="inline-input" placeholder="Run input, fills {{input}}" aria-label="Run input" value={input} onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && canRun && run()} />
+        <label className="toggle" title="Pinned nodes return their pinned output: no agent runs, no commit"><input type="checkbox" checked={pinned} onChange={e => setPinned(e.target.checked)} />Use pins</label>
         <button className="btn" onClick={run} disabled={!canRun} title={canRun ? 'Run on its own git branch and worktree' : 'Save the workflow first'}>Run</button>
         <button className="btn" onClick={exportWf} disabled={!canRun} title={canRun ? 'Write .claude/workflows/<name>.js in Claude Code\'s native format' : 'Save the workflow first'}>Export</button>
         <div className="wf-msg">
@@ -483,7 +505,7 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
           <fieldset className="form" disabled={locked}>
             {sel
               ? <NodeForm key={sel.id} n={sel} ids={nodes.map(n => n.id)} agents={agents} set={(k, v) => setField(sel.id, k, v)} rename={to => rename(sel.id, to)}
-                renameHandle={(from, to) => renameHandle(sel.id, from, to)} dropHandle={h => dropHandle(sel.id, h)} />
+                renameHandle={(from, to) => renameHandle(sel.id, from, to)} dropHandle={h => dropHandle(sel.id, h)} lastOut={lastOut} />
               : <div className="muted">Select a node to edit it.</div>}
           </fieldset>
           {sel?.type === 'trigger' && <fieldset className="form">{/* not locked: the schedule is the owner's DB row, not the file */}
