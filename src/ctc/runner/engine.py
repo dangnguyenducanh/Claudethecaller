@@ -25,7 +25,7 @@ import re
 import shutil
 import uuid
 from asyncio.subprocess import DEVNULL, PIPE
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import psycopg
@@ -58,7 +58,8 @@ from ctc.runner.proc import (
 from ctc.runner.schedule import tick
 
 log = logging.getLogger(__name__)
-SETTINGS = {"permission": "worktree", "allow_extra_usage": False, "auto_resume": True, "max_run_tokens": None}
+SETTINGS = {"permission": "worktree", "allow_extra_usage": False, "auto_resume": True, "max_run_tokens": None,
+            "max_run_minutes": None, "approval_timeout_minutes": None}
 DIFF_MAX = 65536
 PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
 WAKE = asyncio.Event()  # submit() -> run_runner
@@ -101,6 +102,19 @@ where id = %(rid)s and status = 'running' returning id"""
 # WB9: the runner's loop puts quota runs back in the queue once their usage window reset (auto_resume, or Continue).
 REQUEUE_SQL = """update wf_runs set status = 'queued', error = null
 where owner = %s and status = 'quota' and auto_resume and quota_resets_at <= now()"""
+# FR-035: an approval waiting past its run's settings.approval_timeout_minutes fails the run and its waiting step
+APPROVAL_TIMEOUT_SQL = """with x as (
+  select r.id, s.id as sid, 'approval timed out after ' || (r.graph->'settings'->>'approval_timeout_minutes')::float
+    || ' min (approval_timeout_minutes)' as error
+  from wf_runs r join wf_steps s on s.run_id = r.id and s.status = 'waiting'
+  where r.owner = %s and r.status = 'waiting' and r.graph->'settings'->>'approval_timeout_minutes' is not null
+    and s.started_at < now() - (r.graph->'settings'->>'approval_timeout_minutes')::float * interval '1 minute'
+), steps as (
+  update wf_steps set status = 'failed', error = x.error, ended_at = now() from x
+  where wf_steps.id = x.sid and wf_steps.status = 'waiting'  -- an approve() that got there first keeps its step
+)
+update wf_runs r set status = 'failed', error = x.error, ended_at = now() from x where r.id = x.id and r.status = 'waiting'
+returning r.id, r.workflow, r.graph, r.error"""
 
 
 def _j(v):
@@ -332,8 +346,8 @@ def _reopen(p: Path, argv: list[str]) -> None:
 
 
 def _input(node: dict, ctx: dict, resume: str | None) -> tuple[str, list[str] | None]:
-    """(step input, agent argv): the rendered prompt or command, what an IF or switch tests, an approval's message, or the
-    trigger's input."""
+    """(step input, agent argv): the rendered prompt or command, what an IF or switch tests, an approval's or stop's
+    message, or the trigger's input."""
     if node["type"] == "agent":
         argv, text = agent_argv(node, ctx, str(uuid.uuid4()), resume=resume)
         return text, argv
@@ -345,7 +359,7 @@ def _input(node: dict, ctx: dict, resume: str | None) -> tuple[str, list[str] | 
         if node["type"] == "if":
             return conds(node), None
         return "; ".join([*(f"{c.get('name')}: {conds(c)}" for c in node.get("cases") or []), "else default"]), None
-    if node["type"] == "approval":
+    if node["type"] in ("approval", "stop"):
         return render(node.get("message") or "", ctx), None
     if node["type"] == "merge":  # its inputs are the joined nodes' outputs, shown as the step's output
         return "", None
@@ -371,6 +385,9 @@ async def _spawn(node: dict, text: str, argv: list[str] | None, ctx: dict, wt: s
         return {"status": "done", "output": {"case": eval_switch(node, ctx)}}
     if node["type"] == "approval":  # nothing runs: the run waits off the lane for approve()
         return {"status": "waiting"}
+    if node["type"] == "stop":  # FR-033: fails the run with its rendered message (text = _input()); no process, no commit
+        msg = text or f"stopped at {node['id']}"
+        return {"status": "failed", "error": msg, "output": {"message": msg}}
     timeout = node.get("timeout_s") or 1800
     if argv:
         res = await run_agent(argv, text, wt, str(log_path), timeout, env, bool(s["allow_extra_usage"]),
@@ -410,20 +427,27 @@ async def execute(st, run: dict) -> None:
     s = SETTINGS | (g.get("settings") or {})
     nodes = {n["id"]: (g.get("defaults") or {}) | n for n in g["nodes"]}
     trig = next(n for n in g["nodes"] if n["type"] == "trigger")
-    ctx = {"input": run["input"] or trig.get("input") or "", "run": {"branch": run["branch"]}}
+    # FR-033 template roots; each node renders with its own nctx (run.visit, now) over this shared ctx of node outputs
+    ctx = {"input": run["input"] or trig.get("input") or "", "run": {"branch": run["branch"], "id": rid, "trigger": run["trigger"]},
+           "vars": g.get("vars") or {}}
     env, sessions, total, seen = child_env() | {"CTC_RUN": str(rid)}, {}, run["tokens"], len(wst.get("skipped", []))
+    # FR-035 wall clock from the first claim. ponytail: killed steps keep the status their process returned; quota and
+    # approval waits count toward the wall clock
+    mins = s["max_run_minutes"]
+    deadline = run["started_at"] + timedelta(minutes=mins) if mins else None
 
     def skips() -> list[tuple]:  # nodes the walker skipped since the last save -> their step rows
         nonlocal seen
         new, seen = wst["skipped"][seen:], len(wst["skipped"])
         return [(rid, n, wst["visits"][n], nodes[n]["type"]) for n in new]
 
-    async def spawn(node: dict, text: str, argv: list[str] | None, log_path: Path | None, canned: dict | None) -> dict:
+    async def spawn(node: dict, text: str, argv: list[str] | None, log_path: Path | None, canned: dict | None,
+                    nctx: dict) -> dict:
         if canned:  # completed without executing: no process, no commit, no pre/post sha
             return canned
         if node["type"] == "merge":  # its inputs are the data tokens in its inbox, which complete() clears
             return {"status": "done", "output": merge_output(g, wst, node["id"], ctx)}
-        return await _spawn(node, text, argv, ctx, wt, gd, log_path, env, s, alive=lambda: st.store.fetchval(
+        return await _spawn(node, text, argv, nctx, wt, gd, log_path, env, s, alive=lambda: st.store.fetchval(
             "select status = 'running' from wf_runs where id = %s", (rid,)))
 
     try:
@@ -448,12 +472,16 @@ async def execute(st, run: dict) -> None:
             if s["max_run_tokens"] and total >= s["max_run_tokens"]:  # checked before a batch, so finished work is never failed
                 await _fail(st, [rid], f"max_run_tokens reached before {', '.join(b)}: {total} >= {s['max_run_tokens']}")
                 return
-            jobs = []  # (step id, node, input text, argv, log path, canned): every row is inserted `running` before any spawn
+            if deadline and datetime.now(UTC) >= deadline:
+                await _fail(st, [rid], f"max_run_minutes ({mins}) reached before {', '.join(b)}")
+                return
+            jobs = []  # (step id, node, input text, argv, log path, canned, nctx): every row is inserted `running` before any spawn
             for nid in b:
                 node = nodes[nid] | {"visit": wst["visits"].get(nid, 0) + 1}
+                nctx = ctx | {"run": ctx["run"] | {"visit": node["visit"]}, "now": datetime.now(UTC).isoformat(timespec="seconds")}
                 if row := reused.get((nid, node["visit"])):  # its copied row is final: no input, no insert, no log
                     jobs.append((row["id"], node, None, None, None, {"status": "done", "output": row["output"],
-                                                                      "session_id": row["session_id"], "marker": "reused"}))
+                                                                      "session_id": row["session_id"], "marker": "reused"}, nctx))
                     continue
                 # a pinned run completes a pinned node with its pin: its input is kept, no argv, log, process or commit
                 pin = {"status": "done", "output": node["pin"]["output"], "marker": "pinned"} if (
@@ -461,7 +489,7 @@ async def execute(st, run: dict) -> None:
                 if node.get("disabled"):  # FR-016: skipped, its output the upstream one; no input, argv, log, process or commit
                     pin = {"status": "skipped", "output": passthrough(g, wst, nid, ctx), "marker": "disabled"}
                 log_path = RUNS / str(rid) / f"{nid}-{node['visit']}.jsonl" if node["type"] == "agent" and not pin else None
-                text, argv = ("", None) if node.get("disabled") else _input(node, ctx, sessions.get(node.get("resume_from")))
+                text, argv = ("", None) if node.get("disabled") else _input(node, nctx, sessions.get(node.get("resume_from")))
                 argv = None if pin else argv
                 row = await st.store.fetchrow(STEP_SQL, {"rid": rid, "nid": nid, "visit": node["visit"], "kind": node["type"],
                                                          "input": text, "log": str(log_path) if log_path else None})
@@ -470,11 +498,16 @@ async def execute(st, run: dict) -> None:
                         raise RuntimeError(f"step {nid}#{node['visit']} already exists")
                     return  # cancelled between two batches; cancel() also marked this batch's earlier rows
                 if argv and row["session_id"]:  # WB9: this visit stopped at a usage limit; go on in its own session
-                    argv, text = agent_argv(node, ctx, None, resume=row["session_id"])[0], CONTINUE
+                    argv, text = agent_argv(node, nctx, None, resume=row["session_id"])[0], CONTINUE
                     await asyncio.to_thread(_reopen, log_path, argv)
-                jobs.append((row["id"], node, text, argv, log_path, pin))
+                jobs.append((row["id"], node, text, argv, log_path, pin, nctx))
             # ponytail: a cancel landing between the row inserts and the spawns misses these processes; they run to their end
-            ress = await asyncio.gather(*(spawn(*j[1:]) for j in jobs), return_exceptions=True)
+            killer = deadline and asyncio.create_task(_kill_at(rid, (deadline - datetime.now(UTC)).total_seconds()))
+            try:
+                ress = await asyncio.gather(*(spawn(*j[1:]) for j in jobs), return_exceptions=True)
+            finally:
+                if killer:
+                    killer.cancel()
             if exc := next((x for x in ress if isinstance(x, BaseException)), None):
                 raise exc  # after every sibling ended, so none is left running past the run's failure
             steps, tok, end, err, resets, pr, stops, done = [], 0, None, None, None, None, [], []
@@ -511,7 +544,9 @@ async def execute(st, run: dict) -> None:
             fails = [f"{nid}: {res.get('error') or res['status']}" for nid, res in stops if res["status"] != "quota"]
             quota = next((res for _, res in stops if res["status"] == "quota"), None)
             r = []
-            if err or fails:  # a failure wins over a sibling's usage limit; the batch's done siblings stay done
+            if deadline and datetime.now(UTC) >= deadline:  # the limit wins over the batch's own outcome
+                end, err = "failed", f"max_run_minutes ({mins}) reached during {', '.join(b)}"
+            elif err or fails:  # a failure wins over a sibling's usage limit; the batch's done siblings stay done
                 end, err = "failed", err or fails[0]
             elif quota:  # continue re-claims just the quota node: its done siblings were completed above
                 end, err, resets = "quota", quota.get("error"), quota.get("resets_at")
@@ -524,7 +559,7 @@ async def execute(st, run: dict) -> None:
                                                      "err": err, "resets": resets, "pr": pr})
             if saved and end:  # committed: failed, quota, waiting or done
                 notify.fire(run, end, err)
-            for *_, log_path, _ in jobs:
+            for *_, log_path, _, _ in jobs:
                 if log_path and log_path.exists():
                     await asyncio.to_thread(_gzip, log_path)
             if not saved:
@@ -546,6 +581,21 @@ async def kill_run(rid: int) -> None:
             pass
     groups.discard(os.getpgrp())
     await asyncio.gather(*(stop(pg) for pg in groups), kill_containers(f"ctc-run-{rid}-"))  # + container-mode nodes
+
+
+async def _kill_at(rid: int, s: float) -> None:
+    """max_run_minutes: kill_run(rid) in s seconds; execute() cancels this when the batch lands first."""
+    await asyncio.sleep(s)
+    await kill_run(rid)
+
+
+async def expire_approvals(st, owner: str) -> list[int]:
+    """FR-035: fail this owner's `waiting` runs whose approval waited past their settings.approval_timeout_minutes
+    (run and waiting step, one statement), notify each; the ids. The runner calls it every loop (30 s precision)."""
+    rows = await st.store.fetch(APPROVAL_TIMEOUT_SQL, (owner,))
+    for row in rows:
+        notify.fire(row, "failed", row["error"])
+    return [r["id"] for r in rows]
 
 
 async def cancel(st, rid: int, owner: str) -> None:
@@ -634,6 +684,7 @@ async def run_runner(st) -> None:
         wait = 30.0
         try:
             await st.store.execute(REQUEUE_SQL, (await owner(),))
+            await expire_approvals(st, await owner())
             wait = await tick(st, await owner())  # WB12: fire due schedules; wake just after the next cron slot
             while not STOPPING.is_set() and (run := await claim(st)):
                 await execute(st, run)

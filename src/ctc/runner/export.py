@@ -7,10 +7,12 @@ and, for an IF or switch, took that handle), which is walker rules 2-4 as plain 
 conditions (every/some for combine and/or), switch -> {case} via a chain of ?: over its cases, both tested by the nodes
 after them; merge -> {inputs}; a loop (the back-edges into one node) -> a `while` capped at that node's max_visits;
 readonly nodes side by side -> await parallel([...]); a disabled node -> a pass-through of its first live input's
-output (graph.passthrough). Templates fill at run time: {{input}} is the workflow's `args`
-(else the trigger's input), {{node.x}} that node's output, shell values single-quoted like shlex.quote. Every string
-from the graph is embedded with json.dumps, so no prompt or command can break out into code.
-Not exported: approval nodes (a native run can't pause for a sign-off: the caller refuses them), error edges
+output (graph.passthrough); stop -> throw new Error(<its message>). Templates fill at run time: {{input}} is the
+workflow's `args` (else the trigger's input), {{vars.x}} the file's vars:, {{now}} the time, {{node.x}} that node's
+output, shell values single-quoted like shlex.quote. Every string from the graph is embedded with json.dumps, so no
+prompt or command can break out into code.
+Not exported: approval nodes (a native run can't pause for a sign-off: the caller refuses them), {{run.id}},
+{{run.visit}} and {{run.trigger}} (no native run record), settings.max_run_minutes (no native wall clock), error edges
 (on_error: error_output; a native agent's failure is not a branch, so they are refused), regex conditions
 (Python re and JS RegExp differ, so a script could branch where the walker would not), and per-node
 permissions, tools, MCP, max_turns and timeouts: the session's own permission rules apply.
@@ -46,9 +48,14 @@ const sh = (id, cmd) => agent('Run exactly this shell command in the repo and re
 
 
 def _ref(path: str) -> str:
-    """A template path -> the JS lookup: {{input...}} reads `input`, {{node.x}} reads out[node].x."""
+    """A template path -> the JS lookup: {{input...}} reads `input`, {{vars.x}} `vars`, {{now}} the time (the engine's
+    isoformat(timespec='seconds') in UTC), {{node.x}} out[node].x. ValueError for run.id / run.visit / run.trigger."""
     root, *rest = path.split(".")
-    return f"get(input, {J(rest)})" if root == "input" else f"get(out, {J([root, *rest])})"
+    if root == "run" and rest[:1] and rest[0] in ("id", "visit", "trigger"):
+        raise ValueError(f"uses_run_root: {{{{{path}}}}} has no native equivalent; remove it to export")
+    if root == "now" and not rest:
+        return r"new Date().toISOString().replace(/\.\d{3}Z$/, '+00:00')"
+    return f"get({root}, {J(rest)})" if root in ("input", "vars") else f"get(out, {J([root, *rest])})"
 
 
 def _tpl(s: str, shell: bool = False) -> str:
@@ -63,7 +70,9 @@ def _tpl(s: str, shell: bool = False) -> str:
 
 def to_js(g: dict, name: str, description: str = "") -> str:
     """A validated graph -> the workflow script. ValueError for an approval node, a regex condition or a loop the
-    script can't nest."""
+    script can't nest, a {{run.id|visit|trigger}} ref or settings.max_run_minutes."""
+    if (g.get("settings") or {}).get("max_run_minutes") is not None:
+        raise ValueError("has_run_timeout: settings.max_run_minutes has no native equivalent; remove it to export")
     nodes = {n["id"]: (g.get("defaults") or {}) | n for n in g["nodes"]}
     if gate := next((i for i, n in nodes.items() if n["type"] == "approval"), None):
         raise ValueError(f"has_approval: {gate}")
@@ -111,11 +120,14 @@ def to_js(g: dict, name: str, description: str = "") -> str:
             v = f"{{value: {tests(n)}}}"
         elif t == "switch":  # the first matching case, else default
             v = "{case: " + "".join(f"{tests(k)} ? {J(k['name'])} : " for k in n["cases"]) + '"default"}'
+        elif t == "stop":  # the run fails with its rendered message, as engine._spawn
+            v = None
         else:  # merge: the outputs of its live inputs
             ins = ", ".join(f"{on(e)} && [{J(e['from'])}, out[{J(e['from'])}]]" for e in fwd if e["to"] == nid)
             v = f"{{inputs: Object.fromEntries([{ins}].filter(Boolean))}}"
+        act = f"throw new Error(({_tpl(n['message'])}) || {J(f'stopped at {nid}')})" if v is None else f"set({J(nid)}, {v})"
         guard = " || ".join(on(e) for e in fwd if e["to"] == nid)
-        return f"if ({guard}) set({J(nid)}, {v})" if guard else f"/* {nid}: no in-edge, never runs */"
+        return f"if ({guard}) {act}" if guard else f"/* {nid}: no in-edge, never runs */"
 
     def pad() -> str:
         return "  " * len(stack)
@@ -161,7 +173,8 @@ def to_js(g: dict, name: str, description: str = "") -> str:
     trig = next((n for n in nodes.values() if n["type"] == "trigger"), {})
     return (f"export const meta = {{ name: {J(name)}, description: {J(description)} }}\n\n"
             f"// Exported by claudethecaller (ctc) from its canvas workflow {J(name)}; export again after editing it there.\n"
-            f"{PRELUDE}const input = args ?? {J(trig.get('input') or '')}\n\n" + "\n".join(lines) + "\nreturn out\n")
+            f"{PRELUDE}const input = args ?? {J(trig.get('input') or '')}\nconst vars = {J(g.get('vars') or {})}\n\n"
+            + "\n".join(lines) + "\nreturn out\n")
 
 
 if __name__ == "__main__":

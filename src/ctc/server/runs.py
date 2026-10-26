@@ -112,7 +112,8 @@ async def _workflow(st, cap_id: str, head: bool = False) -> tuple[dict, dict, st
             g, sha = load(c["path"]), hashlib.sha256(Path(c["path"]).read_bytes()).hexdigest()
         except OSError:
             fail(404, "not_found", f"{c['path']} is gone; reindex")
-    return c, check_graph(g), sha
+    check_graph(g)
+    return c, g, sha
 
 
 @router.put("/workflows/{cap_id}/schedule", response_model=Schedule)

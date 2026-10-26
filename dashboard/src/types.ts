@@ -44,6 +44,8 @@ export interface Capability {
   override: Override | null; calls_30d: number; followed_30d: number; cluster_id: string | null
   file_hash?: string | null // sha256 of the file; GET /capabilities/{id} and PATCH
 }
+export interface GraphIssue { message: string; node_id: string | null } // graph.validate / graph.warnings entry
+export interface SavedCapability extends Capability { warnings: GraphIssue[] } // POST / PATCH /capabilities
 export interface CapabilityDetail extends Capability {
   name: string; invoke: string; path: string; body: string; summary: string | null; triggers: string[]
   editable: boolean; vectors: number; cluster_members: string[]; recent_decisions: Decision[]
@@ -95,7 +97,7 @@ export interface ApiKey { id: number; name: string; created_at: string; revoked_
 export interface NewApiKey { name: string }
 
 // Workflow runner, PLAN.md "Workflow runner (m5)" → Workflow file and API.
-export type NodeType = 'trigger' | 'agent' | 'shell' | 'if' | 'switch' | 'approval' | 'merge' // merge has no fields of its own
+export type NodeType = 'trigger' | 'agent' | 'shell' | 'if' | 'switch' | 'approval' | 'merge' | 'stop' // merge has no fields of its own
 export type Op = 'eq' | 'ne' | 'gt' | 'ge' | 'lt' | 'le' | 'contains' | 'not_contains' | 'regex' | 'exists' | 'truthy'
 export interface Condition { path: string; op: Op; value?: unknown }
 export interface SwitchCase { name: string; conditions: Condition[]; combine?: 'and' | 'or' }
@@ -115,14 +117,17 @@ export interface WfNode {
   path?: string; op?: Op; value?: unknown // if, the old single-condition form
   conditions?: Condition[]; combine?: 'and' | 'or' // if
   cases?: SwitchCase[] // switch: out-edges use a case name or 'default' as handle
-  message?: string // approval
+  message?: string // approval, stop
 }
 export interface Graph {
   nodes: WfNode[]
   edges: { from: string; to: string; handle?: string }[] // IF 'true' | 'false'; Switch case name | 'default'; agent/shell 'error'
   defaults?: { max_visits?: number } // a run's snapshot carries `defaults`
 }
-export interface WorkflowSettings { permission: 'worktree' | 'container'; allow_extra_usage: boolean; auto_resume: boolean; max_run_tokens: number | null }
+export interface WorkflowSettings {
+  permission: 'worktree' | 'container'; allow_extra_usage: boolean; auto_resume: boolean; max_run_tokens: number | null
+  max_run_minutes: number | null; approval_timeout_minutes: number | null // > 0; null = no limit
+}
 export interface Schedule { cron: string; input: string; enabled: boolean; next_at: string | null; last_fired_at: string | null } // cron in daemon local time
 
 export type RunStatus = 'queued' | 'running' | 'waiting' | 'done' | 'failed' | 'cancelled' | 'quota'

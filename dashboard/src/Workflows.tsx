@@ -8,16 +8,16 @@ import { createContext, useContext, useEffect, useRef, useState, type DragEvent 
 import { ApiError, NEED_DAEMON, api, errText, usingMock } from './api'
 import type { ViewProps } from './App'
 import { parseSteps } from './parts'
-import type { Capability, CapabilityDetail, Condition, Graph, Kind, NodeType, Op, RunDetail, Schedule, SwitchCase, WfNode, WorkflowSettings, WorkflowStep } from './types'
+import type { Capability, CapabilityDetail, Condition, Graph, GraphIssue, Kind, NodeType, Op, RunDetail, Schedule, SwitchCase, WfNode, WorkflowSettings, WorkflowStep } from './types'
 import { Header, Search, fmtTime } from './ui'
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
 const KIND_COLOR: Record<Kind, string> = { skill: '#7c8cff', agent: '#b38cff', command: '#f59e42', workflow: '#3ddc97' }
-const TYPE_COLOR: Record<NodeType, string> = { trigger: '#3ddc97', agent: '#b38cff', shell: '#f59e42', if: '#7c8cff', switch: '#c77dff', approval: '#f5b14a', merge: '#4ac9f5' }
+const TYPE_COLOR: Record<NodeType, string> = { trigger: '#3ddc97', agent: '#b38cff', shell: '#f59e42', if: '#7c8cff', switch: '#c77dff', approval: '#f5b14a', merge: '#4ac9f5', stop: '#f25f5c' }
 const OPS: Op[] = ['eq', 'ne', 'gt', 'ge', 'lt', 'le', 'contains', 'not_contains', 'regex', 'exists', 'truthy']
 const CASE_RE = /^[a-z0-9][a-z0-9_-]*$/ // graph.CASE: switch case names are their output handles
 const DND = 'application/ctc-cap'
-const DEFAULT_SETTINGS: WorkflowSettings = { permission: 'worktree', allow_extra_usage: false, auto_resume: true, max_run_tokens: null }
+const DEFAULT_SETTINGS: WorkflowSettings = { permission: 'worktree', allow_extra_usage: false, auto_resume: true, max_run_tokens: null, max_run_minutes: null, approval_timeout_minutes: null }
 const arrow = { type: MarkerType.ArrowClosed }
 
 export type WfData = Omit<WfNode, 'id' | 'type' | 'pos'>
@@ -45,7 +45,7 @@ function NodeView({ id, type, data, selected }: NodeProps<FlowNode>) {
   const sub = type === 'trigger' ? (data.input ? `input: ${data.input}` : 'run input → {{input}}')
     : type === 'agent' ? data.cap ?? data.agent ?? firstLine(data.prompt)
     : type === 'shell' ? firstLine(data.command)
-    : type === 'approval' ? firstLine(data.message)
+    : type === 'approval' || type === 'stop' ? firstLine(data.message)
     : type === 'merge' ? `waits for ${inbound} input${inbound === 1 ? '' : 's'}`
     : type === 'switch' ? `${cases.length} case${cases.length === 1 ? '' : 's'} + default`
     : data.conditions ? `${condText(data.conditions[0] ?? {})}${data.conditions.length > 1 ? ` +${data.conditions.length - 1}` : ''}`
@@ -61,11 +61,11 @@ function NodeView({ id, type, data, selected }: NodeProps<FlowNode>) {
       {outs
         ? outs.map(h => <div key={h} className="wf-out">{h}<Handle type="source" position={Position.Right} id={errOut && h === 'ok' ? undefined : h}
           style={errOut && h === 'error' ? { background: 'var(--bad)' } : undefined} /></div>)
-        : <Handle type="source" position={Position.Right} />}
+        : type !== 'stop' && <Handle type="source" position={Position.Right} />}
     </div>
   )
 }
-export const nodeTypes = { trigger: NodeView, agent: NodeView, shell: NodeView, if: NodeView, switch: NodeView, approval: NodeView, merge: NodeView }
+export const nodeTypes = { trigger: NodeView, agent: NodeView, shell: NodeView, if: NodeView, switch: NodeView, approval: NodeView, merge: NodeView, stop: NodeView }
 
 /** An error edge (on_error: error_output) is drawn red. ponytail: a switch case named 'error' is red too. */
 const errStyle = (h?: string | null) => (h === 'error' ? { style: { stroke: 'var(--bad)' } } : {})
@@ -249,7 +249,7 @@ function NodeForm({ n, ids, agents, set, rename, renameHandle, dropHandle, lastO
       }} />
       {n.type === 'trigger' && area('input', 'Default input')}
       {n.type === 'agent' && <>
-        {area('prompt', 'Prompt: {{input}}, {{node.field}}, {{run.branch}}')}
+        {area('prompt', 'Prompt: {{input}}, {{node.field}}, {{run.branch}}, {{run.id}}, {{run.visit}}, {{now}}, {{vars.name}}')}
         {text('cap', 'Capability (prefixes the prompt with /<invoke>)')}
         {pick('agent', 'Agent', agents, 'none')}
         <div className="row2">{text('model', 'Model')}{text('effort', 'Effort')}</div>
@@ -279,6 +279,7 @@ function NodeForm({ n, ids, agents, set, rename, renameHandle, dropHandle, lastO
         {pin}
       </>}
       {n.type === 'approval' && area('message', 'Message (shown on the run page while it waits)')}
+      {n.type === 'stop' && area('message', 'Message: fails the run (templates allowed)')}
       {n.type === 'merge' && <div className="muted">Runs once every inbound edge has arrived and at least one input ran (skipped branches count as arrived); output {'{inputs: {node: output}}'} over the inputs that ran. Not allowed inside a loop.</div>}
       {n.type === 'if' && <Conditions conds={ifConds(d)} combine={d.combine} onChange={(conds, combine) => {
         set('conditions', conds); set('combine', combine)
@@ -333,6 +334,10 @@ function SettingsForm({ s, set }: { s: WorkflowSettings; set: (s: WorkflowSettin
       <label className="toggle"><input type="checkbox" checked={s.auto_resume} onChange={e => set({ ...s, auto_resume: e.target.checked })} />Auto-resume when the quota resets</label>
       <label>Max run tokens (empty: no cap)<input type="number" min={1} value={s.max_run_tokens ?? ''}
         onChange={e => set({ ...s, max_run_tokens: e.target.value === '' ? null : Number(e.target.value) })} /></label>
+      <label>Max run minutes (empty: no limit)<input type="number" min={0} step="any" value={s.max_run_minutes ?? ''}
+        onChange={e => set({ ...s, max_run_minutes: e.target.value === '' ? null : Number(e.target.value) })} /></label>
+      <label>Approval timeout minutes (empty: wait forever)<input type="number" min={0} step="any" value={s.approval_timeout_minutes ?? ''}
+        onChange={e => set({ ...s, approval_timeout_minutes: e.target.value === '' ? null : Number(e.target.value) })} /></label>
     </>
   )
 }
@@ -358,6 +363,7 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
   const [pinned, setPinned] = useState(false) // Run with pins: pinned nodes return their pinned output
   const [last, setLast] = useState<RunDetail | null>(null) // the loaded workflow's latest run, for 'Pin output of run #N'
   const [conflict, setConflict] = useState(false) // a save hit 409 changed_on_disk: Reload or Overwrite
+  const [warns, setWarns] = useState<GraphIssue[]>([]) // the last save's graph warnings (refs that would render empty)
   // Undo/redo history: JSON of toGraph() (no selection, settings or description); cur = the last recorded canvas
   const hist = useRef({ past: [] as string[], future: [] as string[], cur: JSON.stringify(toGraph([TRIGGER], [])) })
   const [, setTick] = useState(0) // re-renders Undo/Redo after a history change
@@ -406,7 +412,7 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
 
   const reset = () => {
     setNodes([TRIGGER]); setEdges([]); setSettings(DEFAULT_SETTINGS); setLoaded(null); setSaved(''); setName(''); setDesc('')
-    setErr(''); setOk(''); setReadOnly(''); setBad(null); setScope(project ? 'project' : 'user'); setConflict(false)
+    setErr(''); setOk(''); setReadOnly(''); setBad(null); setScope(project ? 'project' : 'user'); setConflict(false); setWarns([])
     hist.current = { past: [], future: [], cur: JSON.stringify(toGraph([TRIGGER], [])) }; setTick(t => t + 1)
   }
   const open = async (id: string) => {
@@ -460,7 +466,7 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
     setErr(errText(e, { ns: loaded?.namespace }))
   }
   const save = async (overwrite = false) => { // overwrite: no base_hash, so the daemon writes over an on-disk edit
-    setOk(''); setBad(null); setConflict(false)
+    setOk(''); setBad(null); setConflict(false); setWarns([])
     if (!loaded && (!name || nameErr)) return setErr(nameErr || 'Name the workflow.')
     if (!desc.trim()) return setErr('Add a description (what Claude matches against).')
     if (scope === 'project' && !project && !loaded) return setErr('Select a project in the sidebar first, or save to user scope.')
@@ -469,11 +475,11 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
       if (loaded) {
         const c = await api.updateCapability(loaded.id, { description: desc.trim(), graph, settings, base_hash: overwrite ? undefined : loaded.file_hash ?? undefined })
         setLoaded(l => l && { ...l, file_hash: c.file_hash ?? null })
-        setSaved(snap(graph, settings, desc)); setOk(`Saved ${loaded.id}.`)
+        setSaved(snap(graph, settings, desc)); setOk(`Saved ${loaded.id}.`); setWarns(c.warnings ?? [])
       } else {
         const c = await api.createCapability({ kind: 'workflow', scope, project: scope === 'project' ? project ?? undefined : undefined, name, description: desc.trim(), graph, settings })
-        await open(c.id)
-        setOk(`Created ${c.id}.`)
+        await open(c.id) // reset()s the warnings, so they are set after it
+        setOk(`Created ${c.id}.`); setWarns(c.warnings ?? [])
       }
     } catch (e) {
       if (e instanceof ApiError && e.code === 'changed_on_disk') setConflict(true) // before fail(): errText reads every 409 as a name clash
@@ -484,7 +490,7 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
   const run = async () => {
     if (!loaded) return
     try {
-      setErr(''); setOk(''); setBad(null)
+      setErr(''); setOk(''); setBad(null); setWarns([])
       const r = await api.startRun(loaded.id, { input, project: project ?? undefined, trigger: 'button', pinned })
       location.hash = `run/${r.run_id}`
     } catch (e) { if (usingMock()) setErr(NEED_DAEMON); else fail(e) }
@@ -581,6 +587,7 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
             <button className="btn" onClick={reload}>Reload</button> <button className="btn" onClick={() => save(true)}>Overwrite</button></span>}
           {readOnly && <span className="muted">{readOnly}</span>}
           {ok && <span className="okmsg">{ok}</span>}
+          {warns.map((w, i) => <span key={i} className="tag warn">{w.node_id}: {w.message}</span>)}
         </div>
         {existing && (
           <div className="menu wf-open">
@@ -597,6 +604,7 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
             <button className="btn" disabled={locked} onClick={() => add('switch', { cases: [{ name: 'case-1', conditions: [{ path: '', op: 'eq' }] }] })}>+ Switch</button>
             <button className="btn" disabled={locked} onClick={() => add('approval', { message: 'Approve and continue?' })}>+ Approval</button>
             <button className="btn" disabled={locked} onClick={() => add('merge', {})}>+ Merge</button>
+            <button className="btn" disabled={locked} onClick={() => add('stop', { message: 'Stopped: {{input}}' })}>+ Stop</button>
             <Search value={q} onChange={setQ} placeholder="Find a capability" />
           </div>
           <div className="wf-list">
@@ -616,7 +624,7 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
               <Controls showInteractive={false} />
             </ReactFlow>
           </NodeCtx.Provider>
-          {nodes.length <= 1 && <div className="wf-hint">Drag capabilities here (each becomes an Agent node) or add Shell, IF, Switch, Approval and Merge nodes,<br />then connect them from the trigger. Edges that loop back are drawn dashed.</div>}
+          {nodes.length <= 1 && <div className="wf-hint">Drag capabilities here (each becomes an Agent node) or add Shell, IF, Switch, Approval, Merge and Stop nodes,<br />then connect them from the trigger. Edges that loop back are drawn dashed.</div>}
         </div>
         <aside className="wf-panel card pad">
           <fieldset className="form" disabled={locked}>
@@ -637,5 +645,5 @@ function Editor({ project, theme }: ViewProps & { theme: string }) {
 }
 
 export default function Workflows(props: ViewProps & { theme: string }) {
-  return <><Header crumb="Workflows" title="Workflow editor" sub="Agent, Shell, IF, Switch, Approval and Merge nodes on a canvas; each run gets its own git branch and worktree" /><ReactFlowProvider><Editor {...props} /></ReactFlowProvider></>
+  return <><Header crumb="Workflows" title="Workflow editor" sub="Agent, Shell, IF, Switch, Approval, Merge and Stop nodes on a canvas; each run gets its own git branch and worktree" /><ReactFlowProvider><Editor {...props} /></ReactFlowProvider></>
 }
