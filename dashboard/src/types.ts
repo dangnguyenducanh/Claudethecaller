@@ -102,6 +102,7 @@ export interface WfNode {
   allowed_tools?: string[]; mcp_config?: unknown; json_schema?: unknown; resume_from?: string; max_turns?: number; on_error?: 'fail' | 'continue'
   command?: string // shell
   timeout_s?: number; readonly?: boolean // agent and shell
+  pin?: { output: Record<string, unknown> } // agent and shell; used only by runs started with pinned
   path?: string; op?: Op; value?: unknown // if, the old single-condition form
   conditions?: Condition[]; combine?: 'and' | 'or' // if
   cases?: SwitchCase[] // switch: out-edges use a case name or 'default' as handle

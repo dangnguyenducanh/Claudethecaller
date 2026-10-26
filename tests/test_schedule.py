@@ -89,7 +89,7 @@ def test_submit_run_head_uses_the_committed_file_and_others_the_saved_one(tmp_pa
     f.write_text(V2)
     got = []
 
-    async def submit(st, o, w, g, sha, repo_, pid, trigger, text):
+    async def submit(st, o, w, g, sha, repo_, pid, trigger, text, pinned=False):
         got.append((g["description"], sha, trigger))
         return len(got)
 

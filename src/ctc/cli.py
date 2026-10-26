@@ -532,11 +532,14 @@ def _status(s: str) -> str:
 def run_cmd(workflow: str = typer.Argument(..., help="Workflow id or name, e.g. smoke."),
             text: str = typer.Option("", "--input", "-i", help="The run's {{input}}."),
             project: str | None = typer.Option(None, "--project", "-p", help="Project name, for a user or plugin workflow."),
-            wait: bool = typer.Option(False, "--wait", "-w", help="Wait for the end and show every node.")) -> None:
+            wait: bool = typer.Option(False, "--wait", "-w", help="Wait for the end and show every node."),
+            pinned: bool = typer.Option(False, "--pinned", help="Pinned nodes return their pinned output: no agent runs, "
+                                        "no commit. For testing IF, loops and templates.")) -> None:
     """Queue a workflow run on the daemon: its own git worktree and branch, your claude login."""
     cap_id = _workflow_id(workflow)
-    rid = _api("POST", f"/workflows/{quote(cap_id, safe=':@')}/runs", json={"input": text, "project": project, "trigger": "cli"})["run_id"]
-    out.print(f"{dot(BLUE)} run [bold]#{rid}[/] queued  [{FAINT}]{cap_id}[/]")
+    rid = _api("POST", f"/workflows/{quote(cap_id, safe=':@')}/runs",
+               json={"input": text, "project": project, "trigger": "cli", "pinned": pinned})["run_id"]
+    out.print(f"{dot(BLUE)} run [bold]#{rid}[/] queued  [{FAINT}]{cap_id}{' · pinned' if pinned else ''}[/]")
     if not wait:
         return
     with out.status(f"[{MUTED}]running #{rid}…[/]", spinner_style=BLUE):

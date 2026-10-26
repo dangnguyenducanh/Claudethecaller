@@ -4,7 +4,8 @@ Graph = {nodes: [{id, type, pos, ...}], edges: [{from, to, handle?}]}. Types: tr
 merge, loops (back-edges, rule 5), ready readonly nodes in one batch (rule 7). An IF tests `conditions: [{path, op,
 value}]` (or the old single path/op/value) joined by `combine: and|or`; ops: eq ne gt ge lt le contains not_contains
 regex exists truthy. A switch has `cases: [{name, conditions, combine}]`; its out-edges' handles are case names or
-default, and the first matching case's handle fires.
+default, and the first matching case's handle fires. An agent or shell node may carry `pin: {output: {...}}`: a run
+started with pinned completes it with that output instead of running it (the engine applies it, not the walker).
 State (wf_runs.state, `{}` = not started): {inbox: {node: {"<edge#>": "data"|"skip"}}, deferred: [edge#], ready: [node],
 visits: {node: n}, execs: n, skipped: [node]}; edge# is the edge's index in graph["edges"]. visits counts runs and skips.
 Engine loop: `while (r := ready(g, st)): run batch(g, r) together (visit = visits.get(id, 0) + 1; a merge's output is
@@ -155,6 +156,17 @@ def validate(g: dict) -> list[dict]:
             err("a shell node needs a command", nid)
         if (v := n.get("max_visits")) is not None and not (type(v) is int and v >= 1):
             err("max_visits must be a whole number >= 1", nid)
+        if "pin" in n:
+            pin = n["pin"]
+            if t not in ("agent", "shell"):
+                err("only agent and shell nodes can be pinned", nid)
+            elif not (isinstance(pin, dict) and list(pin) == ["output"] and isinstance(pin["output"], dict)):
+                err("pin must be {output: {...}}: one JSON object", nid)
+            else:
+                try:
+                    json.dumps(pin["output"])
+                except (TypeError, ValueError):
+                    err("pin.output must be plain JSON (no dates or binary)", nid)
         cmd = str(n.get("command") or "")
         if t == "shell" and any(_open_quote(cmd[:m.start()]) for m in TPL.finditer(cmd)):
             err("leave {{...}} unquoted in a shell command: the runner shell-quotes it", nid)
