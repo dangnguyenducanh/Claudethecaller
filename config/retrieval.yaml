@@ -20,7 +20,7 @@ graph_links:                       # m6 G3: context -> code links (src/ctc/graph
   claudemem_project: null          # claude-mem's project name; null = <owner>/<Repo> of `git remote get-url origin`
   commit_tags: {".scratch/n8n-parity": '\(n8n parity (\d{2})\)$'}   # feature -> commit-subject regex, group 1 = ticket number
 graph_push:                        # m6 G6: prompt line + PreToolUse file note (src/ctc/graph/push.py)
-  floor: 0.5                       # cosine the best context match must reach; tuned on n8n tickets 01-08 by evaluation/graph_eval.py
+  floor: 0.3                       # cosine the best context match must reach; tuned on n8n tickets 01-08 by evaluation/graph_eval.py
   max_pointers: 3                  # code pointers per prompt line
   max_chars: 400                   # whole prompt line (~80 tokens)
   note_max: 3                      # tasks/requirements per file note
