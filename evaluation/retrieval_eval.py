@@ -5,6 +5,7 @@ uv run python -m evaluation.retrieval_eval index-skillret --text skillret --body
 uv run python -m evaluation.retrieval_eval tune [limit]     # abstain gate candidates (off, margin, platt, isotonic, lr): fit on dev, report on test -> data/reports/gate-<date>.json
 uv run python -m evaluation.retrieval_eval ranking [--fusion score] [--no-write]   # DEV ONLY: keyword_rrf_weight x rerank_weight sweep -> config `ranking`; --fusion score: score_w sweep, never writes the yaml
 uv run python -m evaluation.retrieval_eval ranking-test [n] # SkillRet TEST, report only: dense vs old {1, 1} vs configured ranking
+uv run python -m evaluation.retrieval_eval ablate --split dev|test --variant name=text:skillret,fusion:score,w:0.7 ...  # paired p-values, report only
 uv run python -m evaluation.retrieval_eval run [limit]      # TEST: three modes on SkillRet, own-eval, gold-none -> data/reports/
 --text current|skillret and --body-chars N work on every command (they pick the schemas and the query instruction to match).
 --fusion rrf|score and --score-w W set ranking.fusion / score_w for the whole run (so tune and ranking-test can use score fusion without editing the yaml).
@@ -453,6 +454,46 @@ async def ranking_test(limit: int | None = None) -> None:
         await closed(embedder, reranker, [sr])
 
 
+async def ablate(split: str, specs: list[str], limit: int | None = None) -> None:
+    """The same queries through several named variants in ONE process, so every pair gets a paired test (ranx.compare).
+    A variant is `name=key:val,key:val` with keys text (current|skillret), body (chars), fusion (rrf|score), w (score_w);
+    keys it leaves out keep the config. dev = the SkillRet train sample (sr_dev) against the train schema; test = the
+    4,392 test queries. Report only: nothing is written to config. Needs the variants' schemas indexed beforehand."""
+    base_embed, base_ranking, c = dict(cfg()["embed"]), dict(cfg()["ranking"]), cfg()
+    if split == "dev":
+        items = sr_dev()[:limit]
+    else:
+        _, queries, qrels = skillret("test")
+        items = [(q["id"], q["query"], qrels[q["id"]]) for q in queries][:limit]
+    memo, names, rows_by, hdr = {}, [], {}, {}
+    for spec in specs:
+        name, _, kv = spec.partition("=")
+        opts = dict(p.split(":", 1) for p in kv.split(",") if p)
+        set_text_mode(opts.get("text"), int(opts["body"]) if "body" in opts else None)
+        set_fusion(opts.get("fusion"), float(opts["w"]) if "w" in opts else None)
+        embedder, reranker, (store,) = await opened(sr_schema("train" if split == "dev" else "test"))
+        try:
+            qvs, _ = await embed_all(embedder, [q for _, q, _ in items])
+            mr = MemoReranker(reranker)
+            mr.memo = memo  # (query, doc) -> (sigmoid, logit): shared, so a variant only pays for docs the others did not rerank
+            ctx = Ctx(memo_candidates(store), embedder, mr, NEUTRAL)
+            rows_by[name], hdr[name] = await run_set(ctx, items, qvs, c["depth"], c["rerank_top"]), header()
+            names.append(name)
+            print(f"{name}: {hdr[name]} {scores(rows_by[name], 'full')}", flush=True)
+        finally:
+            await closed(embedder, reranker, [store])
+            cfg()["embed"].clear(); cfg()["embed"].update(base_embed)
+            cfg()["ranking"].clear(); cfg()["ranking"].update(base_ranking)
+    gold = {i: g for i, _, g in items}
+    compare_rows_ = {m: compare_runs(gold, {f"{n}:{m}": run_dict(rows_by[n], m) for n in names}, split) for m in ("dense", "full")}
+    out = {"split": split, "n": len(items), "variants": {n: {"header": hdr[n], "scores": {m: scores(rows_by[n], m) for m in ("dense", "hybrid", "full")}} for n in names},
+           "compare": compare_rows_}
+    print(json.dumps(out, indent=1))
+    for m, rs in compare_rows_.items():
+        print("\n".join(["", f"Paired significance, {m} order ({split}):", *compare_table(rs)]))
+    save(f"ablate-{split}-{TODAY}.json", out)
+
+
 async def run(limit: int | None = None) -> None:
     c = cfg()
     embedder, reranker, (lib, sr) = await opened("ctc", sr_schema("test"))
@@ -585,6 +626,8 @@ if __name__ == "__main__":
     ap.add_argument("--fusion", choices=["rrf", "score"])
     ap.add_argument("--score-w", type=float)
     ap.add_argument("--no-write", action="store_true")
+    ap.add_argument("--split", choices=["dev", "test"], default="test")
+    ap.add_argument("--variant", action="append", default=[])
     args = ap.parse_args()
     set_text_mode(args.text, args.body_chars)
     set_fusion(args.fusion, args.score_w)
@@ -597,6 +640,8 @@ if __name__ == "__main__":
         asyncio.run(tune_ranking(args.fusion or "rrf", not args.no_write))
     elif cmd == "ranking-test":
         asyncio.run(ranking_test(args.limit))
+    elif cmd == "ablate":
+        asyncio.run(ablate(args.split, args.variant, args.limit))
     elif cmd == "run":
         asyncio.run(run(args.limit))
     else:
