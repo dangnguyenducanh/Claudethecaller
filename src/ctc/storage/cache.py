@@ -15,6 +15,7 @@ import hashlib
 import inspect
 import logging
 import time
+import uuid
 from collections import OrderedDict
 
 import numpy as np
@@ -29,6 +30,22 @@ _SEM_QUERY = "(@libv:{$v} @project:{$p} @user:{$u})=>[KNN 1 @vec $qv AS d]"
 _NP = orjson.OPT_SERIALIZE_NUMPY
 _ERRORS = (RedisError, OSError)  # OSError covers socket and timeout errors redis-py does not wrap
 _L1_MAX_S = 60.0
+
+# Sliding-window rate limit: one atomic call. KEYS[1] = rl:{user}, ARGV = window seconds, unique member suffix.
+# SPDX-License-Identifier: Apache-2.0
+# Adapted from IBM/mcp-context-forge mcpgateway/middleware/rate_limit_middleware.py L51-L73:
+# https://github.com/IBM/mcp-context-forge/blob/85dabf0beb75d05f8ff230fb823f7fe60aa1871a/mcpgateway/middleware/rate_limit_middleware.py#L51-L73
+# changed: Redis TIME, unique member (the original takes the clock from the caller); always adds and returns ZCARD.
+# See THIRD_PARTY_NOTICES.md. Needs Redis >= 5 (TIME before a write is allowed in a script).
+_RATE_LUA = """
+local t = redis.call('time')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+local window = tonumber(ARGV[1])
+redis.call('zremrangebyscore', KEYS[1], 0, now - window * 1000)
+redis.call('zadd', KEYS[1], now, now .. '-' .. ARGV[2])
+redis.call('expire', KEYS[1], window)
+return redis.call('zcard', KEYS[1])
+"""
 
 
 def _tag(s: str) -> str:
@@ -58,6 +75,7 @@ class Cache:
         # Blocking stream reads + pub/sub need a read timeout longer than their block; never on the prompt path.
         # ponytail: fixed 10 s, so block_ms must stay under 10000.
         self.rb = redis.from_url(url, socket_timeout=10, socket_connect_timeout=0.05, protocol=2)
+        self._rate = self.r.register_script(_RATE_LUA)
         self._l1: dict[str, OrderedDict] = {}  # key prefix (before the first ':') -> key -> (expires_at, raw bytes)
         self._down_until = 0.0
         self._quiet: dict[str, float] = {}  # log line -> silent until (one line of each kind per down_for_s window)
@@ -269,10 +287,11 @@ class Cache:
 
     # --- rate limit, session turns -----------------------------------------------------------------------------------
 
-    async def hit_rate(self, user: str) -> int:
-        key = f"rl:{user}:{int(time.time() // 60)}"
-        got = await self._safe(self.r.pipeline(transaction=False).incr(key).expire(key, 60).execute())
-        return got[0] if got else 0
+    async def hit_rate(self, user: str, window_s: int = 60) -> int:
+        """Requests by `user` in the last window_s seconds, this one included; 0 when Redis is down (fail open).
+        # ponytail: one sorted-set member per request (and blocked ones count, so a hammering client stays blocked),
+        # O(limit) memory per user; a counter-bucket approximation if Redis memory ever matters."""
+        return await self._safe(self._rate(keys=[f"rl:{user}"], args=[window_s, uuid.uuid4().hex]), default=0)
 
     async def push_turn(self, session_id: str, vec, ttl: int, maxlen: int = 20) -> None:
         # ponytail: turns live in Redis only, so session blending drops out while Redis is down
