@@ -27,12 +27,14 @@ def texts(cap: dict, mode: str | None = None) -> list[str]:
 
 async def catalog_bodies(store: Store) -> dict[str, str]:
     """{cap id: body cut at embed.skillret_body_chars} when embed.text is skillret, else {}. The catalog carries no body
-    (RAM on the hot path), so whoever rebuilds the stored vector text (build_index, enrich.dedup) fetches it for one pass."""
+    (RAM on the hot path), so whoever rebuilds the stored vector text (build_index, enrich.dedup) fetches it for one pass,
+    200 ids per statement so a remote database stays under the 2 s statement timeout."""
     if cfg()["embed"]["text"] != "skillret":
         return {}
-    # ponytail: one statement under the 2 s timeout: fine for 6k x 8k chars on the scratch DB; chunk by id like _load_vectors if a remote DB times out
-    n = cfg()["embed"]["skillret_body_chars"]
-    return {r["id"]: r["body"] for r in await store.fetch("select id, left(body, %s) as body from capabilities", (n,))}
+    n, ids, out = cfg()["embed"]["skillret_body_chars"], list(store.catalog), {}
+    for i in range(0, len(ids), 200):
+        out.update({r["id"]: r["body"] for r in await store.fetch("select id, left(body, %s) as body from capabilities where id = any(%s)", (n, ids[i : i + 200]))})
+    return out
 
 
 async def build_index(store: Store, embedder: Embedder, progress=None) -> int:

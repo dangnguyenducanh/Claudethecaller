@@ -3,8 +3,8 @@ k: 5
 depth: 50            # candidates per channel (dense, keyword)
 rerank_top: 20
 rrf_k: 60
-embed: {text: current, instruction: coding, skillret_body_chars: 8000}   # m8: text = current | skillret (name | description | body, body cut at skillret_body_chars); instruction = coding | skillret query prefix. Changing text re-embeds on the next index.
-ranking: {keyword_rrf_weight: 0.25, rerank_weight: 1, fusion: rrf, score_w: 0.7, rerank_by: sigmoid}   # K2 ranking sweep 2026-10-21, SkillRet dev (500 train q) NDCG@10 / R@5: this 0.605 / 0.599, old {1, 1} 0.600 / 0.583, dense-only 0.580 / 0.574; own dev NDCG@10 0.117 vs old 0.110
+embed: {text: skillret, instruction: skillret, skillret_body_chars: 8000}   # m8 2026-10-27: text = current | skillret (name | description | body, body cut at skillret_body_chars); instruction = coding | skillret query prefix, keep the pair together. SkillRet dev/test dense NDCG@10 0.580/0.787 (current) -> 0.757/0.812 (skillret); changing text re-embeds every capability on the next index. Revert = text: current, instruction: coding, ranking {0.25, 1}.
+ranking: {keyword_rrf_weight: 0, rerank_weight: 0, fusion: rrf, score_w: 0.7, rerank_by: sigmoid}   # m8 2026-10-27 with the skillret text: dense order. SkillRet dev NDCG@10 / R@5: {0,0} 0.758 / 0.713 vs {0.25, 1} 0.711 / 0.694 (p 1.6e-11); test (4,392 q) 0.811 / 0.825 vs 0.784 / 0.800 (p 8e-29). With the current text the 2026-10-21 pick {0.25, 1} stays best (dev 0.605). Score fusion and rerank_by: logit did not beat rrf / sigmoid (specs/004-flagship-adoption/results.md).
 abstain_below: null  # rerank-score floor; null = off (bge-reranker scores are uncalibrated, see CLAUDE.md)
 gate_path: models/abstain.joblib   # calibrated abstain gate from K2; used when the file exists
 gate_min_p: 0.5                    # K2 overwrites with the tuned threshold

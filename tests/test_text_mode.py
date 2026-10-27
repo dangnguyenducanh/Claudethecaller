@@ -17,8 +17,9 @@ CAP = {"id": "u:fix", "name": "fix-tests", "description": "Fix flaky tests", "su
        "triggers": ["fix the flaky test", "  ", "tests fail sometimes"], "body": "# Fix tests\n" + "b" * 20000}
 
 
-def test_current_text_is_unchanged():
+def test_current_text_is_unchanged(monkeypatch):
     # frozen: what the indexer produced before m8 (blank trigger dropped, doc cut at 1000 chars before the summary)
+    monkeypatch.setitem(cfg()["embed"], "text", "current")  # the shipped default is skillret since 2026-10-27
     want = ["fix-tests: Fix flaky tests Finds and fixes flaky tests.", "fix the flaky test", "tests fail sometimes"]
     assert texts(CAP) == texts(CAP, "current") == want
     assert texts({"name": "fix", "description": "d" * 2000, "triggers": None}) == ["fix: " + "d" * 995]
@@ -72,14 +73,15 @@ class FakeEmbedder:
 
 
 def test_build_index_fetches_bodies_only_for_skillret(monkeypatch):
+    monkeypatch.setitem(cfg()["embed"], "text", "current")
     store = FakeStore()
     asyncio.run(build_index(store, FakeEmbedder()))
-    assert store.inserted == ["a: da"] and store.fetched == []  # default mode: no extra query
+    assert store.inserted == ["a: da"] and store.fetched == []  # current mode: no extra query
     store = FakeStore()
     monkeypatch.setitem(cfg()["embed"], "text", "skillret")
     monkeypatch.setitem(cfg()["embed"], "skillret_body_chars", 50)
     asyncio.run(build_index(store, FakeEmbedder()))
-    assert store.fetched == [(50,)] and store.inserted == ["a | da | " + "B" * 50]
+    assert store.fetched == [(50, ["s:a"])] and store.inserted == ["a | da | " + "B" * 50]
 
 
 def test_instruction_strings():
@@ -148,16 +150,22 @@ def test_bare_off_is_off(tmp_path, monkeypatch):  # YAML reads an unquoted `off`
 
 
 def test_catalog_bodies_only_in_skillret_mode(monkeypatch):
-    """enrich.dedup and build_index rebuild the stored vector text from this: default fetches nothing, skillret fetches the cut body."""
+    """enrich.dedup and build_index rebuild the stored vector text from this: default fetches nothing, skillret fetches the
+    cut body, 200 ids per statement."""
     from ctc.ingestion.indexer import catalog_bodies
 
     class FakeStore:
+        def __init__(self):
+            self.catalog, self.calls = {f"u:{i}": {} for i in range(450)}, []
+
         async def fetch(self, sql, args):
-            self.args = args
-            return [{"id": "u:fix", "body": "short"}]
+            self.calls.append(args)
+            return [{"id": i, "body": "b-" + i} for i in args[1]]
 
     store = FakeStore()
-    assert asyncio.run(catalog_bodies(store)) == {} and not hasattr(store, "args")  # current: no query at all
+    monkeypatch.setitem(cfg()["embed"], "text", "current")
+    assert asyncio.run(catalog_bodies(store)) == {} and not store.calls  # current: no query at all
     monkeypatch.setitem(cfg()["embed"], "text", "skillret")
     monkeypatch.setitem(cfg()["embed"], "skillret_body_chars", 123)
-    assert asyncio.run(catalog_bodies(store)) == {"u:fix": "short"} and store.args == (123,)
+    got = asyncio.run(catalog_bodies(store))
+    assert len(got) == 450 and got["u:7"] == "b-u:7" and [len(a[1]) for a in store.calls] == [200, 200, 50] and all(a[0] == 123 for a in store.calls)
