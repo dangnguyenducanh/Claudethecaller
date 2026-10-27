@@ -456,7 +456,7 @@ async def ranking_test(limit: int | None = None) -> None:
 
 async def ablate(split: str, specs: list[str], limit: int | None = None) -> None:
     """The same queries through several named variants in ONE process, so every pair gets a paired test (ranx.compare).
-    A variant is `name=key:val,key:val` with keys text (current|skillret), body (chars), fusion (rrf|score), w (score_w), by (rerank_by: sigmoid|logit);
+    A variant is `name=key:val,key:val` with keys text (current|skillret), body (chars), fusion (rrf|score), w (score_w), by (rerank_by: sigmoid|logit), kw / rw (keyword_rrf_weight / rerank_weight);
     keys it leaves out keep the config. dev = the SkillRet train sample (sr_dev) against the train schema; test = the
     4,392 test queries. Report only: nothing is written to config. Needs the variants' schemas indexed beforehand."""
     base_embed, base_ranking, c = dict(cfg()["embed"]), dict(cfg()["ranking"]), cfg()
@@ -473,6 +473,9 @@ async def ablate(split: str, specs: list[str], limit: int | None = None) -> None
         set_fusion(opts.get("fusion"), float(opts["w"]) if "w" in opts else None)
         if "by" in opts:
             cfg()["ranking"]["rerank_by"] = opts["by"]
+        for key, field in (("kw", "keyword_rrf_weight"), ("rw", "rerank_weight")):
+            if key in opts:
+                cfg()["ranking"][field] = float(opts[key])
         embedder, reranker, (store,) = await opened(sr_schema("train" if split == "dev" else "test"))
         try:
             qvs, _ = await embed_all(embedder, [q for _, q, _ in items])
