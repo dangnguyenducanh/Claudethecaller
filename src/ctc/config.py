@@ -26,10 +26,11 @@ _ENV = {
 
 # m8 knobs: the defaults are the behaviour before they existed, so an older config file still loads
 _DEFAULTS = {"embed": {"text": "current", "instruction": "coding", "skillret_body_chars": 8000},
-             "ranking": {"fusion": "rrf", "score_w": 0.7},
+             "ranking": {"fusion": "rrf", "score_w": 0.7, "rerank_by": "sigmoid"},
              "gate": {"kind": "off", "margin_ratio": 1.5, "min_p": 0.5}}
 _ALLOWED = {("embed", "text"): ("current", "skillret"), ("embed", "instruction"): ("coding", "skillret"),
-            ("ranking", "fusion"): ("rrf", "score"), ("gate", "kind"): ("off", "margin", "platt", "isotonic", "lr")}
+            ("ranking", "fusion"): ("rrf", "score"), ("ranking", "rerank_by"): ("sigmoid", "logit"),
+            ("gate", "kind"): ("off", "margin", "platt", "isotonic", "lr")}
 
 
 @cache

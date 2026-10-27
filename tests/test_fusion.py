@@ -174,3 +174,15 @@ def test_rerank_stages():
         for h in run(ranking).considered:
             logit = LOGITS[h.cap_id.split(":")[-1]]
             assert h.stages["rerank"] == round(sigmoid(logit), 4) and h.stages["rerank_logit"] == logit
+
+
+def test_rerank_by_logit_breaks_the_rounding_ties(monkeypatch):
+    """stages['rerank'] is the sigmoid rounded to 4 decimals: logits -12 and -13 both read 0.0 and keep the first-stage order;
+    rerank_by: logit orders them by the logit. Default (sigmoid) is the pre-m8 behaviour."""
+    monkeypatch.setitem(LOGITS, "a", -13.0)
+    monkeypatch.setitem(LOGITS, "b", -12.0)
+    heavy = {"keyword_rrf_weight": 0, "rerank_weight": 1000}  # the rerank order decides
+    pos = lambda res, c: [h.cap_id for h in res.considered].index(c)
+    default, by_logit = run(heavy, rerank_top=9), run({**heavy, "rerank_by": "logit"}, rerank_top=9)
+    assert pos(default, "user:a") < pos(default, "user:b")  # tie at 0.0: dense order wins (a is dense rank 1)
+    assert pos(by_logit, "user:b") < pos(by_logit, "user:a")  # the logit separates them

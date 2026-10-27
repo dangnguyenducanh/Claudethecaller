@@ -126,7 +126,8 @@ async def search(q: str, ctx: Ctx, qv: np.ndarray | None = None, k: int = 5, dep
         # score ~0.001-0.04), so it only votes with its ORDER. Keywords never vote in the final order (common words
         # like "review"/"test" are noisy); the final order is weighted RRF over dense rank and rerank rank.
         # ponytail: rerank runs even at rerank_weight 0, since bundle reasons and agent_min_rerank read stages["rerank"].
-        rerank_order = [h.cap_id for h in sorted(top, key=lambda h: -h.stages["rerank"])]
+        by = "rerank_logit" if rk.get("rerank_by") == "logit" else "rerank"  # the sigmoid is rounded to 4 decimals: logits below ~-9.9 tie at 0.0
+        rerank_order = [h.cap_id for h in sorted(top, key=lambda h: -h.stages[by])]
         # first-stage order: dense rank; under score fusion `top` is already in fused order and that replaces dense rank.
         first_order = [h.cap_id for h in top] if score_fusion else [h.cap_id for h in sorted(top, key=lambda h: h.stages["dense_rank"] or 10**6)]
         final = rrf([first_order, rerank_order], weights=[1, rk["rerank_weight"]])
