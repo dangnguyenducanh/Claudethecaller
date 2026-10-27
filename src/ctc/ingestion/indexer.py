@@ -20,7 +20,8 @@ def texts(cap: dict, mode: str | None = None) -> list[str]:
     e = cfg()["embed"]
     if (mode or e["text"]) == "skillret":
         body = (cap.get("body") or "")[: e["skillret_body_chars"]]
-        return [f"{cap['name']} | {cap['description']} | {body}" if body else f"{cap['name']} | {cap['description']}"]
+        head = f"{cap['name']} | {cap['description']}"[:4000]  # SkillRet's longest is 2,487; TEI answers 413 above 32k tokens and one bad input fails the whole index pass
+        return [f"{head} | {body}" if body else head]
     doc =f"{cap['name']}: {cap['description']}"[:1000] + (f" {cap['summary']}" if cap.get("summary") else "")
     return [doc, *(t for t in cap.get("triggers") or [] if t.strip())]  # TEI rejects a whole batch with one empty input
 

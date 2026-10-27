@@ -33,8 +33,9 @@ _L1_MAX_S = 60.0
 
 # Sliding-window rate limit: one atomic call. KEYS[1] = rl:{user}, ARGV = window seconds, unique member suffix.
 # SPDX-License-Identifier: Apache-2.0
-# Adapted from IBM/mcp-context-forge mcpgateway/middleware/rate_limit_middleware.py L51-L73:
-# https://github.com/IBM/mcp-context-forge/blob/85dabf0beb75d05f8ff230fb823f7fe60aa1871a/mcpgateway/middleware/rate_limit_middleware.py#L51-L73
+# Copyright contributors to the MCP-CONTEXT-FORGE project
+# Adapted from IBM/mcp-context-forge mcpgateway/middleware/rate_limit_middleware.py L54-L70:
+# https://github.com/IBM/mcp-context-forge/blob/85dabf0beb75d05f8ff230fb823f7fe60aa1871a/mcpgateway/middleware/rate_limit_middleware.py#L54-L70
 # changed: Redis TIME, unique member (the original takes the clock from the caller); always adds and returns ZCARD.
 # See THIRD_PARTY_NOTICES.md. Needs Redis >= 5 (TIME before a write is allowed in a script).
 _RATE_LUA = """

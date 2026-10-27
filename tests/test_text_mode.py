@@ -169,3 +169,10 @@ def test_catalog_bodies_only_in_skillret_mode(monkeypatch):
     monkeypatch.setitem(cfg()["embed"], "skillret_body_chars", 123)
     got = asyncio.run(catalog_bodies(store))
     assert len(got) == 450 and got["u:7"] == "b-u:7" and [len(a[1]) for a in store.calls] == [200, 200, 50] and all(a[0] == 123 for a in store.calls)
+
+
+def test_skillret_text_cuts_a_huge_description():
+    """An untrusted project can ship a 200 KB description; one oversized input makes TEI reject the whole index batch."""
+    cap = {**CAP, "description": "d" * 200_000}
+    (t,) = texts(cap, "skillret")
+    assert len(t) <= 4000 + len(" | ") + cfg()["embed"]["skillret_body_chars"]

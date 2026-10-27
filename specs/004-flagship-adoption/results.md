@@ -7,7 +7,7 @@ Run 2026-10-27 on branch `m8-flagship-adoption`. Every measurement used the scra
 | Ticket | Change | Default after m8 | Evidence |
 |---|---|---|---|
 | M8-1 | `embed.text` (`current` \| `skillret`) and `embed.instruction` (`coding` \| `skillret`); `catalog_bodies()` fetches bodies 200 ids per statement | **`skillret` / `skillret`** (flipped) | dev and test below |
-| M8-2 | `Reranker` asks TEI for `raw_scores`, applies the sigmoid itself; `stages["rerank_logit"]`; `ranking.rerank_by` | `sigmoid` (unchanged) | live parity check: `sigmoid(raw)` equals the old score to ~1e-11 on 4 pairs; dev: `by: logit` no better (p 0.88 / 0.19) |
+| M8-2 | `Reranker` asks TEI for `raw_scores`, applies the sigmoid itself; `stages["rerank_logit"]`; `ranking.rerank_by` | `sigmoid` (unchanged) | live parity check: `sigmoid(raw)` matches the old score to between 3e-9 and 1.5e-4 depending on the call (TEI fp16 is not deterministic between calls, 4 pairs); dev: `by: logit` no better (p 0.88 / 0.19) |
 | M8-3 | `ranking.fusion: score` beside `rrf` | `rrf` (unchanged) | dev: worse or equal at every `score_w` |
 | M8-4 | `ranx.compare` p-values in `ranking-test`; new `ablate` command (variants in one process, paired tests) | n/a | used for every number here |
 | M8-5 | gate candidates `margin`, `platt`, `isotonic`, `lr` in `tune` | gate **off** (unchanged) | SC-003 not met, below |
@@ -28,7 +28,7 @@ Dev (500 train queries against the train skills), paired Student's t:
 | `skillret` text, ranking `{0.25, 1}` | 0.7576 | 0.7110 | 0.694 |
 | `skillret` text, ranking `{0, 0}` (dense order) | 0.7576 | **0.7576** | **0.713** |
 
-`current` → `skillret` (dense): +0.178, p = 2.7e-43. Best weights per text on a 24-variant sweep: `current` keeps `{0.25, 1}`; `skillret` prefers `{0, 0}` over `{0.25, 1}` by +0.047 NDCG@10, p = 1.6e-11.
+`current` → `skillret` (dense): +0.178, p = 2.6e-43. Best weights per text on a 24-variant sweep: `current` keeps `{0.25, 1}`; `skillret` prefers `{0, 0}` over `{0.25, 1}` by +0.047 NDCG@10, p = 1.6e-11.
 
 Test (4,392 queries, run once):
 
@@ -65,6 +65,22 @@ Per the rule the gate stays **off**. The `lr` result is a large change from the 
 ## Review (CLAUDE.md /2: one reviewer, critical/high only) and fixes
 
 Two high findings, both on the live-flip path, both fixed (`ce28e91`): `emb:` keys and `router_version()` now follow the instruction and the `embed`/`gate` config; `enrich.dedup` rebuilds the stored `skillret` text with the body (via `catalog_bodies`). The reviewer's non-blocking notes that were acted on: report header now has `tei_reranker_tag` and `git_sha`; reports no longer crash on a missing `data/reports`; `tune` and `ranking --fusion score` no longer rewrite config. The final review of the whole branch is in the last section.
+
+## Final review (one reviewer, read-only): ship, no critical or high defect
+
+Every number in this file and in the two CLAUDE.md Decisions lines was re-derived from `data/reports/*.json` and matched (one cosmetic p-value, corrected above). Tests 97 passed / 13 skipped, ruff clean at review time. It rated nine items medium or low. Fixed in this branch: the name + description cap in `skillret` mode (4,000 chars; SkillRet's longest is 2,487, so no measured text changes) and the upstream copyright line and exact line range in `cache.py`. The rest are open and listed here so the flip is made with eyes open:
+
+| # | Sev | Item | What to do |
+|---|---|---|---|
+| 1 | medium | `topic_shift_below: 0.55` (`config/retrieval.yaml`, `memory/session.py`) was set under the `coding` prefix. With the `skillret` prefix, same-intent cosines drop (171 same-gold SkillRet pairs: mean 0.655 → 0.513; share below 0.55: 23% → 54%), so follow-up prompts clear the session vector about twice as often | re-tune (about 0.40 by this proxy) on real turns once H1 data exists; session-blend benefit is unmeasured |
+| 2 | medium | `models/difficulty.joblib` (A2) was trained on `coding`-prefix query vectors; `decide()` now feeds it `skillret` vectors (cosine between the two vectors of one prompt: 0.87). The file is not in this checkout, so impact is unmeasured | rerun `scripts/train_difficulty.py` after the flip |
+| 3 | low | `ctc.ai.enrich --selfcheck` asserts `1 + len(triggers)` vectors per cap, which cannot hold under `skillret` (one vector per cap); not in CI | update the assertion or run the self-check with `embed.text: current` |
+| 4 | low | `LocalStore` (no-DB mode, `storage/local.py`) still embeds `name: description` docs but queries with the `skillret` prefix | add body-aware docs there or pin it to the `coding` prefix |
+| 5 | low | after a daemon restart the startup `index` job re-embeds the library; bundles computed in that window are semantic-cached for 24 h (`library_version` does not change on re-embed), and each insert batch marks vectors dirty so prompts in the window reload them | flush the `sem:`/`bundle:` Redis keys after the re-embed finishes (cache only, rebuildable; your yes); running `ctc.ai.enrich --dedup-only` before the re-index dissolves clusters, so index first |
+| 6 | low | `ablate` `body:N` reads the single `_sk` schema (indexed at 8,000) but the header reports N; `ranking` (rrf write path) drops `rerank_by` from the yaml line (the default fills it); the module docstring line 3 still says `index-skillret` writes `ctc_skillret` | re-index per cap before comparing caps; fix the docstring when next in that file |
+| 7 | low | project vector cache is keyed by model, not instruction (cosine old vs new for this repo's profile 0.967) | negligible; refreshes when CLAUDE.md or the manifests change |
+
+Not verified by the reviewer: the limiter Lua on a real Redis, live Supabase behaviour of the one-statement stale-vector delete (~6.3k rows) and of `dedup`'s large text parameter through the pooler, and the real re-embed time of the live library.
 
 ## REA (read-only, static)
 
