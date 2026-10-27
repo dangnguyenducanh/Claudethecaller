@@ -62,7 +62,8 @@ async def search(q: str, ctx: Ctx, qv: np.ndarray | None = None, k: int = 5, dep
                  rerank_top: int = 20, abstain_below: float | None = None, ranking: dict | None = None) -> SearchResult:
     """`ranking` (default cfg()["ranking"]): keyword_rrf_weight = keyword rank's weight in the RRF that picks the
     rerank_top pool; rerank_weight = rerank rank's weight next to dense rank (weight 1) in the final order.
-    {0, 0} = dense order; {1, 1} = the pre-2026-10-21 order."""
+    {0, 0} = dense order; {1, 1} = the pre-2026-10-21 order. `fusion` ("rrf" | "score", default rrf) picks how dense and
+    keyword candidates are first ordered; `score_w` (default 0.7) is the cosine's weight under "score" (M8-3)."""
     rk = ranking or cfg()["ranking"]
     ms: dict[str, float] = {}
     t = time.perf_counter()
@@ -87,10 +88,21 @@ async def search(q: str, ctx: Ctx, qv: np.ndarray | None = None, k: int = 5, dep
     hits: list[Hit] = []
     dropped: list[tuple[Hit, str]] = []
     clusters: set[str] = set()
-    for cap_id, score in sorted(rrf([list(dense_rank), list(sparse_rank)], weights=[1, rk["keyword_rrf_weight"]]).items(), key=lambda x: -x[1]):
+    rrf_score = rrf([list(dense_rank), list(sparse_rank)], weights=[1, rk["keyword_rrf_weight"]])
+    pool = rrf_score
+    score_fusion = rk.get("fusion", "rrf") == "score"
+    if score_fusion:  # fuse on scores, not ranks: (1 - w) * keyword + w * cosine, both in [0, 1]; the stages keep their rrf too
+        # ponytail: a keyword-only hit has no cosine (dense returns just the top `depth`), so it scores (1 - w) * keyword alone.
+        w, lex = rk.get("score_w", 0.7), dict(sparse)
+        lex_max = max(lex.values(), default=0.0)  # ts_rank_cd of the best keyword hit; no keyword arm -> fused = w * cosine
+        pool = {c: (1 - w) * (lex.get(c, 0.0) / lex_max if lex_max > 0 else 0.0) + w * min(max(dense_score.get(c, 0.0), 0.0), 1.0)
+                for c in rrf_score}
+    for cap_id, score in sorted(pool.items(), key=lambda x: -x[1]):
         cap = ctx.store.catalog.get(cap_id)
         hit = Hit(cap_id, score, {"dense": round(dense_score[cap_id], 4) if cap_id in dense_score else None,
-                                  "dense_rank": dense_rank.get(cap_id), "sparse_rank": sparse_rank.get(cap_id), "rrf": round(score, 5)})
+                                  "dense_rank": dense_rank.get(cap_id), "sparse_rank": sparse_rank.get(cap_id), "rrf": round(rrf_score[cap_id], 5)})
+        if score_fusion:
+            hit.stages["fused"] = round(score, 4)
         if cap is None:  # in the DB, not in this worker's catalog: another process indexed it and the 'lib' inval is pending
             dropped.append((hit, "not in this worker's catalog yet"))
         elif overrides.get(cap_id) in ("block", "disable"):
@@ -108,15 +120,16 @@ async def search(q: str, ctx: Ctx, qv: np.ndarray | None = None, k: int = 5, dep
     top = hits[:rerank_top]
     if top:
         docs = [f"{ctx.store.get(h.cap_id)['name']}: {ctx.store.get(h.cap_id)['description']}"[:1000] for h in top]
-        for h, s in zip(top, await ctx.reranker.score(q, docs)):
-            h.stages["rerank"] = round(s, 4)
+        for h, (s, logit) in zip(top, await ctx.reranker.score_with_logits(q, docs)):
+            h.stages["rerank"], h.stages["rerank_logit"] = round(s, 4), round(logit, 4)  # rerank = sigmoid: agent_min_rerank and abstain_below read it
         # bge-reranker's absolute scores carry no signal for tool matching (measured: right and junk matches both
         # score ~0.001-0.04), so it only votes with its ORDER. Keywords never vote in the final order (common words
         # like "review"/"test" are noisy); the final order is weighted RRF over dense rank and rerank rank.
         # ponytail: rerank runs even at rerank_weight 0, since bundle reasons and agent_min_rerank read stages["rerank"].
         rerank_order = [h.cap_id for h in sorted(top, key=lambda h: -h.stages["rerank"])]
-        dense_order = [h.cap_id for h in sorted(top, key=lambda h: h.stages["dense_rank"] or 10**6)]
-        final = rrf([dense_order, rerank_order], weights=[1, rk["rerank_weight"]])
+        # first-stage order: dense rank; under score fusion `top` is already in fused order and that replaces dense rank.
+        first_order = [h.cap_id for h in top] if score_fusion else [h.cap_id for h in sorted(top, key=lambda h: h.stages["dense_rank"] or 10**6)]
+        final = rrf([first_order, rerank_order], weights=[1, rk["rerank_weight"]])
         for h in top:
             h.score = h.stages["final"] = round(final[h.cap_id], 5)
         top.sort(key=lambda h: -h.score)
