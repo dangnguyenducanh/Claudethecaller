@@ -2,11 +2,12 @@
 
 uv run python -m evaluation.retrieval_eval index-skillret   # SkillRet test (6,006) -> ctc_skillret, train (10,123) -> ctc_skillret_train
 uv run python -m evaluation.retrieval_eval index-skillret --text skillret --body-chars 8000   # name | description | body -> ctc_skillret_sk, ctc_skillret_train_sk
-uv run python -m evaluation.retrieval_eval tune             # DEV ONLY: depth x rerank_top sweep + abstain gate -> config, models/
-uv run python -m evaluation.retrieval_eval ranking          # DEV ONLY: keyword_rrf_weight x rerank_weight sweep -> config `ranking`
+uv run python -m evaluation.retrieval_eval tune [limit]     # abstain gate candidates (off, margin, platt, isotonic, lr): fit on dev, report on test -> data/reports/gate-<date>.json
+uv run python -m evaluation.retrieval_eval ranking [--fusion score] [--no-write]   # DEV ONLY: keyword_rrf_weight x rerank_weight sweep -> config `ranking`; --fusion score: score_w sweep, never writes the yaml
 uv run python -m evaluation.retrieval_eval ranking-test [n] # SkillRet TEST, report only: dense vs old {1, 1} vs configured ranking
 uv run python -m evaluation.retrieval_eval run [limit]      # TEST: three modes on SkillRet, own-eval, gold-none -> data/reports/
 --text current|skillret and --body-chars N work on every command (they pick the schemas and the query instruction to match).
+--fusion rrf|score and --score-w W set ranking.fusion / score_w for the whole run (so tune and ranking-test can use score fusion without editing the yaml).
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import asyncio
 import hashlib
 import json
 import re
+import subprocess
 import sys
 import time
 from datetime import date
@@ -24,7 +26,6 @@ import joblib
 import numpy as np
 from ranx import Qrels, Run, compare, evaluate
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold, cross_val_predict
 
 from ctc.config import ROOT, cfg
@@ -43,12 +44,16 @@ SKILLRET = {"test": "ctc_skillret", "train": "ctc_skillret_train"}  # train skil
 NEUTRAL = "/nonexistent/ctc-eval"  # project dir with no project capabilities and no overrides: nothing is project-filtered
 REPORTS = ROOT / "data" / "reports"
 TODAY = date.today().isoformat()
-DEPTHS, RERANK_TOPS, MAX_FT, SR_DEV_N = (25, 50, 100), (10, 20, 40), 0.10, 500
+MAX_FT, SR_DEV_N = 0.10, 500
 TEI_MAX_BATCH = 32  # TEI max_client_batch_size: the shipped Reranker sends one request, so rerank_top > 32 gets HTTP 413
 KW_WEIGHTS, RERANK_WEIGHTS = (0, 0.25, 0.5, 1), (0, 0.25, 0.5, 1, 2)
 OLD_RANKING = {"keyword_rrf_weight": 1, "rerank_weight": 1}
+SCORE_WS = (0.5, 0.6, 0.7, 0.8, 0.9)  # `ranking --fusion score`: the cosine's weight in (1 - w) * keyword + w * cosine
+MARGIN_RATIOS = [round(1 + 0.05 * i, 2) for i in range(41)]  # tune: 1.0 (always fires) .. 3.0
+LANGS = ("ascii", "other")
+SC003_SUGGEST = 0.5  # SC-003: a gate must suggest on >= 50% of SkillRet test queries at <= MAX_FT false-trigger on MetaTool test
 CMP_METRICS = ["ndcg@10", "recall@5"]
-MIN_AUC = 0.7  # tune saves the gate only at or above this out-of-fold AUC (2026-10-21: 0.55 = no signal, rejected)
+MIN_AUC = 0.7  # the pre-m8 tune saved its gate only at or above this out-of-fold AUC; report() still renders such a tune-<date>.json
 
 
 def is_test(qid: str) -> bool:  # same rule as the labeler's session split, for MetaTool rows
@@ -65,16 +70,51 @@ def set_text_mode(text: str | None, body_chars: int | None) -> None:
         e["skillret_body_chars"] = body_chars
 
 
+def set_fusion(fusion: str | None, score_w: float | None) -> None:
+    """--fusion / --score-w for the whole process, like set_text_mode. ponytail: mutates the config cache."""
+    r = cfg()["ranking"]
+    if fusion:
+        r["fusion"] = fusion
+    if score_w is not None:
+        r["score_w"] = score_w
+
+
 def sr_schema(split: str) -> str:
     """The skillret text mode lives beside the current one (`_sk`), never in the live `ctc` schema."""
     return SKILLRET[split] + ("_sk" if cfg()["embed"]["text"] == "skillret" else "")
+
+
+def reranker_tag() -> str:
+    """The TEI image tag of the tei-reranker service in docker-compose.yml ('' when unreadable)."""
+    try:
+        m = re.search(r"tei-reranker:\s*\n\s*image:\s*\S+:([\w.\-]+)", (ROOT / "docker-compose.yml").read_text())
+    except OSError:
+        return ""
+    return m[1] if m else ""
+
+
+def commit_sha() -> str:
+    try:
+        return subprocess.run(["git", "rev-parse", "--short", "HEAD"], check=False, cwd=ROOT, capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
 
 
 def header() -> dict:
     """Report header (contracts/knobs-and-eval.md): what this run's numbers were produced with."""
     e, r = cfg()["embed"], cfg()["ranking"]
     return {"text_mode": e["text"], "instruction": e["instruction"], "body_chars": e["skillret_body_chars"] if e["text"] == "skillret" else None,
-            "fusion": r["fusion"], "score_w": r["score_w"]}
+            "fusion": r["fusion"], "score_w": r["score_w"], "tei_reranker_tag": reranker_tag(), "git_sha": commit_sha()}
+
+
+def save(name: str, data: dict) -> None:
+    REPORTS.mkdir(parents=True, exist_ok=True)  # a fresh checkout has no data/reports
+    (REPORTS / name).write_text(json.dumps(data, indent=1))
+
+
+def lang(q: str) -> str:
+    """ponytail: script test only (ASCII letters vs anything else, so Vietnamese with diacritics and CJK are both "other")."""
+    return "ascii" if all(ch.isascii() for ch in q if ch.isalpha()) else "other"
 
 
 def own_sets(test: bool) -> tuple[list[tuple], list[tuple]]:
@@ -139,7 +179,7 @@ async def run_set(ctx: Ctx, items: list[tuple], qvs: np.ndarray, depth: int, rer
             row["dense"] = [c for c, _ in dense]
             row["hybrid"] = [c for c, _ in sorted(rrf([row["dense"], [c for c, _ in sparse]]).items(), key=lambda x: -x[1])]
         res = await search(q, ctx, qv=qv, k=cfg()["k"], depth=depth, rerank_top=rerank_top, abstain_below=cfg()["abstain_below"], ranking=ranking)
-        row.update(full=[h.cap_id for h in res.considered], abstained=res.abstained, p=res.p, x=gate.features(res, q), ms=res.ms)
+        row.update(full=[h.cap_id for h in res.considered], abstained=res.abstained, p=res.p, x=gate.features(res, q), s=gate.first_scores(res), ms=res.ms)
         out.append(row)
     return out
 
@@ -199,19 +239,6 @@ def latency(rows: list[dict]) -> dict[str, list[float]]:
     return {s: [round(float(np.percentile(v, 50)), 1), round(float(np.percentile(v, 95)), 1)] for s, v in stages.items()}
 
 
-def write_config(depth: int, rerank_top: int, threshold: float) -> None:
-    """Winners into config/retrieval.yaml; only the value is replaced, comments stay."""
-    path = ROOT / "config" / "retrieval.yaml"
-    text = path.read_text()
-    for key, val in (("depth", depth), ("rerank_top", rerank_top), ("gate_min_p", threshold)):
-        def put(m: re.Match, val: str = str(val)) -> str:  # keep a trailing comment in its column
-            return m[1] + val + (" " * max(1, len(m[2]) + len(m[3]) - len(val)) if m[3] else "")
-        text, n = re.subn(rf"^({key}:\s*)([^\s#]+)([ \t]*)", put, text, count=1, flags=re.MULTILINE)
-        assert n == 1, f"{key} not in {path}"
-    path.write_text(text)
-    cfg.cache_clear()
-
-
 async def opened(*schemas: str) -> tuple[Embedder, Reranker, list[Store]]:
     c = cfg()
     stores = [await Store.open(c["database_url"], s) for s in schemas]
@@ -241,76 +268,117 @@ async def index_skillret() -> None:
         await closed(embedder, reranker, stores)
 
 
-async def tune() -> None:
-    """K2 on dev rows only: sweep depth x rerank_top (SkillRet train sample first, own dev second), then fit the abstain gate
-    (positives SkillRet dev + own dev with gold, negatives MetaTool dev + own gold-none; PLAN.md "Benchmark priority")."""
-    embedder, reranker, (lib, sr) = await opened("ctc", sr_schema("train"))
-    memo = MemoReranker(reranker)
-    own_ctx, sr_ctx = Ctx(lib, embedder, memo, NEUTRAL), Ctx(sr, embedder, memo, NEUTRAL)
+def threshold_at_ft(p: np.ndarray, y: np.ndarray, cap: float = MAX_FT) -> float | None:
+    """Lowest out-of-fold p whose false-trigger rate on the negatives (y == 0) is <= cap: the lowest threshold keeps the most
+    suggestions. None = no p meets the cap, so the gate never fires."""
+    neg = p[y == 0]
+    return next((float(t) for t in np.sort(p) if np.mean(neg >= t) <= cap), None)
+
+
+def by_lang(fire: np.ndarray, d: dict, label: int) -> dict[str, list[int]]:
+    """{lang: [fired, rows]} among the rows with this label."""
+    out = {}
+    for lg in LANGS:
+        m = (d["y"] == label) & (d["lang"] == lg)
+        out[lg] = [int(fire[m].sum()), int(m.sum())]
+    return out
+
+
+def gate_candidates(dev: dict, test: dict) -> tuple[list[dict], dict]:
+    """The abstain candidates off, margin, platt, isotonic, lr: everything is fitted and thresholded on `dev`; `test` is only
+    scored with the dev threshold. A split is {"top1", "top2" (first-stage scores: fused, else dense), "x" (gate.FEATURES rows),
+    "y" (1 = SkillRet query, some skill should fire; 0 = MetaTool no-tool prompt), "lang"}. Returns (one row per candidate in the
+    contracts/knobs-and-eval.md "Gate section" shape + meets_sc003 + fired/rows per language on test, {kind: (model, threshold)}).
+    ECE is out-of-fold on dev; the threshold is the lowest with false-trigger <= MAX_FT on the dev negatives (out-of-fold p for
+    the fitted gates, so it is not picked on rows the model memorized)."""
+    y, ty = dev["y"], test["y"]
+    cv = StratifiedKFold(5, shuffle=True, random_state=0)
+    out, models = [], {}
+
+    def add(kind: str, thr: float | None, ft_dev: float | None, fire: np.ndarray, **extra) -> None:
+        sr, ft = float(fire[ty == 1].mean()), float(fire[ty == 0].mean())
+        out.append({"kind": kind, "ece_before": None, "ece_after": None, "threshold": thr,
+                    "false_trigger_dev": None if ft_dev is None else round(ft_dev, 4), "suggest_rate_test": round(sr, 4), "false_trigger_test": round(ft, 4),
+                    **extra, "meets_sc003": sr >= SC003_SUGGEST and ft <= MAX_FT,
+                    "by_lang_test": {"skillret": by_lang(fire, test, 1), "metatool": by_lang(fire, test, 0)}})
+
+    def p_gate(kind: str, p_cv: np.ndarray, p_test: np.ndarray, **extra) -> float | None:
+        """A gate that fires at P >= threshold: out-of-fold dev P `p_cv` picks the threshold, `p_test` is P on the test rows."""
+        thr = threshold_at_ft(p_cv, y)
+        add(kind, thr, None if thr is None else float(np.mean(p_cv[y == 0] >= thr)),
+            np.zeros(len(ty), bool) if thr is None else p_test >= thr, ece_after=round(gate.ece(p_cv, y), 4), **extra)
+        return thr
+
+    add("off", None, 1.0, np.ones(len(ty), bool))  # abstain off: every prompt gets a suggestion
+    ratio = next((r for r in MARGIN_RATIOS if gate.margin(dev["top1"], dev["top2"], r)[y == 0].mean() <= MAX_FT), None)
+    add("margin", ratio, None if ratio is None else float(gate.margin(dev["top1"], dev["top2"], ratio)[y == 0].mean()),
+        np.zeros(len(ty), bool) if ratio is None else gate.margin(test["top1"], test["top2"], ratio))
+    for kind, fit in (("platt", gate.fit_platt), ("isotonic", gate.fit_isotonic)):
+        p_cv = np.zeros(len(y))
+        for tr, va in cv.split(dev["top1"], y):
+            p_cv[va] = gate.calibrate(fit(dev["top1"][tr], y[tr]), dev["top1"][va])
+        model = fit(dev["top1"], y)
+        models[kind] = (model, p_gate(kind, p_cv, gate.calibrate(model, test["top1"]), ece_before=round(gate.ece(dev["top1"], y), 4)))
+    # the pre-m8 gate: seven search-stage features, class_weight=balanced, raw feature units (retrieval/gate.py FEATURES)
+    lr = LogisticRegression(class_weight="balanced", max_iter=5000)
+    p_cv = cross_val_predict(lr, dev["x"], y, cv=cv, method="predict_proba")[:, 1]
+    lr.fit(dev["x"], y)
+    models["lr"] = (lr, p_gate("lr", p_cv, lr.predict_proba(test["x"])[:, 1]))
+    return out, models
+
+
+async def tune(limit: int | None = None) -> None:
+    """K2 abstain-gate candidates on SkillRet (positives) vs MetaTool no-tool prompts (negatives), both searched against the
+    same SkillRet catalog (dev: train skills, sample of SR_DEV_N queries; test: test skills, all queries) at the configured
+    depth / rerank_top, so catalog shifts cannot leak into the gate. MetaTool dev/test = is_test(id), as in own_sets. Fit and
+    threshold on dev; test is scored once. Writes data/reports/gate-<date>.json and models/gate-<kind>-<date>.joblib, never
+    models/abstain.joblib or config. `limit` (>= 50) = smoke run on the first N rows of every set, writes nothing."""
+    c = cfg()
+    embedder, reranker, (sr_train, sr_test) = await opened(sr_schema("train"), sr_schema("test"))
     try:
-        assert sr.catalog, "run index-skillret first"
-        pos, neg = own_sets(test=False)
-        sr_items = sr_dev()
-        qv_pos, qv_neg, qv_sr = [(await embed_all(embedder, [q for _, q, _ in items]))[0] for items in (pos, neg, sr_items)]
-        sweep = []
-        for depth in DEPTHS:
-            for rt in RERANK_TOPS:
-                rows = await run_set(own_ctx, pos, qv_pos, depth, rt, modes=False)
-                sr_rows = await run_set(sr_ctx, sr_items, qv_sr, depth, rt, modes=False)
-                own_s, sr_s = scores(rows, "full"), scores(sr_rows, "full")
-                sweep.append({"depth": depth, "rerank_top": rt, "own_dev": own_s, "skillret_dev": sr_s, "eligible": rt <= TEI_MAX_BATCH, "rows": rows, "sr_rows": sr_rows})
-                print(f"depth {depth:3} rerank_top {rt:2}: own dev R@5 {own_s['recall@5']:.3f}, SkillRet dev R@5 {sr_s['recall@5']:.3f}")
-        # best SkillRet dev Recall@5, then own dev (3 decimals); ties go to the cheaper config (sweep order is ascending cost)
-        win = max((s for s in sweep if s["eligible"]), key=lambda s: (round(s["skillret_dev"]["recall@5"], 3), round(s["own_dev"]["recall@5"], 3)))
-        sr_pos, own_pos = win.pop("sr_rows"), win.pop("rows")
-        pos_rows = sr_pos + own_pos
-        neg_rows = await run_set(own_ctx, neg, qv_neg, win["depth"], win["rerank_top"], modes=False)
-        for s in sweep:
-            for k in ("rows", "sr_rows"):
-                s.pop(k, None)
-
-        # abstain gate: positives = SkillRet dev + own dev rows with gold, negatives = own dev gold-none + MetaTool dev half
-        # ponytail: SkillRet positives are scored against the SkillRet catalog, negatives against ours, so catalog-level
-        # feature shifts can leak into the gate; score MetaTool negatives against SkillRet too if the AUC looks too good
-        X = np.stack([r["x"] for r in pos_rows + neg_rows])
-        y = np.array([1] * len(pos_rows) + [0] * len(neg_rows))
-        model = LogisticRegression(class_weight="balanced", max_iter=5000)
-        # threshold from out-of-fold probabilities, so it is not picked on the rows the model memorized
-        p_cv = cross_val_predict(model, X, y, cv=StratifiedKFold(5, shuffle=True, random_state=0), method="predict_proba")[:, 1]
-        model.fit(X, y)
-        r5 = np.array([recall5(r) for r in pos_rows])
-        # Recall@5 only falls as the threshold rises, so the lowest threshold within the false-trigger cap is the best one
-        threshold = round(next(float(t) for t in np.sort(p_cv) if np.mean(p_cv[y == 0] >= t) <= MAX_FT), 4)
-
-        def at(p: np.ndarray) -> dict:
-            return {"false_trigger": round(float(np.mean(p[y == 0] >= threshold)), 4),
-                    "recall@5": round(float(np.mean(r5 * (p[y == 1] >= threshold))), 4), "fire_rate_pos": round(float(np.mean(p[y == 1] >= threshold)), 4)}
-
-        auc = round(float(roc_auc_score(y, p_cv)), 4)
-        if saved := auc >= MIN_AUC:  # the daemon uses the file as soon as it exists, so no-signal gates are never written
-            (ROOT / "models").mkdir(exist_ok=True)
-            joblib.dump({"model": model, "threshold": threshold, "features": gate.FEATURES}, ROOT / cfg()["gate_path"])
-        else:
-            print(f"WARNING: gate CV AUC {auc} < {MIN_AUC}: not saved, gate_min_p unchanged, abstain stays as it was")
-        write_config(win["depth"], win["rerank_top"], threshold if saved else cfg()["gate_min_p"])
-        result = {"sweep": sweep, "winner": {"depth": win["depth"], "rerank_top": win["rerank_top"]},
-                  "gate": {"saved": saved, "threshold": threshold, "features": gate.FEATURES, "coef": model.coef_[0].round(4).tolist(),
-                           "intercept": round(float(model.intercept_[0]), 4), "n_pos": int(y.sum()), "n_pos_skillret": len(sr_pos), "n_neg": int(len(y) - y.sum()),
-                           "n_neg_own": sum(not i.startswith("metatool:") for i, _, _ in neg), "cv": at(p_cv), "in_sample": at(model.predict_proba(X)[:, 1]),
-                           "auc_cv": auc, "mean_pos": X[y == 1].mean(0).round(4).tolist(),
-                           "mean_neg": X[y == 0].mean(0).round(4).tolist(), "recall@5_ungated": round(float(r5.mean()), 4)},
-                  "sizes": {"own_dev_gold": len(pos), "own_dev_none": sum(not i.startswith("metatool:") for i, _, _ in neg),
-                            "metatool_dev": sum(i.startswith("metatool:") for i, _, _ in neg), "skillret_dev": len(sr_items)}}
-        REPORTS.mkdir(parents=True, exist_ok=True)
-        (REPORTS / f"tune-{TODAY}.json").write_text(json.dumps(result, indent=1))
-        print(json.dumps({k: result[k] for k in ("winner", "gate", "sizes")}, indent=1))
+        assert sr_train.catalog and sr_test.catalog, "run index-skillret first"
+        _, queries, qrels = skillret("test")
+        mt = [(m["id"], m["query"], {}) for m in metatool()]
+        sets = {"dev": (sr_train, sr_dev()[:limit], [m for m in mt if not is_test(m[0])][:limit]),
+                "test": (sr_test, [(q["id"], q["query"], qrels[q["id"]]) for q in queries][:limit], [m for m in mt if is_test(m[0])][:limit])}
+        data = {}
+        for split, (store, pos, neg) in sets.items():
+            items = pos + neg
+            qvs, _ = await embed_all(embedder, [q for _, q, _ in items])
+            rows = await run_set(Ctx(store, embedder, reranker, NEUTRAL), items, qvs, c["depth"], c["rerank_top"], modes=False)
+            data[split] = {"top1": np.array([r["s"][0] for r in rows]), "top2": np.array([r["s"][1] for r in rows]), "x": np.stack([r["x"] for r in rows]),
+                           "y": np.array([1] * len(pos) + [0] * len(neg)), "lang": np.array([lang(q) for _, q, _ in items])}
+            print(f"{split}: {len(pos)} SkillRet queries, {len(neg)} MetaTool prompts")
     finally:
-        await closed(embedder, reranker, [lib, sr])
+        await closed(embedder, reranker, [sr_train, sr_test])
+    cands, models = gate_candidates(data["dev"], data["test"])
+    score = "fused" if c["ranking"]["fusion"] == "score" else "dense"
+    sizes = {f"{name}_{split}": {"n": int((d["y"] == label).sum()), **{lg: int(((d["y"] == label) & (d["lang"] == lg)).sum()) for lg in LANGS}}
+             for split, d in data.items() for name, label in (("skillret", 1), ("metatool", 0))}
+    f = lambda v, spec=".3f": "-" if v is None else format(v, spec)
+    print(f"first-stage score: {score}; depth {c['depth']} rerank_top {c['rerank_top']}; sizes {json.dumps(sizes)}")
+    for r in cands:
+        bl = r["by_lang_test"]
+        print(f"{r['kind']:9} ECE {f(r['ece_before'])} -> {f(r['ece_after'])}  threshold {f(r['threshold'], '.4f')}  false-trigger dev {f(r['false_trigger_dev'], '.1%')}  "
+              f"| test: suggest {r['suggest_rate_test']:.1%} (SkillRet)  false-trigger {r['false_trigger_test']:.1%} (MetaTool)  {'SC-003 ok' if r['meets_sc003'] else 'fails SC-003'}")
+        print("          fired/rows by language: " + "; ".join(f"{n} " + " ".join(f"{lg} {a}/{b}" for lg, (a, b) in bl[n].items()) for n in bl))
+    if limit:
+        print(f"smoke run on {limit} rows per set: nothing written")
+        return
+    save(f"gate-{TODAY}.json", {"header": header(), "score": score, "depth": c["depth"], "rerank_top": c["rerank_top"], "sizes": sizes, "candidates": cands})
+    (ROOT / "models").mkdir(exist_ok=True)
+    for kind, (model, thr) in models.items():  # lr in the shape gate.load wants; platt / isotonic are over one score, so load() rejects them (no wiring yet)
+        if thr is not None:
+            joblib.dump({"kind": kind, "model": model, "threshold": thr, "features": gate.FEATURES if kind == "lr" else [f"top1_{score}"]}, ROOT / "models" / f"gate-{kind}-{TODAY}.joblib")
+    print("wrote", REPORTS / f"gate-{TODAY}.json", "(models/abstain.joblib untouched)")
 
 
-async def tune_ranking() -> None:
+async def tune_ranking(fusion: str = "rrf", write: bool = True) -> None:
     """Final-order sweep on dev rows only (SkillRet train sample + own dev) at the configured depth / rerank_top.
-    Winner = best SkillRet dev NDCG@10, then R@5, then own dev NDCG@10 (3 decimals); ties go to the lower weights."""
+    Winner = best SkillRet dev NDCG@10, then R@5, then own dev NDCG@10 (3 decimals); ties go to the lower weights.
+    fusion "rrf": keyword_rrf_weight x rerank_weight; the winner goes into config/retrieval.yaml unless write is False.
+    fusion "score": score_w in SCORE_WS at the configured rerank_weight, next to the configured rrf order as the reference;
+    never writes the yaml (the winner is printed and saved to ranking-score-<date>.json, the config is changed by hand)."""
     c = cfg()
     embedder, reranker, (lib, sr) = await opened("ctc", sr_schema("train"))
     memo = MemoReranker(reranker)
@@ -319,33 +387,45 @@ async def tune_ranking() -> None:
         sets = {"skillret_dev": (sr, sr_dev()), "own_dev": (lib, own_sets(test=False)[0])}
         qvs = {n: (await embed_all(embedder, [q for _, q, _ in items]))[0] for n, (_, items) in sets.items()}
         ctxs = {n: Ctx(memo_candidates(store), embedder, memo, NEUTRAL) for n, (store, _) in sets.items()}
+        base = {k: c["ranking"][k] for k in ("keyword_rrf_weight", "rerank_weight")}
+        grid = ([{"keyword_rrf_weight": kw, "rerank_weight": rr} for kw in KW_WEIGHTS for rr in RERANK_WEIGHTS] if fusion == "rrf"
+                else [{**base, "fusion": "rrf"}, *({**base, "fusion": "score", "score_w": w} for w in SCORE_WS)])
+        label = lambda rk: f"score_w {rk['score_w']}" if rk.get("fusion") == "score" else f"kw {rk['keyword_rrf_weight']:4} rr {rk['rerank_weight']:4}"
         sweep, ref = [], {}
-        for kw in KW_WEIGHTS:
-            for rr in RERANK_WEIGHTS:
-                rk, s = {"keyword_rrf_weight": kw, "rerank_weight": rr}, {}
-                for n, (_, items) in sets.items():
-                    rows = await run_set(ctxs[n], items, qvs[n], c["depth"], c["rerank_top"], modes=not ref.get(n), ranking=rk)
-                    ref[n] = ref.get(n) or {m: scores(rows, m) for m in ("dense", "hybrid")}
-                    s[n] = scores(rows, "full")
-                sweep.append({"ranking": rk, **s})
-                print(f"kw {kw:4} rr {rr:4}: SkillRet dev NDCG@10 {s['skillret_dev']['ndcg@10']:.4f} R@5 {s['skillret_dev']['recall@5']:.4f}, "
-                      f"own dev NDCG@10 {s['own_dev']['ndcg@10']:.4f} R@5 {s['own_dev']['recall@5']:.4f}")
+        for rk in grid:
+            s = {}
+            for n, (_, items) in sets.items():
+                rows = await run_set(ctxs[n], items, qvs[n], c["depth"], c["rerank_top"], modes=not ref.get(n), ranking=rk)
+                ref[n] = ref.get(n) or {m: scores(rows, m) for m in ("dense", "hybrid")}
+                s[n] = scores(rows, "full")
+            sweep.append({"ranking": rk, **s})
+            print(f"{label(rk)}: SkillRet dev NDCG@10 {s['skillret_dev']['ndcg@10']:.4f} R@5 {s['skillret_dev']['recall@5']:.4f}, "
+                  f"own dev NDCG@10 {s['own_dev']['ndcg@10']:.4f} R@5 {s['own_dev']['recall@5']:.4f}")
         key = lambda s: tuple(round(s[n][m], 3) for n, m in (("skillret_dev", "ndcg@10"), ("skillret_dev", "recall@5"), ("own_dev", "ndcg@10")))
+        if fusion == "score":  # ponytail: the winner is the dev optimum, not tested against rrf; ranking-test (once, on test) does that
+            win, rrf_cfg = max((s for s in sweep if s["ranking"]["fusion"] == "score"), key=key), sweep[0]
+            f = lambda s: f"{s['skillret_dev']['ndcg@10']:.3f} / {s['skillret_dev']['recall@5']:.3f}"
+            save(f"ranking-score-{TODAY}.json", {"header": header(), "winner": win["ranking"], "rrf_configured": rrf_cfg, "reference": ref, "sweep": sweep,
+                                                 "depth": c["depth"], "rerank_top": c["rerank_top"]})
+            print(f"winner {label(win['ranking'])}: SkillRet dev NDCG@10 / R@5 {f(win)} vs configured rrf {f(rrf_cfg)}, dense-only {f({n: r['dense'] for n, r in ref.items()})}; "
+                  f"own dev NDCG@10 {win['own_dev']['ndcg@10']:.3f} vs {rrf_cfg['own_dev']['ndcg@10']:.3f}")
+            print(f"config/retrieval.yaml NOT written; to adopt, set ranking: fusion: score, score_w: {win['ranking']['score_w']}")
+            return
         win, old = max(sweep, key=key), next(s for s in sweep if s["ranking"] == OLD_RANKING)
         f = lambda s: f"{s['skillret_dev']['ndcg@10']:.3f} / {s['skillret_dev']['recall@5']:.3f}"
         note = (f"K2 ranking sweep {TODAY}, SkillRet dev ({len(sets['skillret_dev'][1])} train q) NDCG@10 / R@5: this {f(win)}, "
                 f"old {{1, 1}} {f(old)}, dense-only {f({n: r['dense'] for n, r in ref.items()})}; own dev NDCG@10 {win['own_dev']['ndcg@10']:.3f} vs old {old['own_dev']['ndcg@10']:.3f}")
         path = ROOT / "config" / "retrieval.yaml"
         rk = win["ranking"]
-        text, n = re.subn(r"^ranking:.*$", f"ranking: {{keyword_rrf_weight: {rk['keyword_rrf_weight']}, rerank_weight: {rk['rerank_weight']}, fusion: {c['ranking']['fusion']}, "
-                          f"score_w: {c['ranking']['score_w']}}}   # {note}",
-                          path.read_text(), count=1, flags=re.MULTILINE)
-        assert n == 1, f"ranking not in {path}"
-        path.write_text(text)
-        cfg.cache_clear()
-        REPORTS.mkdir(parents=True, exist_ok=True)
-        (REPORTS / f"ranking-{TODAY}.json").write_text(json.dumps({"winner": rk, "reference": ref, "sweep": sweep, "depth": c["depth"], "rerank_top": c["rerank_top"]}, indent=1))
-        print("winner", rk, "->", path)
+        if write:
+            text, n = re.subn(r"^ranking:.*$", f"ranking: {{keyword_rrf_weight: {rk['keyword_rrf_weight']}, rerank_weight: {rk['rerank_weight']}, fusion: {c['ranking']['fusion']}, "
+                              f"score_w: {c['ranking']['score_w']}}}   # {note}",
+                              path.read_text(), count=1, flags=re.MULTILINE)
+            assert n == 1, f"ranking not in {path}"
+            path.write_text(text)
+            cfg.cache_clear()
+        save(f"ranking-{TODAY}.json", {"header": header(), "winner": rk, "reference": ref, "sweep": sweep, "depth": c["depth"], "rerank_top": c["rerank_top"]})
+        print("winner", rk, "->", path if write else "(config/retrieval.yaml not written: --no-write)")
     finally:
         await closed(embedder, reranker, [lib, sr])
 
@@ -368,7 +448,7 @@ async def ranking_test(limit: int | None = None) -> None:
         print("\n".join(["", "Paired significance (full = configured ranking, old = {1, 1}):", *compare_table(out["compare"])]))
         if not limit:
             path = REPORTS / f"ranking-{TODAY}.json"
-            path.write_text(json.dumps({**(json.loads(path.read_text()) if path.exists() else {}), "skillret_test": out}, indent=1))
+            save(path.name, {**(json.loads(path.read_text()) if path.exists() else {}), "skillret_test": out})
     finally:
         await closed(embedder, reranker, [sr])
 
@@ -502,15 +582,19 @@ if __name__ == "__main__":
     ap.add_argument("limit", nargs="?", type=int)
     ap.add_argument("--text", choices=["current", "skillret"])
     ap.add_argument("--body-chars", type=int)
+    ap.add_argument("--fusion", choices=["rrf", "score"])
+    ap.add_argument("--score-w", type=float)
+    ap.add_argument("--no-write", action="store_true")
     args = ap.parse_args()
     set_text_mode(args.text, args.body_chars)
+    set_fusion(args.fusion, args.score_w)
     cmd = args.cmd
     if cmd == "index-skillret":
         asyncio.run(index_skillret())
     elif cmd == "tune":
-        asyncio.run(tune())
+        asyncio.run(tune(args.limit))
     elif cmd == "ranking":
-        asyncio.run(tune_ranking())
+        asyncio.run(tune_ranking(args.fusion or "rrf", not args.no_write))
     elif cmd == "ranking-test":
         asyncio.run(ranking_test(args.limit))
     elif cmd == "run":
