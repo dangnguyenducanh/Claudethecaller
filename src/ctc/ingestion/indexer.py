@@ -25,6 +25,16 @@ def texts(cap: dict, mode: str | None = None) -> list[str]:
     return [doc, *(t for t in cap.get("triggers") or [] if t.strip())]  # TEI rejects a whole batch with one empty input
 
 
+async def catalog_bodies(store: Store) -> dict[str, str]:
+    """{cap id: body cut at embed.skillret_body_chars} when embed.text is skillret, else {}. The catalog carries no body
+    (RAM on the hot path), so whoever rebuilds the stored vector text (build_index, enrich.dedup) fetches it for one pass."""
+    if cfg()["embed"]["text"] != "skillret":
+        return {}
+    # ponytail: one statement under the 2 s timeout: fine for 6k x 8k chars on the scratch DB; chunk by id like _load_vectors if a remote DB times out
+    n = cfg()["embed"]["skillret_body_chars"]
+    return {r["id"]: r["body"] for r in await store.fetch("select id, left(body, %s) as body from capabilities", (n,))}
+
+
 async def build_index(store: Store, embedder: Embedder, progress=None) -> int:
     """Embed the (cap_id, text_hash) pairs the catalog wants and the DB lacks; delete the ones it no longer wants.
     text_hash = sha256(model + text), so a model change re-embeds everything. Returns how many were embedded."""
@@ -32,11 +42,7 @@ async def build_index(store: Store, embedder: Embedder, progress=None) -> int:
     if not embedder.model_version:
         await embedder.embed(["warmup"], "doc")  # learns the model id for the hash
     model = embedder.model_version
-    bodies = {}
-    if cfg()["embed"]["text"] == "skillret":  # the catalog carries no body (RAM on the hot path): fetch it for this pass only
-        # ponytail: one statement under the 2 s timeout: fine for 6k x 8k chars on the scratch DB; chunk by id like _load_vectors if a remote DB times out
-        n = cfg()["embed"]["skillret_body_chars"]
-        bodies = {r["id"]: r["body"] for r in await store.fetch("select id, left(body, %s) as body from capabilities", (n,))}
+    bodies = await catalog_bodies(store)
     want = {(c["id"], hashlib.sha256((model + t).encode()).hexdigest()): t
             for c in store.catalog.values() for t in texts({**c, "body": bodies.get(c["id"])})}
     have = await store.vector_keys()

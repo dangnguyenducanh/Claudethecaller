@@ -59,7 +59,8 @@ def _scoped(st: State, user_id: str, key: str) -> str:
 async def _embed(st: State, texts: list[str]) -> list[np.ndarray]:
     """Query embeddings through emb:{model8}:{sha256(text)[:16]}; one TEI call for the misses."""
     m8 = hashlib.sha256((st.embedder.model_version or st.cfg["embed_model"]).encode()).hexdigest()[:8]
-    keys = [f"emb:{m8}:{hashlib.sha256(t.encode()).hexdigest()[:16]}" for t in texts]
+    ins = st.cfg["embed"]["instruction"]  # the query prefix changes the vector; `coding` keeps the old key shape
+    keys = [f"emb:{m8}{'' if ins == 'coding' else ':' + ins}:{hashlib.sha256(t.encode()).hexdigest()[:16]}" for t in texts]
     vecs = list(await asyncio.gather(*(st.cache.get_vec(k) for k in keys)))
     if miss := [i for i, v in enumerate(vecs) if v is None]:
         for i, v in zip(miss, await st.embedder.embed([texts[i] for i in miss], "query")):
@@ -83,7 +84,7 @@ def router_version(st: State) -> str:
     except OSError:
         gate = 0
     knobs = [st.cfg.get(k) for k in ("k", "depth", "rerank_top", "rrf_k", "abstain_below", "agent_min_rerank", "ranking",
-                                     "memory_in_query", "memory_weight", "blend")]
+                                     "memory_in_query", "memory_weight", "blend", "embed", "gate")]
     return hashlib.md5(f"{st.store.library_version}|{gate}|{knobs}".encode()).hexdigest()
 
 

@@ -145,3 +145,19 @@ def test_old_config_file_still_loads(tmp_path, monkeypatch):
 
 def test_bare_off_is_off(tmp_path, monkeypatch):  # YAML reads an unquoted `off` as False
     assert load(tmp_path, monkeypatch, lambda t: t.replace('kind: "off"', "kind: off"))["gate"]["kind"] == "off"
+
+
+def test_catalog_bodies_only_in_skillret_mode(monkeypatch):
+    """enrich.dedup and build_index rebuild the stored vector text from this: default fetches nothing, skillret fetches the cut body."""
+    from ctc.ingestion.indexer import catalog_bodies
+
+    class FakeStore:
+        async def fetch(self, sql, args):
+            self.args = args
+            return [{"id": "u:fix", "body": "short"}]
+
+    store = FakeStore()
+    assert asyncio.run(catalog_bodies(store)) == {} and not hasattr(store, "args")  # current: no query at all
+    monkeypatch.setitem(cfg()["embed"], "text", "skillret")
+    monkeypatch.setitem(cfg()["embed"], "skillret_body_chars", 123)
+    assert asyncio.run(catalog_bodies(store)) == {"u:fix": "short"} and store.args == (123,)
