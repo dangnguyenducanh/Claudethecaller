@@ -24,6 +24,14 @@ _ENV = {
     "CTC_CLAUDE_HOME": ("claude_home", str),
 }
 
+# m8 knobs: the defaults are the behaviour before they existed, so an older config file still loads
+_DEFAULTS = {"embed": {"text": "current", "instruction": "coding", "skillret_body_chars": 8000},
+             "ranking": {"fusion": "rrf", "score_w": 0.7, "rerank_by": "sigmoid"},
+             "gate": {"kind": "off", "margin_ratio": 1.5, "min_p": 0.5}}
+_ALLOWED = {("embed", "text"): ("current", "skillret"), ("embed", "instruction"): ("coding", "skillret"),
+            ("ranking", "fusion"): ("rrf", "score"), ("ranking", "rerank_by"): ("sigmoid", "logit"),
+            ("gate", "kind"): ("off", "margin", "platt", "isotonic", "lr")}
+
 
 @cache
 def cfg() -> dict:
@@ -32,6 +40,15 @@ def cfg() -> dict:
     out: dict = {"database_url": None}
     for name in ("models", "retrieval", "server"):
         out.update(yaml.safe_load((ROOT / "config" / f"{name}.yaml").read_text()) or {})
+    for sec, defaults in _DEFAULTS.items():
+        out[sec] = out.get(sec) or {}
+        for key, val in defaults.items():
+            out[sec].setdefault(key, val)
+    if out["gate"]["kind"] is False:  # YAML 1.1 reads a bare `off` as False
+        out["gate"]["kind"] = "off"
+    for (sec, key), allowed in _ALLOWED.items():  # a typo fails at load, not at the first query
+        if out[sec][key] not in allowed:
+            raise ValueError(f"{sec}.{key}: {out[sec][key]!r} is not one of {', '.join(allowed)}")
     for env, (key, cast) in _ENV.items():
         if os.environ.get(env):
             out[key] = cast(os.environ[env])

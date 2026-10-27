@@ -246,6 +246,51 @@ create table if not exists {schema}.wf_schedules (
   primary key (owner, workflow)
 );
 
+-- Context + coding graph (PLAN.md m6, specs/002-context-coding-graph/data-model.md). Write rules live in ctc/graph/db.py.
+create table if not exists {schema}.graph_nodes (
+  user_id text not null default 'local',
+  project_id text not null,
+  id text not null,                  -- code:<graphify id> | ctx:…
+  kind text not null check (kind in ('context', 'coding')),
+  type text not null,
+  label text not null,               -- <= 200 chars
+  text text not null default '',     -- <= 2,000 chars; label + text is what gets embedded
+  source_file text,
+  source_line int,
+  content_hash text not null,        -- sha256(label + text)[:16]; re-embed only when it changes
+  embedding extensions.vector(1024),
+  origin text not null,              -- graphify | parser | claude | claude-mem
+  meta jsonb not null default '{}',
+  updated_at timestamptz not null default now(),
+  primary key (user_id, project_id, id)
+);
+create index if not exists graph_nodes_file on {schema}.graph_nodes (user_id, project_id, source_file);
+
+create table if not exists {schema}.graph_edges (
+  user_id text not null default 'local',
+  project_id text not null,
+  src text not null,
+  dst text not null,
+  relation text not null,
+  confidence text not null check (confidence in ('EXTRACTED', 'INFERRED', 'CONFIRMED', 'DROPPED')),
+  score real not null default 1,
+  origin text not null,              -- review/session rows are never overwritten by a rebuild
+  updated_at timestamptz not null default now(),
+  primary key (user_id, project_id, src, dst, relation)
+);
+create index if not exists graph_edges_dst on {schema}.graph_edges (user_id, project_id, dst);
+
+create table if not exists {schema}.graph_sources (
+  user_id text not null default 'local',
+  project_id text not null,
+  source text not null,              -- graphify | parse:<file> | extract:<file>#<chunk> | claude-mem
+  version text not null,
+  info jsonb not null default '{}',
+  updated_at timestamptz not null default now(),
+  primary key (user_id, project_id, source)
+);
+alter table {schema}.decisions add column if not exists graph_line text;  -- m6: the push line shown for this decision
+
 -- RLS on, no policies: only the postgres role (bypasses RLS) touches these tables.
 alter table {schema}.capabilities enable row level security;
 alter table {schema}.cap_vectors enable row level security;
@@ -262,3 +307,6 @@ alter table {schema}.history_files enable row level security;
 alter table {schema}.wf_runs enable row level security;
 alter table {schema}.wf_steps enable row level security;
 alter table {schema}.wf_schedules enable row level security;
+alter table {schema}.graph_nodes enable row level security;
+alter table {schema}.graph_edges enable row level security;
+alter table {schema}.graph_sources enable row level security;
