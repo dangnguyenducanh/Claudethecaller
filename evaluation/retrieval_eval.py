@@ -92,11 +92,14 @@ class MemoReranker:
     def __init__(self, r: Reranker):
         self.r, self.memo = r, {}
 
-    async def score(self, q: str, docs: list[str]) -> list[float]:
+    async def score_with_logits(self, q: str, docs: list[str]) -> list[tuple[float, float]]:
         new = [d for d in dict.fromkeys(docs) if (q, d) not in self.memo]
         for i in range(0, len(new), TEI_MAX_BATCH):
-            self.memo.update(zip([(q, d) for d in new[i : i + TEI_MAX_BATCH]], await self.r.score(q, new[i : i + TEI_MAX_BATCH])))
+            self.memo.update(zip([(q, d) for d in new[i : i + TEI_MAX_BATCH]], await self.r.score_with_logits(q, new[i : i + TEI_MAX_BATCH])))
         return [self.memo[(q, d)] for d in docs]
+
+    async def score(self, q: str, docs: list[str]) -> list[float]:
+        return [s for s, _ in await self.score_with_logits(q, docs)]
 
 
 def memo_candidates(store: Store) -> Store:
