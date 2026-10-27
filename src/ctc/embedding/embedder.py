@@ -9,11 +9,18 @@ from typing import Literal
 import httpx
 import numpy as np
 
-# Qwen3-Embedding-style instruction prefix (SKILLRET-Embedding-0.6B is fine-tuned from it); docs get no prefix.
-QUERY_INSTRUCTION = (
-    "Instruct: Given a coding task or question, retrieve capabilities "
-    "(skills, agents, commands, workflows) that help accomplish it\nQuery: "
-)
+from ctc.config import cfg
+
+# Qwen3-Embedding-style instruction prefixes (SKILLRET-Embedding-0.6B is fine-tuned from it); docs get no prefix.
+# config embed.instruction picks one; `skillret` is the string SkillRet's own harness uses (skillret/config.py).
+QUERY_INSTRUCTIONS = {
+    "coding": (
+        "Instruct: Given a coding task or question, retrieve capabilities "
+        "(skills, agents, commands, workflows) that help accomplish it\nQuery: "
+    ),
+    "skillret": "Instruct: Given a skill search query, retrieve relevant skills that match the query\nQuery: ",
+}
+QUERY_INSTRUCTION = QUERY_INSTRUCTIONS["coding"]  # today's prefix; kept importable
 
 
 class Embedder:
@@ -33,7 +40,8 @@ class Embedder:
         return self._client
 
     async def embed(self, texts: list[str], kind: Literal["query", "doc"]) -> np.ndarray:
-        inputs = [QUERY_INSTRUCTION + t for t in texts] if kind == "query" else texts
+        prefix = QUERY_INSTRUCTIONS[cfg()["embed"]["instruction"]]
+        inputs = [prefix + t for t in texts] if kind == "query" else texts
         client = self.client()
         if not self.model_version:
             info = await client.get(f"{self.base_url}/info")

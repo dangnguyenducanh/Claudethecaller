@@ -1,14 +1,17 @@
 """K1 retrieval benchmark + K2 tuning (PLAN.md K1, K2, Targets): ranx metrics per mode, abstain gate, report.
 
 uv run python -m evaluation.retrieval_eval index-skillret   # SkillRet test (6,006) -> ctc_skillret, train (10,123) -> ctc_skillret_train
+uv run python -m evaluation.retrieval_eval index-skillret --text skillret --body-chars 8000   # name | description | body -> ctc_skillret_sk, ctc_skillret_train_sk
 uv run python -m evaluation.retrieval_eval tune             # DEV ONLY: depth x rerank_top sweep + abstain gate -> config, models/
 uv run python -m evaluation.retrieval_eval ranking          # DEV ONLY: keyword_rrf_weight x rerank_weight sweep -> config `ranking`
 uv run python -m evaluation.retrieval_eval ranking-test [n] # SkillRet TEST, report only: dense vs old {1, 1} vs configured ranking
 uv run python -m evaluation.retrieval_eval run [limit]      # TEST: three modes on SkillRet, own-eval, gold-none -> data/reports/
+--text current|skillret and --body-chars N work on every command (they pick the schemas and the query instruction to match).
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import hashlib
 import json
@@ -19,7 +22,7 @@ from datetime import date
 
 import joblib
 import numpy as np
-from ranx import Qrels, Run, evaluate
+from ranx import Qrels, Run, compare, evaluate
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold, cross_val_predict
@@ -44,11 +47,34 @@ DEPTHS, RERANK_TOPS, MAX_FT, SR_DEV_N = (25, 50, 100), (10, 20, 40), 0.10, 500
 TEI_MAX_BATCH = 32  # TEI max_client_batch_size: the shipped Reranker sends one request, so rerank_top > 32 gets HTTP 413
 KW_WEIGHTS, RERANK_WEIGHTS = (0, 0.25, 0.5, 1), (0, 0.25, 0.5, 1, 2)
 OLD_RANKING = {"keyword_rrf_weight": 1, "rerank_weight": 1}
+CMP_METRICS = ["ndcg@10", "recall@5"]
 MIN_AUC = 0.7  # tune saves the gate only at or above this out-of-fold AUC (2026-10-21: 0.55 = no signal, rejected)
 
 
 def is_test(qid: str) -> bool:  # same rule as the labeler's session split, for MetaTool rows
     return int(hashlib.sha256(qid.encode()).hexdigest(), 16) % 2 == 1
+
+
+def set_text_mode(text: str | None, body_chars: int | None) -> None:
+    """--text / --body-chars for the whole process: the cached config is changed in place, so texts() and the Embedder see
+    it. The instruction follows the text (skillret text <-> skillret instruction). ponytail: mutates the config cache."""
+    e = cfg()["embed"]
+    if text:
+        e["text"], e["instruction"] = text, {"current": "coding", "skillret": "skillret"}[text]
+    if body_chars:
+        e["skillret_body_chars"] = body_chars
+
+
+def sr_schema(split: str) -> str:
+    """The skillret text mode lives beside the current one (`_sk`), never in the live `ctc` schema."""
+    return SKILLRET[split] + ("_sk" if cfg()["embed"]["text"] == "skillret" else "")
+
+
+def header() -> dict:
+    """Report header (contracts/knobs-and-eval.md): what this run's numbers were produced with."""
+    e, r = cfg()["embed"], cfg()["ranking"]
+    return {"text_mode": e["text"], "instruction": e["instruction"], "body_chars": e["skillret_body_chars"] if e["text"] == "skillret" else None,
+            "fusion": r["fusion"], "score_w": r["score_w"]}
 
 
 def own_sets(test: bool) -> tuple[list[tuple], list[tuple]]:
@@ -115,11 +141,44 @@ async def run_set(ctx: Ctx, items: list[tuple], qvs: np.ndarray, depth: int, rer
     return out
 
 
+def run_dict(rows: list[dict], mode: str, gated: bool = False) -> dict[str, dict[str, float]]:
+    """One mode's ranking per query as a ranx run (score = 1 / rank); gated = an abstained query retrieves nothing."""
+    return {r["id"]: {} if gated and r["abstained"] else {c: 1 / i for i, c in enumerate(r[mode], 1)} for r in rows}
+
+
 def scores(rows: list[dict], mode: str, gated: bool = False) -> dict[str, float]:
     """ranx metrics; gated = an abstained query retrieves nothing (what the user gets)."""
     qrels = Qrels.from_dict({r["id"]: r["gold"] for r in rows})
-    run = Run.from_dict({r["id"]: {} if gated and r["abstained"] else {c: 1 / i for i, c in enumerate(r[mode], 1)} for r in rows})
+    run = Run.from_dict(run_dict(rows, mode, gated))
     return {m: round(float(v), 4) for m, v in evaluate(qrels, run, METRICS, make_comparable=True).items()}
+
+
+def compare_runs(qrels: dict, runs: dict[str, dict], split: str = "test") -> list[dict]:
+    """Paired two-sided Student's t per query (ranx.compare) for every pair in `runs` (name -> {qid: {doc: score}}), in
+    dict order, A first: delta = mean(A) - mean(B). One row per pair and metric (contracts/knobs-and-eval.md).
+    sig_0.01 is ranx's own flag; sig_0.05 is the same p-value against 0.05. Identical runs have no variance: p = 1.
+    ponytail: no multiple-comparison correction across pairs; read p with that many pairs in mind."""
+    report = compare(Qrels.from_dict(qrels), [Run.from_dict(r, name=n) for n, r in runs.items()], CMP_METRICS,
+                     stat_test="student", max_p=0.01, make_comparable=True)
+    names, rows = list(runs), []
+    for i, a in enumerate(names):
+        for b in names[i + 1 :]:
+            for m in CMP_METRICS:
+                c = report.comparisons[a, b][m]
+                p = 1.0 if np.isnan(c["p_value"]) else float(c["p_value"])
+                rows.append({"a": a, "b": b, "metric": m, "split": split, "delta": round(report.results[a][m] - report.results[b][m], 4),
+                             "p": p, "sig_0.01": bool(c["significant"]), "sig_0.05": p <= 0.05})
+    return rows
+
+
+def compare_rows(rows: list[dict], modes: list[str], split: str = "test") -> list[dict]:
+    return compare_runs({r["id"]: r["gold"] for r in rows}, {m: run_dict(rows, m) for m in modes}, split)
+
+
+def compare_table(rows: list[dict]) -> list[str]:
+    yn = lambda b: "yes" if b else "no"
+    return ["| A | B | metric | split | Δ (A − B) | p | p ≤ 0.01 | p ≤ 0.05 |", "|---|---|---|---|---|---|---|---|",
+            *[f"| {r['a']} | {r['b']} | {r['metric']} | {r['split']} | {r['delta']:+.4f} | {r['p']:.3g} | {yn(r['sig_0.01'])} | {yn(r['sig_0.05'])} |" for r in rows]]
 
 
 def fired(rows: list[dict], mode: str) -> float:
@@ -164,12 +223,17 @@ async def closed(embedder: Embedder, reranker: Reranker, stores: list[Store]) ->
 
 
 async def index_skillret() -> None:
-    embedder, reranker, stores = await opened(*SKILLRET.values())
+    """Index SkillRet under the configured text mode (--text): `current` -> ctc_skillret*, `skillret` -> ctc_skillret*_sk."""
+    embedder, reranker, stores = await opened(*map(sr_schema, SKILLRET))
     try:
-        for (split, _), store in zip(SKILLRET.items(), stores):
+        done = {}
+        for split, store in zip(SKILLRET, stores):
             diff = await store.upsert(skillret_caps(skillret(split)[0]), ["skillret"])  # idempotent: unchanged rows are skipped
             n = await build_index(store, embedder)
-            print(f"{store.schema}: +{len(diff.added)} ~{len(diff.changed)} -{len(diff.removed)}, embedded {n}, {await store.counts()}")
+            done[store.schema] = {"added": len(diff.added), "changed": len(diff.changed), "removed": len(diff.removed), "embedded": n, "counts": await store.counts()}
+            print(f"{store.schema}: +{len(diff.added)} ~{len(diff.changed)} -{len(diff.removed)}, embedded {n}, {done[store.schema]['counts']}")
+        REPORTS.mkdir(parents=True, exist_ok=True)
+        (REPORTS / f"index-skillret-{cfg()['embed']['text']}-{TODAY}.json").write_text(json.dumps({"header": header(), "schemas": done}, indent=1))
     finally:
         await closed(embedder, reranker, stores)
 
@@ -177,7 +241,7 @@ async def index_skillret() -> None:
 async def tune() -> None:
     """K2 on dev rows only: sweep depth x rerank_top (SkillRet train sample first, own dev second), then fit the abstain gate
     (positives SkillRet dev + own dev with gold, negatives MetaTool dev + own gold-none; PLAN.md "Benchmark priority")."""
-    embedder, reranker, (lib, sr) = await opened("ctc", SKILLRET["train"])
+    embedder, reranker, (lib, sr) = await opened("ctc", sr_schema("train"))
     memo = MemoReranker(reranker)
     own_ctx, sr_ctx = Ctx(lib, embedder, memo, NEUTRAL), Ctx(sr, embedder, memo, NEUTRAL)
     try:
@@ -245,7 +309,7 @@ async def tune_ranking() -> None:
     """Final-order sweep on dev rows only (SkillRet train sample + own dev) at the configured depth / rerank_top.
     Winner = best SkillRet dev NDCG@10, then R@5, then own dev NDCG@10 (3 decimals); ties go to the lower weights."""
     c = cfg()
-    embedder, reranker, (lib, sr) = await opened("ctc", SKILLRET["train"])
+    embedder, reranker, (lib, sr) = await opened("ctc", sr_schema("train"))
     memo = MemoReranker(reranker)
     try:
         assert sr.catalog, "run index-skillret first"
@@ -270,7 +334,8 @@ async def tune_ranking() -> None:
                 f"old {{1, 1}} {f(old)}, dense-only {f({n: r['dense'] for n, r in ref.items()})}; own dev NDCG@10 {win['own_dev']['ndcg@10']:.3f} vs old {old['own_dev']['ndcg@10']:.3f}")
         path = ROOT / "config" / "retrieval.yaml"
         rk = win["ranking"]
-        text, n = re.subn(r"^ranking:.*$", f"ranking: {{keyword_rrf_weight: {rk['keyword_rrf_weight']}, rerank_weight: {rk['rerank_weight']}}}   # {note}",
+        text, n = re.subn(r"^ranking:.*$", f"ranking: {{keyword_rrf_weight: {rk['keyword_rrf_weight']}, rerank_weight: {rk['rerank_weight']}, fusion: {c['ranking']['fusion']}, "
+                          f"score_w: {c['ranking']['score_w']}}}   # {note}",
                           path.read_text(), count=1, flags=re.MULTILINE)
         assert n == 1, f"ranking not in {path}"
         path.write_text(text)
@@ -285,7 +350,7 @@ async def tune_ranking() -> None:
 async def ranking_test(limit: int | None = None) -> None:
     """SkillRet test, report only (never tunes): dense, plain hybrid, the old {1, 1} order and the configured ranking."""
     c = cfg()
-    embedder, reranker, (sr,) = await opened(SKILLRET["test"])
+    embedder, reranker, (sr,) = await opened(sr_schema("test"))
     try:
         _, queries, qrels = skillret("test")
         items = [(q["id"], q["query"], qrels[q["id"]]) for q in queries][:limit]
@@ -294,8 +359,10 @@ async def ranking_test(limit: int | None = None) -> None:
         rows = await run_set(ctx, items, qvs, c["depth"], c["rerank_top"])
         for r, o in zip(rows, await run_set(ctx, items, qvs, c["depth"], c["rerank_top"], modes=False, ranking=OLD_RANKING)):
             r["old"] = o["full"]
-        out = {"n": len(rows), "ranking": c["ranking"], "scores": {m: scores(rows, m) for m in ("dense", "hybrid", "old", "full")}}
+        out = {"n": len(rows), "header": header(), "ranking": c["ranking"], "scores": {m: scores(rows, m) for m in ("dense", "hybrid", "old", "full")},
+               "compare": compare_rows(rows, ["full", "dense", "old"])}  # full = the configured ranking
         print(json.dumps(out, indent=1))
+        print("\n".join(["", "Paired significance (full = configured ranking, old = {1, 1}):", *compare_table(out["compare"])]))
         if not limit:
             path = REPORTS / f"ranking-{TODAY}.json"
             path.write_text(json.dumps({**(json.loads(path.read_text()) if path.exists() else {}), "skillret_test": out}, indent=1))
@@ -305,7 +372,7 @@ async def ranking_test(limit: int | None = None) -> None:
 
 async def run(limit: int | None = None) -> None:
     c = cfg()
-    embedder, reranker, (lib, sr) = await opened("ctc", SKILLRET["test"])
+    embedder, reranker, (lib, sr) = await opened("ctc", sr_schema("test"))
     try:
         assert sr.catalog, "run index-skillret first"
         _, queries, qrels = skillret("test")
@@ -317,12 +384,15 @@ async def run(limit: int | None = None) -> None:
             rows = await run_set(Ctx(store, embedder, reranker, NEUTRAL), items, qvs, c["depth"], c["rerank_top"])
             out[name] = {"n": len(rows), "embed_ms": round(embed_ms, 1), "latency": latency(rows),
                          "fired": {m: fired(rows, m) for m in SHOWN}, "abstained": round(float(np.mean([r["abstained"] for r in rows])), 4)}
+            if name != "none":
+                out.setdefault("compare", {})[name] = compare_rows(rows, MODES)
             if name == "none":
                 for part, keep in (("none_own", lambda i: not i.startswith("metatool:")), ("none_metatool", lambda i: i.startswith("metatool:"))):
                     out[part] = {"n": sum(keep(r["id"]) for r in rows), "fired": {m: fired([r for r in rows if keep(r["id"])], m) for m in SHOWN}}
             else:
                 out[name]["scores"] = {m: scores(rows, m) for m in MODES} | {"full+gate": scores(rows, "full", gated=True)}
             print(name, json.dumps({k: v for k, v in out[name].items() if k != "latency"}))
+        out["header"] = header()
         out["config"] = {k: c[k] for k in ("k", "depth", "rerank_top", "rrf_k", "ranking", "abstain_below", "gate_min_p")}
         out["gate"] = gate.load(c["gate_path"]) is not None
         out["library"] = {"ctc": {"capabilities": len(lib.catalog), "library_version": lib.library_version}, "skillret": len(sr.catalog),
@@ -347,7 +417,7 @@ def report(out: dict, tune: dict | None, limit: int | None) -> str:
             rows.append(f"| {label[m]} | " + " | ".join(f"{s[k]:.3f}" for k in METRICS) + f" | {out[name]['fired'][m]:.0%} |")
         return rows
 
-    sr, own, cf = out["skillret"]["scores"], out["own"]["scores"], out["config"]
+    sr, own, cf, h = out["skillret"]["scores"], out["own"]["scores"], out["config"], out["header"]
     ft = out["none"]["fired"]["full+gate"]
     lat = out["own"]["latency"]["search"][1] + out["own"]["embed_ms"]
     db = "Supabase (session pooler)" if "supabase" in (cfg()["database_url"] or "") else "local dev Postgres"
@@ -361,6 +431,9 @@ def report(out: dict, tune: dict | None, limit: int | None) -> str:
           f"ranking={cf['ranking']} (keyword weight in the rerank pool, rerank weight in the final order), abstain_below={cf['abstain_below']}, gate {'on' if out['gate'] else 'off'} (gate_min_p={cf['gate_min_p']}). "
           f"Library `ctc`: {out['library']['ctc']['capabilities']} capabilities (library_version `{out['library']['ctc']['library_version']}`); "
           f"`ctc_skillret`: {out['library']['skillret']} skills. DB: {db}."), "",
+          (f"Text mode `{h['text_mode']}`, query instruction `{h['instruction']}`, body cap {h['body_chars']}, fusion `{h['fusion']}` (score_w {h['score_w']})."
+           + (" The own-transcript and gold-none sets query the live `ctc` index (embedded with `current` text) with this instruction, so they are not part of the text-mode ablation."
+              if h["text_mode"] != "current" else "")), "",
           *(["> **The `ctc` library changed during this run (another process re-indexed it): own-eval numbers are suspect.**", ""]
             if out["library"]["changed_during_run"] else []),
           "## Targets (PLAN.md)", "", "| target | measured | |", "|---|---|---|",
@@ -374,9 +447,11 @@ def report(out: dict, tune: dict | None, limit: int | None) -> str:
           "| memory lift ≥ 0 · extraction precision ≥ 0.80 | not measured here | K4 / A3 |", "",
           f"## SkillRet test ({out['skillret']['n']} queries, 6,006 skills, neutral project)", "", *table("skillret"), "",
           f"The gate abstains on {out['skillret']['abstained']:.0%} of SkillRet queries (every one has a correct skill, so each abstain is a miss).", "",
+          f"### Significance, SkillRet test (paired two-sided Student's t over {out['skillret']['n']} queries, ranx.compare; Δ = A − B)", "", *compare_table(out["compare"]["skillret"]), "",
           f"## Own transcripts, test split ({out['own']['n']} rows with gold, real library `ctc`)", "", *table("own"), "",
           ("4 of the 652 gold ids (all splits) point at `project@d63e3c8f:graphify`, a project-only skill of this repo; the queries come "
           "from other projects, so the neutral project filters it and those ids are unreachable."), "",
+          f"### Significance, own test ({out['own']['n']} queries)", "", *compare_table(out["compare"]["own"]), "",
           f"## False triggers (gold-none test rows: {out['none_own']['n']} own + {out['none_metatool']['n']} MetaTool negatives)", "",
           "| mode | all | own none | MetaTool |", "|---|---|---|---|",
           *[f"| {m} | {out['none']['fired'][m]:.1%} | {out['none_own']['fired'][m]:.1%} | {out['none_metatool']['fired'][m]:.1%} |" for m in SHOWN],
@@ -419,7 +494,14 @@ def report(out: dict, tune: dict | None, limit: int | None) -> str:
 
 
 if __name__ == "__main__":
-    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    ap = argparse.ArgumentParser(usage=__doc__, add_help=False)
+    ap.add_argument("cmd", nargs="?", default="")
+    ap.add_argument("limit", nargs="?", type=int)
+    ap.add_argument("--text", choices=["current", "skillret"])
+    ap.add_argument("--body-chars", type=int)
+    args = ap.parse_args()
+    set_text_mode(args.text, args.body_chars)
+    cmd = args.cmd
     if cmd == "index-skillret":
         asyncio.run(index_skillret())
     elif cmd == "tune":
@@ -427,8 +509,8 @@ if __name__ == "__main__":
     elif cmd == "ranking":
         asyncio.run(tune_ranking())
     elif cmd == "ranking-test":
-        asyncio.run(ranking_test(int(sys.argv[2]) if len(sys.argv) > 2 else None))
+        asyncio.run(ranking_test(args.limit))
     elif cmd == "run":
-        asyncio.run(run(int(sys.argv[2]) if len(sys.argv) > 2 else None))
+        asyncio.run(run(args.limit))
     else:
         sys.exit(__doc__)

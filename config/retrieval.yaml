@@ -3,10 +3,12 @@ k: 5
 depth: 50            # candidates per channel (dense, keyword)
 rerank_top: 20
 rrf_k: 60
-ranking: {keyword_rrf_weight: 0.25, rerank_weight: 1}   # K2 ranking sweep 2026-10-21, SkillRet dev (500 train q) NDCG@10 / R@5: this 0.605 / 0.599, old {1, 1} 0.600 / 0.583, dense-only 0.580 / 0.574; own dev NDCG@10 0.117 vs old 0.110
+embed: {text: current, instruction: coding, skillret_body_chars: 8000}   # m8: text = current | skillret (name | description | body, body cut at skillret_body_chars); instruction = coding | skillret query prefix. Changing text re-embeds on the next index.
+ranking: {keyword_rrf_weight: 0.25, rerank_weight: 1, fusion: rrf, score_w: 0.7}   # K2 ranking sweep 2026-10-21, SkillRet dev (500 train q) NDCG@10 / R@5: this 0.605 / 0.599, old {1, 1} 0.600 / 0.583, dense-only 0.580 / 0.574; own dev NDCG@10 0.117 vs old 0.110
 abstain_below: null  # rerank-score floor; null = off (bge-reranker scores are uncalibrated, see CLAUDE.md)
 gate_path: models/abstain.joblib   # calibrated abstain gate from K2; used when the file exists
 gate_min_p: 0.5                    # K2 overwrites with the tuned threshold
+gate: {kind: "off", margin_ratio: 1.5, min_p: 0.5}   # m8: off | margin | platt | isotonic | lr; off = abstain off, the 2026-10-21 Decision (quote it: bare off is YAML false). ranking.fusion = rrf | score (score: (1 - score_w) * keyword + score_w * cosine)
 agent_min_rerank: 0.5              # B6: attach an agent hit only above this
 blend: {prompt: 0.6, session: 0.25, project: 0.15}   # B7 query vector
 memory_weight: 0.1                 # B8 recall() weight on the query vector
