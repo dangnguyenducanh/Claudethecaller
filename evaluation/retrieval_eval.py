@@ -5,7 +5,8 @@ uv run python -m evaluation.retrieval_eval index-skillret --text skillret --body
 uv run python -m evaluation.retrieval_eval tune [limit]     # abstain gate candidates (off, margin, platt, isotonic, lr): fit on dev, report on test -> data/reports/gate-<date>.json
 uv run python -m evaluation.retrieval_eval ranking [--fusion score] [--no-write]   # DEV ONLY: keyword_rrf_weight x rerank_weight sweep -> config `ranking`; --fusion score: score_w sweep, never writes the yaml
 uv run python -m evaluation.retrieval_eval ranking-test [n] # SkillRet TEST, report only: dense vs old {1, 1} vs configured ranking
-uv run python -m evaluation.retrieval_eval ablate --split dev|test --variant name=text:skillret,fusion:score,w:0.7 ...  # paired p-values, report only
+uv run python -m evaluation.retrieval_eval ablate --split dev|test [--on own] --variant name=text:skillret,fusion:score,w:0.7 ...  # paired p-values, report only
+uv run python -m evaluation.retrieval_eval index-own        # this machine's library (the scan K1 labels against) -> ctc_own[_sk]; CTC_LIVE_DATABASE_URL = read-only source of A1 summaries
 uv run python -m evaluation.retrieval_eval run [limit]      # TEST: three modes on SkillRet, own-eval, gold-none -> data/reports/
 --text current|skillret and --body-chars N work on every command (they pick the schemas and the query instruction to match).
 --fusion rrf|score and --score-w W set ranking.fusion / score_w for the whole run (so tune and ranking-test can use score fusion without editing the yaml).
@@ -17,14 +18,17 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
 import time
 from datetime import date
+from pathlib import Path
 
 import joblib
 import numpy as np
+import psycopg
 from ranx import Qrels, Run, compare, evaluate
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold, cross_val_predict
@@ -32,6 +36,7 @@ from sklearn.model_selection import StratifiedKFold, cross_val_predict
 from ctc.config import ROOT, cfg
 from ctc.embedding.embedder import Embedder
 from ctc.ingestion.indexer import build_index
+from ctc.ingestion.scanner import default_roots, scan_library
 from ctc.reranking.reranker import Reranker
 from ctc.retrieval import gate
 from ctc.retrieval.hybrid import Ctx, rrf, search
@@ -41,6 +46,7 @@ from evaluation.loaders import metatool, skillret, skillret_caps
 METRICS = ["recall@1", "recall@5", "recall@10", "ndcg@10", "mrr"]
 MODES = ["dense", "hybrid", "full"]
 SHOWN = [*MODES, "full+gate"]  # full+gate = what the user gets: an abstained query retrieves nothing
+OWN = "ctc_own"  # this machine's library as K1 labels it: a scratch copy per text mode, so the live index is never re-embedded
 SKILLRET = {"test": "ctc_skillret", "train": "ctc_skillret_train"}  # train skills only serve the dev sample (disjoint qrels)
 NEUTRAL = "/nonexistent/ctc-eval"  # project dir with no project capabilities and no overrides: nothing is project-filtered
 REPORTS = ROOT / "data" / "reports"
@@ -80,9 +86,19 @@ def set_fusion(fusion: str | None, score_w: float | None) -> None:
         r["score_w"] = score_w
 
 
+def text_suffix() -> str:
+    """The skillret text mode lives beside the current one (`_sk`; `_sk<N>` for a body cap other than the shipped 8,000, so
+    cap variants never share vectors), never in the live `ctc` schema."""
+    e = cfg()["embed"]
+    return "" if e["text"] != "skillret" else "_sk" + ("" if e["skillret_body_chars"] == 8000 else str(e["skillret_body_chars"]))
+
+
 def sr_schema(split: str) -> str:
-    """The skillret text mode lives beside the current one (`_sk`), never in the live `ctc` schema."""
-    return SKILLRET[split] + ("_sk" if cfg()["embed"]["text"] == "skillret" else "")
+    return SKILLRET[split] + text_suffix()
+
+
+def own_schema() -> str:
+    return OWN + text_suffix()
 
 
 def reranker_tag() -> str:
@@ -243,7 +259,7 @@ def latency(rows: list[dict]) -> dict[str, list[float]]:
 async def opened(*schemas: str) -> tuple[Embedder, Reranker, list[Store]]:
     c = cfg()
     stores = [await Store.open(c["database_url"], s) for s in schemas]
-    return Embedder(c["embed_url"], c["batch_timeout_s"]), Reranker(c["rerank_url"], c["batch_timeout_s"]), stores
+    return Embedder(c["embed_url"], max(c["batch_timeout_s"], 300)), Reranker(c["rerank_url"], c["batch_timeout_s"]), stores  # ponytail: a 32-batch of 24k-char bodies outlasts the daemon's 60 s
 
 
 async def closed(embedder: Embedder, reranker: Reranker, stores: list[Store]) -> None:
@@ -267,6 +283,31 @@ async def index_skillret() -> None:
         (REPORTS / f"index-skillret-{cfg()['embed']['text']}-{TODAY}.json").write_text(json.dumps({"header": header(), "schemas": done}, indent=1))
     finally:
         await closed(embedder, reranker, stores)
+
+
+async def index_own() -> None:
+    """Index this machine's library (the scan K1 labels against) under the configured text mode into ctc_own[_sk]. A1's summary and
+    triggers come by id from the live index, read-only, when CTC_LIVE_DATABASE_URL is set (so `current` text is not handicapped).
+    ponytail: ids new since the last live A1 pass stay un-enriched."""
+    embedder, reranker, (store,) = await opened(own_schema())
+    try:
+        caps, _ = scan_library(default_roots(Path.cwd()))
+        diff = await store.upsert(caps, sorted({c.namespace for c in caps}))
+        enriched = 0
+        if dsn := os.environ.get("CTC_LIVE_DATABASE_URL"):
+            def read():
+                with psycopg.connect(dsn) as conn:
+                    conn.read_only = True
+                    return conn.execute("select id, summary, triggers, enricher_version from ctc.capabilities where summary is not null").fetchall()
+            rows = [r for r in await asyncio.to_thread(read) if r[0] in store.catalog]
+            await store.executemany("update capabilities set summary = %s, triggers = %s, enricher_version = %s where id = %s", [(s, t, v, i) for i, s, t, v in rows])
+            enriched = len(rows)
+        n = await build_index(store, embedder)
+        done = {"added": len(diff.added), "changed": len(diff.changed), "removed": len(diff.removed), "enriched": enriched, "embedded": n, "counts": await store.counts()}
+        print(f"{store.schema}: {done}")
+        save(f"index-own-{cfg()['embed']['text']}-{TODAY}.json", {"header": header(), "schema": store.schema, **done})
+    finally:
+        await closed(embedder, reranker, [store])
 
 
 def threshold_at_ft(p: np.ndarray, y: np.ndarray, cap: float = MAX_FT) -> float | None:
@@ -454,13 +495,16 @@ async def ranking_test(limit: int | None = None) -> None:
         await closed(embedder, reranker, [sr])
 
 
-async def ablate(split: str, specs: list[str], limit: int | None = None) -> None:
+async def ablate(split: str, specs: list[str], limit: int | None = None, on: str = "skillret") -> None:
     """The same queries through several named variants in ONE process, so every pair gets a paired test (ranx.compare).
     A variant is `name=key:val,key:val` with keys text (current|skillret), body (chars), fusion (rrf|score), w (score_w), by (rerank_by: sigmoid|logit), kw / rw (keyword_rrf_weight / rerank_weight);
     keys it leaves out keep the config. dev = the SkillRet train sample (sr_dev) against the train schema; test = the
-    4,392 test queries. Report only: nothing is written to config. Needs the variants' schemas indexed beforehand."""
+    4,392 test queries. `--on own`: the own-transcript rows with gold (split = their K1 split) against `index-own`'s library.
+    Report only: nothing is written to config. Needs the variants' schemas indexed beforehand."""
     base_embed, base_ranking, c = dict(cfg()["embed"]), dict(cfg()["ranking"]), cfg()
-    if split == "dev":
+    if on == "own":
+        items = own_sets(test=split == "test")[0][:limit]
+    elif split == "dev":
         items = sr_dev()[:limit]
     else:
         _, queries, qrels = skillret("test")
@@ -476,7 +520,7 @@ async def ablate(split: str, specs: list[str], limit: int | None = None) -> None
         for key, field in (("kw", "keyword_rrf_weight"), ("rw", "rerank_weight")):
             if key in opts:
                 cfg()["ranking"][field] = float(opts[key])
-        embedder, reranker, (store,) = await opened(sr_schema("train" if split == "dev" else "test"))
+        embedder, reranker, (store,) = await opened(own_schema() if on == "own" else sr_schema("train" if split == "dev" else "test"))
         try:
             qvs, _ = await embed_all(embedder, [q for _, q, _ in items])
             mr = MemoReranker(reranker)
@@ -491,19 +535,20 @@ async def ablate(split: str, specs: list[str], limit: int | None = None) -> None
             cfg()["ranking"].clear(); cfg()["ranking"].update(base_ranking)
     gold = {i: g for i, _, g in items}
     compare_rows_ = {m: compare_runs(gold, {f"{n}:{m}": run_dict(rows_by[n], m) for n in names}, split) for m in ("dense", "full")}
-    out = {"split": split, "n": len(items), "variants": {n: {"header": hdr[n], "scores": {m: scores(rows_by[n], m) for m in ("dense", "hybrid", "full")}} for n in names},
+    out = {"split": split, "on": on, "n": len(items), "variants": {n: {"header": hdr[n], "scores": {m: scores(rows_by[n], m) for m in ("dense", "hybrid", "full")}} for n in names},
            "compare": compare_rows_}
     print(json.dumps(out, indent=1))
     for m, rs in compare_rows_.items():
         print("\n".join(["", f"Paired significance, {m} order ({split}):", *compare_table(rs)]))
-    save(f"ablate-{split}-{TODAY}.json", out)
+    save(f"ablate-{split}{'-own' if on == 'own' else ''}-{TODAY}.json", out)
 
 
 async def run(limit: int | None = None) -> None:
     c = cfg()
-    embedder, reranker, (lib, sr) = await opened("ctc", sr_schema("test"))
+    embedder, reranker, (lib, sr) = await opened(own_schema(), sr_schema("test"))
     try:
         assert sr.catalog, "run index-skillret first"
+        assert lib.catalog, "run index-own first"
         _, queries, qrels = skillret("test")
         pos, neg = own_sets(test=True)
         sets = {"skillret": (sr, [(q["id"], q["query"], qrels[q["id"]]) for q in queries][:limit]), "own": (lib, pos[:limit]), "none": (lib, neg[:limit])}
@@ -524,7 +569,7 @@ async def run(limit: int | None = None) -> None:
         out["header"] = header()
         out["config"] = {k: c[k] for k in ("k", "depth", "rerank_top", "rrf_k", "ranking", "abstain_below", "gate_min_p")}
         out["gate"] = gate.load(c["gate_path"]) is not None
-        out["library"] = {"ctc": {"capabilities": len(lib.catalog), "library_version": lib.library_version}, "skillret": len(sr.catalog),
+        out["library"] = {"ctc": {"schema": lib.schema, "capabilities": len(lib.catalog), "library_version": lib.library_version}, "skillret": len(sr.catalog),
                           "changed_during_run": await lib.compute_library_version() != lib.library_version}  # another process re-indexed
         REPORTS.mkdir(parents=True, exist_ok=True)
         (REPORTS / f"run-{TODAY}.json").write_text(json.dumps(out, indent=1))
@@ -558,11 +603,11 @@ def report(out: dict, tune: dict | None, limit: int | None) -> str:
           "noisy labels. Treat own-eval numbers as provisional until the owner's H1 check."), "",
           (f"Config used: k={cf['k']}, depth={cf['depth']}, rerank_top={cf['rerank_top']}, rrf_k={cf['rrf_k']}, "
           f"ranking={cf['ranking']} (keyword weight in the rerank pool, rerank weight in the final order), abstain_below={cf['abstain_below']}, gate {'on' if out['gate'] else 'off'} (gate_min_p={cf['gate_min_p']}). "
-          f"Library `ctc`: {out['library']['ctc']['capabilities']} capabilities (library_version `{out['library']['ctc']['library_version']}`); "
+          f"Library `{out['library']['ctc'].get('schema', 'ctc')}`: {out['library']['ctc']['capabilities']} capabilities (library_version `{out['library']['ctc']['library_version']}`); "
           f"`ctc_skillret`: {out['library']['skillret']} skills. DB: {db}."), "",
           (f"Text mode `{h['text_mode']}`, query instruction `{h['instruction']}`, body cap {h['body_chars']}, fusion `{h['fusion']}` (score_w {h['score_w']})."
-           + (" The own-transcript and gold-none sets query the live `ctc` index (embedded with `current` text) with this instruction, so they are not part of the text-mode ablation."
-              if h["text_mode"] != "current" else "")), "",
+           + (" The own-transcript and gold-none sets query this machine's library as `index-own` embedded it under the same text mode."
+              if out["library"]["ctc"].get("schema") else "")), "",
           *(["> **The `ctc` library changed during this run (another process re-indexed it): own-eval numbers are suspect.**", ""]
             if out["library"]["changed_during_run"] else []),
           "## Targets (PLAN.md)", "", "| target | measured | |", "|---|---|---|",
@@ -633,12 +678,15 @@ if __name__ == "__main__":
     ap.add_argument("--no-write", action="store_true")
     ap.add_argument("--split", choices=["dev", "test"], default="test")
     ap.add_argument("--variant", action="append", default=[])
+    ap.add_argument("--on", choices=["skillret", "own"], default="skillret")
     args = ap.parse_args()
     set_text_mode(args.text, args.body_chars)
     set_fusion(args.fusion, args.score_w)
     cmd = args.cmd
     if cmd == "index-skillret":
         asyncio.run(index_skillret())
+    elif cmd == "index-own":
+        asyncio.run(index_own())
     elif cmd == "tune":
         asyncio.run(tune(args.limit))
     elif cmd == "ranking":
@@ -646,7 +694,7 @@ if __name__ == "__main__":
     elif cmd == "ranking-test":
         asyncio.run(ranking_test(args.limit))
     elif cmd == "ablate":
-        asyncio.run(ablate(args.split, args.variant, args.limit))
+        asyncio.run(ablate(args.split, args.variant, args.limit, args.on))
     elif cmd == "run":
         asyncio.run(run(args.limit))
     else:

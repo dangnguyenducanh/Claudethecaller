@@ -42,6 +42,16 @@ Paired: chosen vs shipped-before, NDCG@10 +0.0381 (p = 6.6e-29), Recall@5 +0.032
 
 GPU: peak 3.8 GiB for this project's containers during the 16k-skill `skillret` indexing (budget 7 GiB; guard script sampled every 15 s, never over). Indexing took ~10 minutes for 6,006 + 10,123 skills.
 
+### Body cap (`embed.skillret_body_chars`), `skillret` text, dense order, run 2026-10-27 after the main ablation
+
+| Cap | dev NDCG@10 (500 q) | dev Recall@5 | test NDCG@10 (4,392 q) | test Recall@5 | test Recall@1 |
+|---|---|---|---|---|---|
+| 2,000 | 0.7188 | 0.6953 | 0.8112 | 0.8229 | 0.5647 |
+| **8,000 (shipped)** | 0.7574 | 0.7133 | 0.8115 | 0.8243 | 0.5692 |
+| 24,000 (covers 95.5% of test bodies in full) | 0.7608 | 0.7163 | 0.8121 | 0.8243 | 0.5702 |
+
+Paired: on dev 2,000 loses to 8,000 by 0.039 NDCG@10 (p = 1.7e-10) and 24,000 does not beat 8,000 (+0.003, p = 0.16); on test no pair differs (p ≥ 0.5). Dev and test disagree about 2,000, and nothing supports a larger cap, so **8,000 stays**. GPU peak for this project 3.8 GiB (24,000-char indexing). Reports: `data/reports/m8-caps-dev.json`, `m8-caps-test.json`; each non-default cap has its own scratch schema `ctc_skillret[_train]_sk<N>`.
+
 ## US2/US4: fusion, rerank order, significance
 
 Dev, full order, NDCG@10 vs the same text with `rrf` (positive Δ = rrf better): score fusion `w` 0.5: +0.189 (`current`) / +0.252 (`skillret`), `w` 0.7: +0.028 / +0.050 (p ≤ 3e-6), `w` 0.9: +0.003 / +0.003 (p 0.43 / 0.33, no difference). `rerank_by: logit` minus sigmoid: −0.0001 / +0.0006 (p 0.88 / 0.19). So both knobs stay at their old defaults; fusion would only be tried further with a BM25-style keyword arm (our `ts_rank_cd` is not bounded like BM25). Not run on test, by the dev rule.
@@ -60,7 +70,7 @@ Per the rule the gate stays **off**. The `lr` result is a large change from the 
 
 ## US5: rate limit
 
-`hit_rate` is one Lua call over a sorted set; it counts blocked attempts too, so a client that keeps sending more than the limit per minute stays blocked until it backs off (no Retry-After). Tests: the fail-open case runs (closed port, no server); the sliding-window case skips without a scratch Redis. The review checked the script against Redis 5.1 Lua rules by reading; a builder ran the same script on fakeredis + lupa (Lua 5.4) and it passed the same scenario.
+`hit_rate` is one Lua call over a sorted set; it counts blocked attempts too, so a client that keeps sending more than the limit per minute stays blocked until it backs off (no Retry-After). Tests: the fail-open case runs (closed port, no server); the sliding-window case needs a scratch Redis. It **passes on a real Redis 8.2** (`tests/test_rate_limit.py`, 2 passed, run 2026-10-27 against a throwaway `redis:8.2` container on `:18395`, since stopped); before that a builder had run the same script on fakeredis + lupa (Lua 5.4).
 
 ## Review (CLAUDE.md /2: one reviewer, critical/high only) and fixes
 
@@ -77,7 +87,7 @@ Every number in this file and in the two CLAUDE.md Decisions lines was re-derive
 | 3 | low | `ctc.ai.enrich --selfcheck` asserts `1 + len(triggers)` vectors per cap, which cannot hold under `skillret` (one vector per cap); not in CI | update the assertion or run the self-check with `embed.text: current` |
 | 4 | low | `LocalStore` (no-DB mode, `storage/local.py`) still embeds `name: description` docs but queries with the `skillret` prefix | add body-aware docs there or pin it to the `coding` prefix |
 | 5 | low | after a daemon restart the startup `index` job re-embeds the library; bundles computed in that window are semantic-cached for 24 h (`library_version` does not change on re-embed), and each insert batch marks vectors dirty so prompts in the window reload them | flush the `sem:`/`bundle:` Redis keys after the re-embed finishes (cache only, rebuildable; your yes); running `ctc.ai.enrich --dedup-only` before the re-index dissolves clusters, so index first |
-| 6 | low | `ablate` `body:N` reads the single `_sk` schema (indexed at 8,000) but the header reports N; `ranking` (rrf write path) drops `rerank_by` from the yaml line (the default fills it); the module docstring line 3 still says `index-skillret` writes `ctc_skillret` | re-index per cap before comparing caps; fix the docstring when next in that file |
+| 6 | low | ~~`ablate` `body:N` reads the single `_sk` schema~~ **fixed**: a cap other than 8,000 now has its own `_sk<N>` schema. `ranking` (rrf write path) still drops `rerank_by` from the yaml line (the default fills it); the module docstring line 3 still says `index-skillret` writes `ctc_skillret` (true for `--text current`) | fix when next in that file |
 | 7 | low | project vector cache is keyed by model, not instruction (cosine old vs new for this repo's profile 0.967) | negligible; refreshes when CLAUDE.md or the manifests change |
 
 Not verified by the reviewer: the limiter Lua on a real Redis, live Supabase behaviour of the one-statement stale-vector delete (~6.3k rows) and of `dedup`'s large text parameter through the pooler, and the real re-embed time of the live library.
@@ -90,15 +100,15 @@ Not verified by the reviewer: the limiter Lua on a real Redis, live Supabase beh
 
 ## Not verified / not done (be explicit)
 
-- The Lua limiter on a real Redis: no scratch Redis was started (starting a container needs your yes). Run `tests/test_rate_limit.py` with `CTC_REDIS_URL` pointing at a throwaway Redis 8 (`docker run -d --rm --name ctc-scratch-redis -p 127.0.0.1:18395:6379 redis:8.2`).
-- Own-transcript rows (`data/processed/own-eval.jsonl`) are absent from this checkout, so the in-domain check of the text flip, `run` and `memory_eval` were not run. The 2026-10-22 Decision makes SkillRet and MetaTool the gate; H1 rows remain the secondary check.
-- Body cap: 8,000 chars truncates 2,432 of 6,006 test bodies; the 2,000 and uncapped caps were not measured (the `_sk` schema holds the 8,000 index).
+- Own-transcript check: **not finished**. `data/processed/own-eval.jsonl` was absent, so I re-ran the K1 labeler (`python -m evaluation.label`, local Qwen2.5-3B on `llama-server`; 304 candidate prompts, 251 test). It was stopped at 71 labelled rows, so there is no `current` vs `skillret` result on your own prompts, and `run` and `memory_eval` were not run. The tooling is in: `index-own` (this machine's 699 capabilities, scanned like K1 does, indexed in both text modes into scratch schemas `ctc_own` and `ctc_own_sk`; A1 summaries read from the live index, read-only) and `ablate --on own --split dev|test`; `run` now reads that library. The labels are LLM-made and unchecked (H1 is yours). The 2026-10-22 Decision makes SkillRet and MetaTool the gate; H1 rows remain the secondary check.
 - Live deploy: nothing was re-embedded and the daemon was not restarted. After merging, `ctc index` (or the daemon's startup index) re-embeds every capability with the `skillret` text, and cached bundles built under the old settings are invalidated by the new `router_version`.
-- Graph hook: `ctc graph extract` sent 40 of 69 changed chunks (29 left for the next run) and logged several unparsable replies (CLAUDE.md and the n8n-parity docs among them); `ctc graph build` then succeeded (612 extracted, 886 inferred links; 85% of tasks linked). The `after_implement` review hook (`ctc graph confirm` writes to Supabase) was **not** run: it needs your yes.
+- Graph hook: `ctc graph extract` sent 40 of 69 changed chunks (29 left for the next run) and logged several unparsable replies (CLAUDE.md and the n8n-parity docs among them); `ctc graph build` then succeeded (612 extracted, 886 inferred links; 85% of tasks linked). The `after_implement` review hook was run on request after ticking the finished tasks and rebuilding the graph: 30 inferred `implemented_in` links reviewed, 16 kept, 14 dropped (e.g. `build_index`, `rrf`, `Hit`, `LocalStore.candidates` were consumers or untouched code, not the implementation of their task). `ctc graph extract` was not re-run after the last doc edits.
 - Deferred rows 6 (SKILLRET-Reranker sidecar: rerank still hurts with the new text, so it is the natural next lever), 8 (native http hook) and 9 (usage arm) have their triggers in `spec.md`.
 - `THIRD_PARTY_NOTICES.md` links the Apache-2.0 license rather than bundling its text, and `cache.py` carries the SPDX line but not upstream's copyright line (reviewer nit; one line each to add).
 
 ## Reproduce
+
+(Body caps: `index-skillret --text skillret --body-chars 2000|24000`, then `ablate --split dev|test --variant b2000=text:skillret,body:2000,kw:0,rw:0 --variant b8000=... --variant b24000=...`. Own library: `index-own --text current|skillret` with `CTC_LIVE_DATABASE_URL` set to the live URL for A1 summaries, then `ablate --on own --split test ...`.)
 
 ```bash
 export CTC_DATABASE_URL="$(grep -E '^# dev stand-in' .env | sed -E 's/^.*CTC_DATABASE_URL=//')"   # scratch ctc-dev-pg, never Supabase
