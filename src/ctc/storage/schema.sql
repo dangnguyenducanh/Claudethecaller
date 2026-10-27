@@ -138,6 +138,66 @@ create table if not exists {schema}.memories (
 create index if not exists memories_hnsw on {schema}.memories using hnsw (embedding extensions.vector_cosine_ops);
 create index if not exists memories_live on {schema}.memories (user_id, scope, project_id) where deleted_at is null;
 
+-- m7 claude-mem port: what the observer saw in the tool calls (separate from memories: these come from tool output, not the user's words)
+create or replace function {schema}.obs_text(title text, subtitle text, narrative text, facts text[], concepts text[]) returns text
+  language sql immutable parallel safe
+  as $$ select {schema}.unaccent_i($1 || ' ' || coalesce($2, '') || ' ' || coalesce($3, '') || ' '
+        || array_to_string(coalesce($4, '{}'), ' ') || ' ' || array_to_string(coalesce($5, '{}'), ' ')) $$;
+
+create table if not exists {schema}.observations (
+  id bigserial primary key,                 -- short ids: they are printed on every index row
+  user_id text not null default 'local',
+  project_id text not null,
+  session_id text not null references {schema}.sessions (id) on delete cascade,
+  prompt_number int not null default 0,
+  type text not null check (type in ('bugfix', 'feature', 'refactor', 'change', 'discovery', 'decision',
+                                     'security_alert', 'security_note', 'sensitive')),
+  title text not null,
+  subtitle text not null default '',
+  narrative text not null default '',
+  facts text[] not null default '{}',
+  concepts text[] not null default '{}',
+  files_read text[] not null default '{}',      -- project-relative
+  files_modified text[] not null default '{}',  -- from Edit / Write tool inputs, not the model
+  content_hash text not null,                   -- sha256(session_id \0 title \0 narrative)[:16]
+  discovery_tokens int not null default 0,      -- observer usage / observations in that call
+  model text not null default '',
+  created_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  embedding extensions.vector(1024) not null,
+  tsv tsvector generated always as (to_tsvector('simple', {schema}.obs_text(title, subtitle, narrative, facts, concepts))) stored,
+  unique (session_id, content_hash),
+  foreign key (user_id, project_id) references {schema}.projects (user_id, id) on delete cascade
+);
+create index if not exists observations_recent on {schema}.observations (user_id, project_id, created_at desc, id desc) where deleted_at is null;
+create index if not exists observations_tsv on {schema}.observations using gin (tsv);
+create index if not exists observations_hnsw on {schema}.observations using hnsw (embedding extensions.vector_cosine_ops);
+
+create table if not exists {schema}.session_summaries (
+  id bigserial primary key,
+  user_id text not null default 'local',
+  project_id text not null,
+  session_id text not null references {schema}.sessions (id) on delete cascade,
+  prompt_number int not null default 0,
+  request text not null default '', investigated text not null default '', learned text not null default '',
+  completed text not null default '', next_steps text not null default '', notes text not null default '',
+  files_read text[] not null default '{}', files_edited text[] not null default '{}',
+  discovery_tokens int not null default 0,
+  model text not null default '',
+  created_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  tsv tsvector generated always as (to_tsvector('simple', {schema}.unaccent_i(request || ' ' || investigated || ' ' || learned
+       || ' ' || completed || ' ' || next_steps || ' ' || notes))) stored,
+  unique (session_id, prompt_number),           -- a retry or a transcript re-read from 0 upserts, never doubles a turn's summary
+  foreign key (user_id, project_id) references {schema}.projects (user_id, id) on delete cascade
+);
+create index if not exists summaries_recent on {schema}.session_summaries (user_id, project_id, created_at desc, id desc) where deleted_at is null;
+create index if not exists summaries_tsv on {schema}.session_summaries using gin (tsv);
+
+alter table {schema}.sessions
+  add column if not exists observed_bytes bigint not null default 0,  -- m7: byte offset in transcript_path the observer has processed
+  add column if not exists observed_prompts int not null default 0;   -- typed prompts seen so far (the prompt_number source)
+
 create table if not exists {schema}.dedup_review (
   id bigserial primary key,
   a text not null,
@@ -310,3 +370,5 @@ alter table {schema}.wf_schedules enable row level security;
 alter table {schema}.graph_nodes enable row level security;
 alter table {schema}.graph_edges enable row level security;
 alter table {schema}.graph_sources enable row level security;
+alter table {schema}.observations enable row level security;
+alter table {schema}.session_summaries enable row level security;

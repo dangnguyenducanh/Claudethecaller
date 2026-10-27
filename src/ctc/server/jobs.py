@@ -27,11 +27,13 @@ HANDLERS = {
     "distill": "ctc.ingestion.history:run_distill",
     "graph_build": "ctc.graph.build:run_job",  # m6
     "graph_extract": "ctc.graph.extract:run_job",
+    "observe": "ctc.memory.observe:run_job",  # m7
 }
 # ponytail: no timeout for these: a first import or a long session's distill (LLM chunks + replay) passes 60 s; a hung
 # LLM call holds the worker until the openai client's own 600 s timeout. Per-kind timeouts if that bites.
 # graph_build / graph_extract: an embedding pass or up to max_chunks_per_run claude calls (each capped by its timeout_s) pass 60 s.
-UNTIMED = {"index", "history", "distill", "graph_build", "graph_extract"}
+# observe: up to max_calls_per_job claude calls, each with its own 120 s timeout.
+UNTIMED = {"index", "history", "distill", "graph_build", "graph_extract", "observe"}
 COLS = "id::text as id, kind, status, progress, result, error, created_at"
 
 

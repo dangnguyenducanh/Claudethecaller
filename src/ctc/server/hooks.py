@@ -27,8 +27,10 @@ from ctc.decision.bundle import Bundle, decide, followed, stage_rows, suggestion
 from ctc.graph import core, push
 from ctc.graph.extract import SOURCE, prose
 from ctc.ingestion.scanner import project_id
+from ctc.llm.client import _redact
 from ctc.memory.longterm import recall
 from ctc.memory.session import blend, project_vector, session_vector
+from ctc.memory.tags import strip_tags
 from ctc.retrieval.hybrid import result_json, search
 from ctc.runner.engine import in_runs
 from ctc.server.jobs import submit
@@ -145,7 +147,8 @@ async def _prompt(st: State, body: dict, user_id: str) -> str:
     """Route one UserPromptSubmit and write its session + decision rows; never raises."""
     try:
         prompt, sid, cwd = (str(body.get(f) or "") for f in ("prompt", "session_id", "cwd"))
-        if not (prompt.strip() and sid and cwd) or _in_run(body):
+        prompt = _redact(strip_tags(prompt))  # m7 FR-004: <private> text and secrets never reach route(), decisions or the title
+        if not (prompt and sid and cwd) or _in_run(body):
             return ""
         pid = project_id(cwd)
         if (user_id, pid) not in st.names:  # first sight in this worker: the row (FK of sessions), then its .claude/ caps
@@ -207,6 +210,36 @@ async def hook_pre(request: Request) -> Response:
         log.info("hook/pre over its %.0f ms budget: no note", PRE_BUDGET_S * 1000)
     except Exception:
         log.exception("hook/pre failed; no note")
+    return Response(status_code=200)
+
+
+START_BUDGET_S = 0.9  # curl -m 1 (m7 D16): the one hook allowed 1 s, it runs once per session; a warm ctx: key answers in ms
+STATS = re.compile(r"^Stats: (\d+) obs", re.MULTILINE)  # the index's own count; the welcome text of an empty project has none
+
+
+@router.post("/v1/hook/start")
+async def hook_start(request: Request) -> Response:
+    """SessionStart on startup|clear|compact (m7 FR-006): the project's memory index as additional context, framed as retrieved
+    data. Never creates a project row or a job (a hook in every repo must not opt it in); off, resume, a skipped or run
+    project, a miss that outlives its budget or any error = empty 200."""
+    try:
+        # here, not at the top: observations.py imports hooks._embed itself (circular)
+        from ctc.memory import observations
+        st, user_id, body = _st(request), _user(request), await _body(request)
+        cwd = str(body.get("cwd") or "")
+        pid = project_id(cwd)
+        name = st.names.get((user_id, pid)) or Path(cwd).name
+        if (cwd and st.cfg["memory"]["enabled"] and body.get("source") != "resume" and not _in_run(body)
+                and not {name, Path(cwd).name} & set(st.cfg["history"]["skip_projects"])):
+            text = await asyncio.wait_for(observations.context_text(st, user_id, pid, name), START_BUDGET_S)
+            out = {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}
+            if m := STATS.search(text):
+                out["systemMessage"] = f"ctc memory: {m[1]} observations · http://127.0.0.1:{st.cfg['port']}/#memories"
+            return JSONResponse(out)
+    except TimeoutError:
+        log.info("hook/start over its %.0f ms budget: no context", START_BUDGET_S * 1000)
+    except Exception:
+        log.exception("hook/start failed; no context")
     return Response(status_code=200)
 
 
@@ -310,6 +343,23 @@ async def _want_extract(st: State, sid: str, end: bool, user_id: str) -> bool:
     return await st.store.fetchval(INFLIGHT_SQL, (user_id, "distill" if end else "extract", sid)) is None
 
 
+# a queued observe job for the session reads up to its payload's upto when it runs: a second Stop only raises it
+OBSERVE_UPTO_SQL = ("update jobs set payload = jsonb_set(payload, '{upto}', to_jsonb(greatest((payload->>'upto')::bigint, %s::bigint)))"
+                    " where user_id = %s and kind = 'observe' and status = 'queued' and payload->>'session_id' = %s")
+
+
+async def _observe(st: State, sid: str, cwd: str, path: Path, upto: int, end: bool, user_id: str) -> None:
+    """m7: queue the capture job for the turn that just finished. Only with memory.enabled, never for a skip_projects project
+    (name or folder basename); the payload holds ids and the transcript size at Stop time, never last_assistant_message.
+    A running job does not count: it may have stopped reading before this turn."""
+    pid = project_id(cwd)
+    if not st.cfg["memory"]["enabled"] or {st.names.get((user_id, pid)), Path(cwd).name} & set(st.cfg["history"]["skip_projects"]):
+        return
+    if not await st.store.execute(OBSERVE_UPTO_SQL, (upto, user_id, sid)):
+        await submit(st, "observe", {"session_id": sid, "project_id": pid, "user_id": user_id, "transcript_path": str(path),
+                                     "final": end, "upto": upto}, user_id)
+
+
 async def _stop(st: State, body: dict, user_id: str) -> None:
     """Stop and SessionEnd (same endpoint; Claude Code names the event in hook_event_name)."""
     try:
@@ -318,17 +368,19 @@ async def _stop(st: State, body: dict, user_id: str) -> None:
             return
         end = body.get("hook_event_name") == "SessionEnd"
         await write(st, "event", {"session_id": sid, "type": "session_end" if end else "stop", "payload": {}})
-        model, tokens, path = "", 0, None
+        model, tokens, path, upto = "", 0, None, 0
         if st.cfg["mode"] == "local" and tp:  # shared mode: the transcript is on the client's disk
             p = Path(tp).expanduser().resolve()
             # the TCP port is open to every local user: read only Claude Code transcripts (same rule as ai/extract.py)
             if p.suffix == ".jsonl" and p.is_relative_to(Path(st.cfg["claude_home"]).resolve() / "projects") and p.is_file():
-                path = p
+                path, upto = p, p.stat().st_size
                 model, tokens = await asyncio.to_thread(_usage, p)
         await write(st, "session_end", {"id": sid, "model": model, "tokens": tokens})
         if path and await _want_extract(st, sid, end, user_id):
             await submit(st, "distill" if end else "extract", {"session_id": sid, "transcript_path": str(path),
                                          "project_id": project_id(cwd) if cwd else None, "user_id": user_id}, user_id)
+        if path and cwd:
+            await _observe(st, sid, cwd, path, upto, end, user_id)
     except Exception:
         log.exception("hook/stop failed")
 

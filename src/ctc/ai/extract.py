@@ -14,7 +14,9 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field, create_model
 
 from ctc.ingestion.scanner import project_id
+from ctc.llm.client import _redact
 from ctc.memory.longterm import NOOP_MIN, UPDATE_MIN, Memory, write_memory
+from ctc.memory.tags import strip_tags
 from ctc.runner.engine import in_runs
 
 MAX_NEW, MAX_EXISTING, TURN_CHARS = 8, 20, 2000
@@ -90,7 +92,7 @@ def transcript_text(path, max_chars: int = 12000) -> str:
             parts = [p for p in ([{"type": "text", "text": c}] if isinstance(c, str) else c if isinstance(c, list) else []) if isinstance(p, dict)]
             if any(p.get("type") == "tool_result" for p in parts):
                 continue
-            texts = [t for p in parts if p.get("type") == "text" and (t := INJECTED.sub("", str(p.get("text", ""))).strip())
+            texts = [t for p in parts if p.get("type") == "text" and (t := INJECTED.sub("", _redact(strip_tags(str(p.get("text", ""))))).strip())
                      and not t.startswith("[Request interrupted")]
             if texts:
                 turns.append("User: " + "\n".join(texts)[:TURN_CHARS])

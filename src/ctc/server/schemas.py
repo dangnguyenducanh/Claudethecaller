@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -224,6 +224,65 @@ class DedupResolve(BaseModel):
     action: Literal["merge", "keep_apart"]
 
 
+ObsType = Literal["bugfix", "feature", "refactor", "change", "discovery", "decision", "security_alert", "security_note", "sensitive"]
+
+
+class Observation(BaseModel):  # types.ts Observation: what the observer saw in one turn's tool calls
+    id: int
+    project: str
+    session_id: str
+    prompt_number: int
+    type: ObsType
+    title: str
+    subtitle: str
+    narrative: str
+    facts: list[str]
+    concepts: list[str]
+    files_read: list[str]
+    files_modified: list[str]
+    discovery_tokens: int
+    created_at: datetime
+    deleted_at: datetime | None
+
+
+class Summary(BaseModel):  # types.ts Summary: one turn's summary
+    id: int
+    project: str
+    session_id: str
+    prompt_number: int
+    request: str
+    investigated: str
+    learned: str
+    completed: str
+    next_steps: str
+    notes: str
+    files_read: list[str]
+    files_edited: list[str]
+    created_at: datetime
+    deleted_at: datetime | None
+
+
+class PromptItem(BaseModel):  # a decision's prompt in the feed
+    item_type: Literal["prompt"]
+    id: int
+    session_id: str
+    prompt_number: int
+    text: str
+    created_at: datetime
+
+
+class ObservationItem(Observation):
+    item_type: Literal["observation"]
+
+
+class SummaryItem(Summary):
+    item_type: Literal["summary"]
+
+
+FeedItem = Annotated[ObservationItem | SummaryItem | PromptItem, Field(discriminator="item_type")]
+FeedCounts = dict[str, int]  # ObsType | "summary" | "prompt" -> n, zeros left out
+
+
 class Session(BaseModel):
     id: str
     project: str
@@ -235,6 +294,7 @@ class Session(BaseModel):
     decisions: int
     followed: int
     memories: int
+    observations: int = 0
     source: Source
     summary: str | None
     status: Literal["pending", "processed", "failed"]
@@ -271,6 +331,8 @@ class SessionDetail(BaseModel):  # types.ts: Session minus its counts, plus the 
     git_branch: str | None
     decisions: list[Decision]
     memories: list[Memory]
+    observations: list[Observation] = []
+    summaries: list[Summary] = []
 
 
 class MemoryDetail(Memory):

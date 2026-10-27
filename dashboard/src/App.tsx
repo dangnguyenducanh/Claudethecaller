@@ -16,14 +16,16 @@ type View = (typeof VIEWS)[number]
 const SHARED_ONLY: View[] = ['keys']
 export type ViewProps = { project: string | null; range: Range; setRange: (r: Range) => void; projects: string[] }
 
-/** '#library' → view; '#decision/12' → the Overview with decision 12 open; '#run/7' → run 7's page; '#compare/7/9[/node]' → runs 7 and 9 compared. */
-function parseHash(): { view: View; decision: number | null; run: number | null; compare: string | null } {
+/** '#library' → view; '#decision/12' → the Overview with decision 12 open; '#run/7' → run 7's page; '#compare/7/9[/node]' → runs 7 and 9 compared; '#memories?session=<id>' → the Memories timeline of one session. */
+function parseHash(): { view: View; decision: number | null; run: number | null; compare: string | null; memSession: string | null } {
   const h = location.hash.slice(1)
   const m = /^(decision|run)\/(\d+)$/.exec(h)
-  if (m) return m[1] === 'run' ? { view: 'runs', decision: null, run: Number(m[2]), compare: null } : { view: 'overview', decision: Number(m[2]), run: null, compare: null }
+  if (m) return m[1] === 'run' ? { view: 'runs', decision: null, run: Number(m[2]), compare: null, memSession: null } : { view: 'overview', decision: Number(m[2]), run: null, compare: null, memSession: null }
   const c = /^compare\/(\d+\/\d+(?:\/[a-z0-9-]+)?)$/.exec(h)
-  if (c) return { view: 'runs', decision: null, run: null, compare: c[1] }
-  return { view: VIEWS.includes(h as View) ? (h as View) : 'overview', decision: null, run: null, compare: null }
+  if (c) return { view: 'runs', decision: null, run: null, compare: c[1], memSession: null }
+  const ms = /^memories\?session=([\w-]+)$/.exec(h) // the Memories timeline filtered to one session
+  if (ms) return { view: 'memories', decision: null, run: null, compare: null, memSession: ms[1] }
+  return { view: VIEWS.includes(h as View) ? (h as View) : 'overview', decision: null, run: null, compare: null, memSession: null }
 }
 
 const ICONS: Record<View, string> = {
@@ -58,6 +60,7 @@ export default function App() {
   const [decisionId, setDecisionId] = useState<number | null>(() => parseHash().decision)
   const [runId, setRunId] = useState<number | null>(() => parseHash().run)
   const [compare, setCompare] = useState<string | null>(() => parseHash().compare)
+  const [memSession, setMemSession] = useState<string | null>(() => parseHash().memSession)
   const [project, setProject] = useState<string | null>(null)
   const [range, setRange] = useState<Range>('30d')
   const [projects, setProjects] = useState<Project[]>([])
@@ -83,9 +86,11 @@ export default function App() {
     loadProjects()
     setRev(r => r + 1)
   }
-  useEffect(() => { location.hash = decisionId ? `decision/${decisionId}` : runId ? `run/${runId}` : compare ? `compare/${compare}` : view }, [view, decisionId, runId, compare])
+  useEffect(() => {
+    location.hash = decisionId ? `decision/${decisionId}` : runId ? `run/${runId}` : compare ? `compare/${compare}` : view === 'memories' && memSession ? `memories?session=${memSession}` : view
+  }, [view, decisionId, runId, compare, memSession])
   useEffect(() => { // back/forward and pasted #links switch views or open a decision
-    const onHash = () => { const h = parseHash(); setView(h.view); setDecisionId(h.decision); setRunId(h.run); setCompare(h.compare) }
+    const onHash = () => { const h = parseHash(); setView(h.view); setDecisionId(h.decision); setRunId(h.run); setCompare(h.compare); setMemSession(h.memSession) }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
@@ -109,7 +114,7 @@ export default function App() {
           claudethecaller
         </div>
         {VIEWS.filter(v => !SHARED_ONLY.includes(v) || health?.mode === 'shared').map(v => (
-          <button key={v} className={'navitem' + (v === view ? ' on' : '')} onClick={() => { setDecisionId(null); setRunId(null); setCompare(null); setView(v) }}>
+          <button key={v} className={'navitem' + (v === view ? ' on' : '')} onClick={() => { setDecisionId(null); setRunId(null); setCompare(null); setMemSession(null); setView(v) }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d={ICONS[v]} /></svg>
             {v[0].toUpperCase() + v.slice(1)}
           </button>
@@ -153,7 +158,7 @@ export default function App() {
         {view === 'workflows' && <Workflows {...props} theme={theme} />}
         {view === 'runs' && <Runs runId={runId} compare={compare} onRun={setRunId} theme={theme} />}
         {view === 'sessions' && <Sessions {...props} />}
-        {view === 'memories' && <Memories {...props} />}
+        {view === 'memories' && <Memories {...props} session={memSession} onClearSession={() => setMemSession(null)} />}
         {view === 'jobs' && <Jobs {...props} />}
         {view === 'keys' && <Keys />}
       </main>
@@ -172,7 +177,7 @@ function ProjectMenu({ name, onChanged }: { name: string; onChanged: (from: stri
     try { const p = await api.renameProject(name, to.trim()); onChanged(name, p.name) } catch (e) { setErr(errText(e)) }
   }
   const forget = async () => {
-    if (!confirm(`Forget project ${name}? This deletes its sessions, decisions, events, project memories and overrides from claudethecaller. Files on disk are untouched.`)) return
+    if (!confirm(`Forget project ${name}? This deletes its sessions, decisions, events, observations and summaries, project memories and overrides from claudethecaller. Files on disk are untouched.`)) return
     try { await api.deleteProject(name); onChanged(name, null) } catch (e) { setErr(errText(e)) }
   }
   return (

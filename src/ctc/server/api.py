@@ -15,6 +15,7 @@ import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from ctc.ingestion import history as hist
+from ctc.memory.observations import _FROM, _OSEL, _SSEL, ctx_key
 from ctc.server import jobs
 from ctc.server.schemas import (
     KPI_KEYS,
@@ -148,7 +149,7 @@ async def delete_project(name: str, request: Request):
     if pid is None:
         fail(404, "not_found", f"no project {name}")
     st.names.pop((u, pid), None)
-    await st.cache.delete(f"ovr:{u}:{pid}")
+    await st.cache.delete(f"ovr:{u}:{pid}", ctx_key(u, pid))  # the observations went with the project (FK cascade)
     await st.cache.publish_inval("ovr", user=u, project=pid)
     return Ok()
 
@@ -256,10 +257,12 @@ async def sessions(request: Request, project: str | None = None, q: str | None =
         f"""select {SESSION_COLS},
               (select count(*) from decisions d where d.session_id = s.id) as decisions,
               (select count(*) from decisions d where d.session_id = s.id and d.followed) as followed,
-              coalesce(mm.n, 0) as memories
+              coalesce(mm.n, 0) as memories, coalesce(oc.n, 0) as observations
             from {SESSION_FROM}
             left join (select source->>'session_id' as sid, count(*) as n from memories
                        where user_id = %(u)s and source->>'kind' = 'session' and deleted_at is null group by 1) mm on mm.sid = s.id
+            left join (select session_id, count(*) as n from observations
+                       where user_id = %(u)s and deleted_at is null group by 1) oc on oc.session_id = s.id
             where s.user_id = %(u)s and (%(p)s::text is null or s.project_id = %(p)s)
               and (%(q)s::text is null or s.title ilike %(q)s or s.model ilike %(q)s)
               and (%(src)s::text is null or s.source = %(src)s)
@@ -280,8 +283,12 @@ async def session(sid: str, request: Request):
                         where d.user_id = s.user_id and d.session_id = s.id) x), '[]') as decisions,
               coalesce((select json_agg(x order by x.updated_at desc) from (select {MEM_COLS} from {MEM_FROM}
                         where m.user_id = s.user_id and m.source @> jsonb_build_object('kind', 'session', 'session_id', s.id)) x),
-                       '[]') as memories
-            from {SESSION_FROM} where s.user_id = %s and s.id = %s""", (u, sid))
+                       '[]') as memories,
+              coalesce((select json_agg(x order by x.created_at desc, x.id desc) from (select {_OSEL} from {_FROM['o']}
+                        where o.user_id = s.user_id and o.session_id = s.id and o.deleted_at is null) x), '[]') as observations,
+              coalesce((select json_agg(x order by x.created_at desc, x.id desc) from (select {_SSEL} from {_FROM['s']}
+                        where s.user_id = %(u)s and s.session_id = %(sid)s and s.deleted_at is null) x), '[]') as summaries
+            from {SESSION_FROM} where s.user_id = %(u)s and s.id = %(sid)s""", {"u": u, "sid": sid})
     if not r:
         fail(404, "not_found", f"no session {sid}")
     return {**r, "followed": sum(x["followed"] for x in r["decisions"]), "decisions": [to_decision(x) for x in r["decisions"]],
@@ -290,9 +297,11 @@ async def session(sid: str, request: Request):
 
 @router.delete("/sessions/{sid}", response_model=Ok)
 async def delete_session(sid: str, request: Request):
-    st, u = ctx(request)  # decisions and events cascade; memories stay (their source keeps the id as text)
-    if not await st.store.execute("delete from sessions where user_id = %s and id = %s", (u, sid)):
+    st, u = ctx(request)  # decisions, events and observations cascade; memories stay (their source keeps the id as text)
+    r = await st.store.fetchrow("delete from sessions where user_id = %s and id = %s returning project_id", (u, sid))
+    if not r:
         fail(404, "not_found", f"no session {sid}")
+    await st.cache.delete(ctx_key(u, r["project_id"]))
     return Ok()
 
 

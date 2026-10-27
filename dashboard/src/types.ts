@@ -62,9 +62,10 @@ export interface Session {
   id: string; project: string; title: string; model: string; started_at: string
   turns: number; tokens: number; decisions: number; followed: number; memories: number
   source: Source; summary: string | null; status: 'pending' | 'processed' | 'failed'; git_branch: string | null
+  observations?: number // m7: observations captured in this session
 }
 // Contract says `Session + {decisions: Decision[], memories: Memory[]}`; those names clash with Session's counts, so the arrays win here.
-export type SessionDetail = Omit<Session, 'decisions' | 'memories'> & { decisions: Decision[]; memories: Memory[] }
+export type SessionDetail = Omit<Session, 'decisions' | 'memories' | 'observations'> & { decisions: Decision[]; memories: Memory[]; observations?: Observation[]; summaries?: Summary[] }
 
 export interface Memory {
   id: string; scope: 'global' | 'project'; project: string | null; kind: MemoryKind
@@ -73,6 +74,22 @@ export interface Memory {
   deleted_at?: string | null // not in PLAN's field list yet; needed to show "Restore" when include_deleted=true
 }
 export interface MemoryDetail extends Memory { history: Memory[] }
+
+// m7 timeline: what the agent did, captured per tool call (specs/003-claude-mem-memory/contracts/api.md).
+export type ObsType = 'bugfix' | 'feature' | 'refactor' | 'change' | 'discovery' | 'decision' | 'security_alert' | 'security_note' | 'sensitive'
+export interface Observation {
+  id: number; project: string; session_id: string; prompt_number: number; type: ObsType; title: string
+  subtitle: string; narrative: string; facts: string[]; concepts: string[]; files_read: string[]; files_modified: string[]
+  discovery_tokens: number; created_at: string; deleted_at: string | null
+}
+export interface Summary {
+  id: number; project: string; session_id: string; prompt_number: number; request: string; investigated: string
+  learned: string; completed: string; next_steps: string; notes: string; files_read: string[]; files_edited: string[]
+  created_at: string; deleted_at: string | null
+}
+export interface PromptItem { id: number; session_id: string; prompt_number: number; text: string; created_at: string }
+export type FeedItem = ({ item_type: 'observation' } & Observation) | ({ item_type: 'summary' } & Summary) | ({ item_type: 'prompt' } & PromptItem)
+export type FeedCounts = Partial<Record<ObsType | 'summary' | 'prompt', number>>
 export interface NewMemory { scope: 'global' | 'project'; project?: string; kind: MemoryKind; text: string; pinned?: boolean }
 export type MemoryPatch = Partial<Pick<Memory, 'text' | 'pinned' | 'kind' | 'scope'>>
 export interface MemoryWrite { action: 'ADD' | 'UPDATE' | 'NOOP'; memory: Memory }
