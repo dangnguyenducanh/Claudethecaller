@@ -21,5 +21,10 @@ if [ -n "${CTC_REDIS_URL:-}" ]; then uv run python -m ctc.storage.cache; else ec
 pnpm -C dashboard install --frozen-lockfile
 pnpm -C dashboard build
 
+pnpm install --frozen-lockfile
+pnpm -r lint
+pnpm -r typecheck
+pnpm -r test
+
 if command -v gitleaks >/dev/null; then gitleaks git --no-banner .; else echo "skip secret scan: gitleaks not installed (CI runs it)"; fi
 echo "check.sh: all ok"

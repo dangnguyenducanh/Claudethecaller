@@ -235,6 +235,7 @@ check('D9', 'every package has package.json, tsconfig, src/index.ts, a test, the
 // ---- D10 tsconfig flags
 check('D10', 'strict flags catch the planted errors', () => {
   const d = path.join(TMP, 'ts'); fs.mkdirSync(d);
+  fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ type: 'module' }));
   fs.writeFileSync(path.join(d, 'f.ts'), `const a: string = 1;\nconst arr: number[] = [];\nconst b: number = arr[0];\nenum E { A }\nconst o: { p?: number } = { p: undefined };\nexport { a, b, E, o };\n`);
   fs.writeFileSync(path.join(d, 'tsconfig.json'), JSON.stringify({ extends: path.join(ROOT, 'tsconfig.base.json'), compilerOptions: { types: [] }, files: ['f.ts'] }));
   const r = sh('pnpm', ['-C', 'packages/shared', 'exec', 'tsc', '-p', path.join(d, 'tsconfig.json'), '--noEmit']);

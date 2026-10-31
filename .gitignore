@@ -14,3 +14,5 @@ dashboard/dist/
 dashboard/tsconfig.tsbuildinfo
 /graphify/
 fixtures/py-baseline/local/
+node_modules/
+*.tsbuildinfo
