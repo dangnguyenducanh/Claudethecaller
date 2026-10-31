@@ -1,0 +1,11 @@
+{
+ "recorded_at": "2026-10-31T12:37:11+00:00",
+ "daemon": "http://127.0.0.1:18310 (read-only MCP calls)",
+ "library_version": "196c3ab517449e5d48919fa8d0fbe29a",
+ "project": "claudethecaller",
+ "questions_sha256": "d742b2c81973bd35cc02b98b50317b46a0d0105e9ccad56b12828bbf385d33cf",
+ "answers_sha256": "b93b0775f92e8e8b5dfc1015110c2947576b4250b272c8fb319bfe295dc87e55",
+ "rows": 30,
+ "errors": 3,
+ "note": "Recorded by the T2.4 planner with the same questions, argument names and project as evaluation/record_fixtures.py (T0.1 D13); the T0.1 recorder itself was never run. The daemon's graph is the Python build of the main checkout, so ids of rationale and x- context nodes exist only here."
+}
