@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Self-check for T1.3 (packages/shared/repositories). Run from anywhere: python3 agent/t1-3-repos/selfcheck.py [--fast] [--snapshot]
+"""Self-check for T1.3 (packages/shared/src/repositories). Run from anywhere: python3 agent/t1-3-repos/selfcheck.py [--fast] [--snapshot]
 
 Sections: preflight, own tests + integration tests (Vitest), the checks (checks.mjs), lint (ESLint + tsc), scope
 (only the module and its test files changed since the snapshot), scratch-service leftovers.
@@ -21,10 +21,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 TASK = "T1.3"
-MODULE_DIRS = ["packages/shared/repositories"]          # change here if T1.1 puts sources under src/
-ENTRY_FILES = ["packages/shared/repositories/index.ts"]          # each must exist before anything else runs
-REQUIRED_TESTS = ["packages/shared/repositories/tenancy.test.ts", "packages/shared/repositories/tenancy.cases.ts",
-                  "packages/shared/repositories/schema-assumptions.test.ts"]    # test files that must exist (gate tests)
+MODULE_DIRS = ["packages/shared/src/repositories"]          # T1.1 D3b puts sources under src/
+ENTRY_FILES = ["packages/shared/src/repositories/index.ts"]          # each must exist before anything else runs
+REQUIRED_TESTS = ["packages/shared/src/repositories/tenancy.test.ts", "packages/shared/src/repositories/tenancy.cases.ts",
+                  "packages/shared/src/repositories/schema-assumptions.test.ts"]    # test files that must exist (gate tests)
 SLOW_TEST_GLOBS = ["**/tenancy.test.ts", "**/*.int.test.ts"]       # skipped by --fast
 EXTRA_ALLOWED = []      # non-module paths this task may also create (prefixes)
 DECISION_IDS = [f"D{i}" for i in range(17)]
