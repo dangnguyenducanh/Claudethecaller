@@ -1,9 +1,9 @@
 /**
  * Pure rules of long-term memory extraction: which transcript rows count, the prompts and JSON schemas, the strict parsers of model
  * replies, the write bands (NOOP / UPDATE / SUPERSEDE / ADD) and the summary hash. Ports (embed, nearest, judge, writes) are injected.
- * Called from: apps/worker/src/memory (`llm.extract`, `llm.summarize`); later T4.3 (`save_memory`, `memory.import`, `memory.distill`).
+ * Called from: apps/worker/src/memory (`llm.extract`, `llm.summarize`, `memory.import`) and apps/web/src/memory (`save_memory`, recall). Recall, the start block, memory files and the band ports live in recall.ts, start.ts, files.ts and ports.ts, re-exported at the end.
  * Why: one place decides what a user's own words are and how a fact meets the memories already stored; no I/O so it is testable
- * without disk, Postgres or a model. Deliberately NOT done: reading files, SQL, model calls, queues, recall, the "since last extract" cursor.
+ * without disk, Postgres or a model. Deliberately NOT done: reading files, SQL, queues, the "since last extract" cursor (the band ports in ports.ts only call injected repositories and models).
  * Untrusted: every byte of the transcript and of every model reply; nothing here edits its arguments.
  */
 import { createHash } from 'node:crypto';
@@ -339,3 +339,8 @@ export async function applyBands(ports: BandPorts, fact: Fact, bands: Bands): Pr
 export function summaryHash(sessionId: string, text: string): string {
   return createHash('sha256').update(`summary-v1\n${sessionId}\n${text}`).digest('hex');
 }
+
+export * from './recall.ts';
+export * from './start.ts';
+export * from './files.ts';
+export * from './ports.ts';

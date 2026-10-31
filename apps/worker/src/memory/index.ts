@@ -3,7 +3,7 @@
  * (NOOP / UPDATE / SUPERSEDE / ADD) into `memories`; the whole session becomes 6 summary fields in `session_summaries`.
  * Called from: apps/worker main, bound into `startWorkers({ handlers })` (apps/worker/src/jobs/index.ts). Jobs come from the spool drain
  * (apps/web/src/spool, T4.1) and later from `memory.distill` (T4.3). Why: spec:513-523, so the next session starts with what the user said.
- * Deliberately NOT done: the worker main and config wiring, recall, `memory.import`, `memory.distill`, a "since last extract" cursor, embedding backfill.
+ * Deliberately NOT done: the worker main and config wiring, recall, a "since last extract" cursor, embedding backfill (`memory.import`, `memory.distill` and the file watch live in jobs.ts and watch.ts, re-exported at the end).
  * Untrusted: the job payload (shape checked by runAttempt, meaning checked here), the transcript path and every byte of the file, every model reply.
  * Never: writes the transcript, logs user or model text, builds a fact from assistant text, hard-deletes a memory.
  */
@@ -12,12 +12,11 @@ import { constants } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  applyBands, extractInput, extractMessages, isRunnerSession, memoryLimits, parseExtractReply, parseRelationReply, parseSummaryReply,
-  relationMessages, RELATION_SCHEMA, EXTRACT_SCHEMA, SUMMARY_SCHEMA, sessionText, summaryHash, summaryMessages, userTurns,
-  type Action, type BandPorts, type ChatMessage, type Fact,
+  applyBands, bandPorts, extractInput, extractMessages, isRunnerSession, memoryLimits, parseExtractReply, parseSummaryReply,
+  EXTRACT_SCHEMA, SUMMARY_SCHEMA, sessionText, summaryHash, summaryMessages, userTurns,
+  type Action, type ChatMessage,
 } from '@ctc/core/memory';
-import { memoryHash } from '@ctc/shared/memory-hash';
-import { ModelError, type Chat, type Embed } from '@ctc/shared/models';
+import type { Chat, Embed } from '@ctc/shared/models';
 import { JobDropped } from '@ctc/shared/queues';
 import type { Ctx, Repositories } from '@ctc/shared/repositories';
 import type { Handler } from '../jobs/index.ts';
@@ -99,34 +98,6 @@ export function memoryHandlers(deps: MemoryDeps): { 'llm.extract': Handler; 'llm
     }
   }
 
-  function portsFor(ctx: Ctx, source: unknown, signal: AbortSignal): BandPorts {
-    const { repos: r } = deps;
-    const input = (fact: Fact, embedding: number[]) => ({ scope: fact.scope, kind: fact.kind, text: fact.text, embedding, confidence: fact.confidence, source });
-    return {
-      embed: async (text) => {
-        const [v] = await embed([text], signal);
-        if (!v) throw new ModelError('bad_response', 'no vector');
-        return v;
-      },
-      nearest: async (scope, embedding) => {
-        const [n] = await r.memory.nearest(ctx, { scope, embedding, limit: 1 });
-        return n ? { id: n.memory.id, text: n.memory.text, similarity: n.similarity } : null;
-      },
-      judge: async (oldText, newText) => {
-        try {
-          return parseRelationReply(await chat({ messages: relationMessages(oldText, newText), schema: RELATION_SCHEMA, temperature: 0 }, signal));
-        } catch (e) {
-          if (signal.aborted || !(e instanceof ModelError)) throw e;
-          return null; // judgment: no verdict keeps both rows
-        }
-      },
-      reinforce: async (id) => void (await r.memory.reinforce(ctx, id, today())),
-      rewrite: async (id, text, embedding) => r.memory.rewrite(ctx, id, { text, embedding, hash: memoryHash(text) }),
-      supersede: async (oldId, fact, embedding) => r.memory.supersede(ctx, oldId, input(fact, embedding)),
-      add: async (fact, embedding) => r.memory.add(ctx, input(fact, embedding)),
-    };
-  }
-
   const extract = async (payload: ExtractPayload, job: JobCtx): Promise<unknown> => {
     const { userId, sessionId, projectId } = payload;
     const ctx: Ctx = projectId ? { userId, projectId } : { userId };
@@ -142,7 +113,7 @@ export function memoryHandlers(deps: MemoryDeps): { 'llm.extract': Handler; 'llm
       (raw) => parseExtractReply(raw, { hasProject: Boolean(projectId) }),
       job.signal,
     );
-    const ports = portsFor(ctx, { type: 'session', sessionId, transcriptPath }, job.signal);
+    const ports = bandPorts({ memory: repos.memory, embed, chat, today }, ctx, { source: { type: 'session', sessionId, transcriptPath }, signal: job.signal });
     const counts: Record<Action, number> = { NOOP: 0, UPDATE: 0, SUPERSEDE: 0, ADD: 0 };
     for (const fact of reply.facts) {
       job.signal.throwIfAborted();
@@ -183,3 +154,6 @@ export function memoryHandlers(deps: MemoryDeps): { 'llm.extract': Handler; 'llm
 
   return { 'llm.extract': extract, 'llm.summarize': summarize };
 }
+
+export { memoryJobHandlers, type MemoryJobDeps } from './jobs.ts';
+export { watchMemoryFiles } from './watch.ts';
