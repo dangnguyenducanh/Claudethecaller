@@ -1,0 +1,119 @@
+#!/bin/sh
+# hooks/spool [EventName] < hook-json
+# What: the command Claude Code runs for the PostToolUse, Stop and SessionEnd hooks. It turns the hook's stdin into one
+#   spool file (atomic: .tmp then rename) and nudges ctc-web in the background.
+# Called from: .claude/settings.json hooks (wired by T7.1). The files are drained by apps/web/src/spool.
+# Why: ctc-web may be down during a session; the spool keeps every event until it returns (spec:502-505).
+# NOT done: size limits (the drain moves > 1 MB files to corrupt/), JSON parsing, routing, retries, waiting for the nudge,
+#   any output, any exit status but 0, bash-only syntax (runs under dash), a fallback when awk or od is missing.
+# Env: CTC_SPOOL_DIR (default $HOME/.claudethecaller/spool), CTC_NUDGE_URL (default http://127.0.0.1:${CTC_PORT:-18310}/v1/spool/nudge).
+
+exec >/dev/null 2>&1
+umask 077
+LC_ALL=C
+export LC_ALL
+
+raw=$(cat)
+case $raw in
+  *[![:space:]]*) ;;
+  *) exit 0 ;;
+esac
+
+# Event names and anything else that goes into a file name: letters, digits, underscore; 1..32 chars, starts with a letter.
+event_ok() {
+  case $1 in
+    '' | *[!A-Za-z0-9_]* | [!A-Za-z]*) return 1 ;;
+  esac
+  [ "${#1}" -le 32 ]
+}
+
+# First `"<key>":"<value>"` of stdin, value printed; the key is $1. Reads stdin whole (lines joined by a newline).
+first_value() {
+  awk -v k="$1" '
+    { s = s (NR > 1 ? "\n" : "") $0 }
+    END {
+      key = "\"" k "\""
+      while ((i = index(s, key)) > 0) {
+        s = substr(s, i + length(key))
+        if (match(s, /^[ \t]*:[ \t]*"[^"]*"/)) {
+          v = substr(s, RSTART, RLENGTH)
+          sub(/^[^"]*"/, "", v)
+          sub(/"$/, "", v)
+          printf "%s", v
+          exit
+        }
+      }
+    }'
+}
+
+# Strip: every <private>, <system-reminder>, <persisted-output> block (tags included) is removed, repeated until none is left.
+# An opening tag without a closing tag removes everything to the end (privacy wins; the file then fails JSON parsing).
+payload=$(printf '%s' "$raw" | awk '
+  BEGIN { n = split("private system-reminder persisted-output", T, " ") }
+  { s = s (NR > 1 ? "\n" : "") $0 }
+  END {
+    do {
+      changed = 0
+      for (t = 1; t <= n; t++) {
+        o = "<" T[t] ">"; c = "</" T[t] ">"; out = ""
+        while ((i = index(s, o)) > 0) {
+          changed = 1
+          out = out substr(s, 1, i - 1)
+          s = substr(s, i + length(o))
+          j = index(s, c)
+          if (j == 0) { s = ""; break }
+          s = substr(s, j + length(c))
+        }
+        s = out s
+      }
+    } while (changed)
+    printf "%s", s
+  }') || exit 0
+raw=
+
+event=unknown
+if event_ok "$1"; then
+  event=$1
+else
+  ev=$(printf '%s' "$payload" | first_value hook_event_name)
+  if event_ok "$ev"; then event=$ev; fi
+fi
+
+sid=$(printf '%s' "$payload" | first_value session_id | tr -d '\n' | awk '{ gsub(/[^A-Za-z0-9_-]/, "_"); printf "%s", substr($0, 1, 64) }')
+[ -n "$sid" ] || sid=nosession
+
+dir=${CTC_SPOOL_DIR:-}
+if [ -z "$dir" ]; then
+  [ -n "$HOME" ] || exit 0
+  dir=$HOME/.claudethecaller/spool
+fi
+mkdir -p -- "$dir" || exit 0
+
+ns=$(date +%s%N)
+case $ns in
+  '' | *[!0-9]*) ns=$(date +%s)000000000 ;;
+esac
+rand=$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
+case $rand in
+  '' | *[!0-9a-f]*) rand=$(printf '%08d' "$$") ;;
+esac
+[ "${#rand}" -eq 8 ] || rand=$(printf '%08d' "$$")
+
+name=$sid-$event-$ns-$rand.json
+tmp=$dir/$name.tmp
+now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+if ! printf '{"v":1,"event":"%s","received_at":"%s","payload":%s}\n' "$event" "$now" "$payload" >"$tmp" ||
+  ! mv -f "$tmp" "$dir/$name"; then
+  rm -f "$tmp"
+  exit 0
+fi
+
+if command -v curl >/dev/null; then
+  url=${CTC_NUDGE_URL:-}
+  if [ -z "$url" ]; then
+    port=${CTC_PORT:-18310}
+    url=http://127.0.0.1:$port/v1/spool/nudge
+  fi
+  curl -s -m 0.25 -X POST -o /dev/null --data '' "$url" </dev/null >/dev/null 2>&1 &
+fi
+exit 0
