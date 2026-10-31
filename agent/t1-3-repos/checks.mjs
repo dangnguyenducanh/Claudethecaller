@@ -1,7 +1,7 @@
-// checks for T1.3 packages/shared/repositories: one runnable example per decision id (D0..D16).
+// checks for T1.3 packages/shared/src/repositories: one runnable example per decision id (D0..D16).
 // Prints `PASS D# ...` or `FAIL D# expected=<..> got=<..>`; last line `CHECKS: <n> pass, <m> fail`; exit 1 on any FAIL.
 // Needs: env CTC_SCRATCH_PG_URL (scratch Postgres 127.0.0.1:18304 only) and the T1.2 migrations
-// (`packages/shared/migrations` exporting applyMigrations({url, schema})). Run from the repo root:
+// (`packages/shared/src/repositories/admin` exporting migrate({url, schema})). Run from the repo root:
 //   node --import tsx agent/t1-3-repos/checks.mjs      (tsx lets Node import the .ts sources)
 // Fixture values are this file's own; nothing is derived from the module's code.
 import assert from 'node:assert/strict';
@@ -11,8 +11,8 @@ import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 
 const ROOT = path.resolve(new URL('../../', import.meta.url).pathname);
-const MODULE_ENTRY = 'packages/shared/repositories/index.ts'; // change here if T1.1 puts sources under src/
-const MIGRATIONS_ENTRY = 'packages/shared/migrations/index.ts';
+const MODULE_ENTRY = 'packages/shared/src/repositories/index.ts'; // T1.1 D3b puts sources under src/
+const MIGRATIONS_ENTRY = 'packages/shared/src/repositories/admin/index.ts'; // T1.2 exports migrate({url, schema})
 const IDS = Array.from({ length: 17 }, (_, i) => `D${i}`);
 let pass = 0;
 let fail = 0;
@@ -49,7 +49,7 @@ const require = createRequire(path.join(ROOT, 'packages/shared/package.json'));
 let db; let db2; let repos; let sql; let sctx;
 try {
   ({ sql } = require('kysely'));
-  await mig.applyMigrations({ url, schema });
+  await mig.migrate({ url, schema });
   db = mod.createDb({ url, schema });
   repos = mod.createRepositories(db);
   sctx = mod.createSystemCtx('checks');
@@ -208,7 +208,7 @@ try {
 
   await check('D12', 'tenancy test and cases exist and cover every function', async () => {
     const fs = await import('node:fs');
-    const dir = path.join(ROOT, 'packages/shared/repositories');
+    const dir = path.join(ROOT, 'packages/shared/src/repositories');
     const test = fs.readFileSync(path.join(dir, 'tenancy.test.ts'), 'utf8');
     assert.match(test, /describe\(\s*['"]tenancy['"]/);
     const casesMod = await import(pathToFileURL(path.join(dir, 'tenancy.cases.ts')).href);
