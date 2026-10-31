@@ -3,7 +3,7 @@ __pycache__/
 data/
 *.usearch
 *.db
-models/
+/models/
 *.gguf
 *.safetensors
 graphify-out/
