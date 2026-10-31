@@ -9,7 +9,7 @@ import { cases, seed, type Case, type Seed } from './tenancy.cases.ts';
 
 const SYSTEM_ALLOWLIST = [
   'apiKeys.findByHash', 'cleanup.deleteUnreferencedBlobs', 'cleanup.listFinishedRuns', 'cleanup.pruneIdempotencyKeys', 'jobs.listQueued',
-  'jobs.markDead', 'jobs.markDone', 'jobs.markFailed', 'jobs.markQueued', 'jobs.markRunning', 'jobs.setProgress', 'runner.listRunningSteps',
+  'jobs.markDead', 'jobs.markDone', 'jobs.markFailed', 'jobs.markQueued', 'jobs.markRunning', 'jobs.setProgress', 'runner.listActiveRuns', 'runner.listRunningSteps',
 ];
 
 let s: Scratch;

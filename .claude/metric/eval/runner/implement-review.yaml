@@ -1,0 +1,28 @@
+name: implement-review
+description: An agent implements, a read-only agent reviews in the same worktree, a person approves, a shell announces the result.
+inputs:
+  topic: string
+nodes:
+  - { id: trigger, type: trigger }
+  - id: impl
+    type: agent
+    agent: claude
+    prompt: "FAKE_WRITE=feature.txt:built FAKE_SAY=impl-summary-xyz Implement {{input.topic}} in this repository."
+  - id: review
+    type: agent
+    agent: claude
+    worktree: parent
+    permission: plan
+    prompt: "FAKE_SAY=reviewed Review this work on {{input.topic}}: {{impl.out}}"
+  - id: gate
+    type: approval
+    question: "Ship {{input.topic}}?"
+  - id: announce
+    type: shell
+    cwd: repo
+    run: "echo shipped {{input.topic}} after {{gate.out}}"
+edges:
+  - { from: trigger, to: impl }
+  - { from: impl, to: review }
+  - { from: review, to: gate }
+  - { from: gate, to: announce }

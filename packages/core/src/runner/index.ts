@@ -244,3 +244,10 @@ export {
   AGENTS, PERMISSIONS, agentArgv, buildPreamble, emptyStream, exitOutcome, parseRepoSetup, readStreamLine, runnerExecLimits, sweepAction, worktreeRecipe,
 } from './exec.ts';
 export type { AgentNode, StreamState, SweepProbe } from './exec.ts';
+export { NODE_TYPES, REF_RE, backEdgesOf, isRef, parseWorkflow, workflowLimits } from './workflow.ts';
+export type { FanoutChild, ParseResult, Workflow, WorkflowEdge, WorkflowNode } from './workflow.ts';
+export { childId, evalCondition, outText, parseChildId, planFanout, renderTemplate, scopeOf } from './template.ts';
+export type { FanoutPlan } from './template.ts';
+export { deriveRunStatus, isReadonlyNode, walkerComplete, walkerNext, walkerStart, walkerStatus } from './walker.ts';
+export type { CurrentStep, Todo, WalkerState } from './walker.ts';
+export { REJECT_OPTION, approveStep, continueRun, isBookkeeping, optionIds } from './gates.ts';

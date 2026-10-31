@@ -60,6 +60,11 @@ export const systemRepo = (db: Db) => {
       async listRunningSteps(_sctx: SystemCtx): Promise<Step[]> {
         return rows<Step>(k, sql`select ${STEP_COLS}, ${STEP_WITH_USER} from wf_steps s join wf_runs r on r.id = s.run_id where s.status = 'running' order by s.id`);
       },
+      /** Engine tick: runs of all users that are not final (`queued`, `running`, `waiting`, `quota`), ordered by id. */
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      async listActiveRuns(_sctx: SystemCtx): Promise<Run[]> {
+        return rows<Run>(k, sql`select ${RUN_COLS} from wf_runs r where r.status in ('queued', 'running', 'waiting', 'quota') order by r.id`);
+      },
     },
     cleanup: {
       /** Worktree cleanup candidates: runs finished more than `olderThanDays` days ago. */
