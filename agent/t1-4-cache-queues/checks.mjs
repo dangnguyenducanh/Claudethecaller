@@ -13,9 +13,9 @@ import net from 'node:net';
 import path from 'node:path';
 
 const ROOT = path.resolve(new URL('../../', import.meta.url).pathname);
-const CACHE = 'packages/shared/cache';
-const QUEUES_DIR = 'packages/shared/queues';
-const WORKER = 'apps/worker/jobs';
+const CACHE = 'packages/shared/src/cache';
+const QUEUES_DIR = 'packages/shared/src/queues';
+const WORKER = 'apps/worker/src/jobs';
 const UNITS = 'deploy/systemd';
 const IDS = Array.from({ length: 24 }, (_, i) => `D${i}`);
 let pass = 0; let fail = 0;
