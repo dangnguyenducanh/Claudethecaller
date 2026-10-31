@@ -1,0 +1,16 @@
+name: loop-gate
+description: A shell counts up in a loop through an if and a back-edge until it reaches 3, then a person approves and a shell finishes.
+nodes:
+  - { id: trigger, type: trigger }
+  - { id: count, type: shell, cwd: repo, run: "n=$(cat count.txt 2>/dev/null || echo 0); echo $((n+1)) > count.txt; cat count.txt" }
+  - { id: chk, type: shell, cwd: repo, run: "if test $(cat count.txt) -ge 3; then echo yes; else echo no; fi" }
+  - { id: enough, type: if, op: eq, left: "{{chk.out}}", right: yes }
+  - { id: gate, type: approval, question: "Counted to 3. Finish?" }
+  - { id: fin, type: shell, cwd: repo, run: "echo finished after $(cat count.txt)" }
+edges:
+  - { from: trigger, to: count }
+  - { from: count, to: chk }
+  - { from: chk, to: enough }
+  - { from: enough, to: gate, handle: true }
+  - { from: enough, to: count, handle: false }
+  - { from: gate, to: fin }

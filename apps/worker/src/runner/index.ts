@@ -427,3 +427,8 @@ export async function sweepRunner(deps: RunnerExecDeps): Promise<{ actions: { st
   }
   return { actions, settled: Promise.allSettled(tasks).then(() => undefined) };
 }
+export { advanceRun, execDepsOf, startRunnerLoop, tickRuns, workflowHandlers } from './engine.ts';
+export type { AdvanceResult } from './engine.ts';
+export { cleanupHandlers, scheduleCleanup } from './cleanup.ts';
+export { engineLimits } from './common.ts';
+export type { EngineDeps } from './common.ts';
