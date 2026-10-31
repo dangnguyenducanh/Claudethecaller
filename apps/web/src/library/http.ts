@@ -23,7 +23,10 @@ export type LibraryApiDeps = {
 export type Route = {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   url: string;
-  handler(req: { params?: unknown; query?: unknown; body?: unknown }, reply: { code(n: number): { send(body?: unknown): unknown } }): Promise<unknown>;
+  handler(
+    req: { params?: unknown; query?: unknown; body?: unknown; headers?: Record<string, string | string[] | undefined> },
+    reply: { code(n: number): { send(body?: unknown): unknown } },
+  ): Promise<unknown>;
 };
 export type McpResult = { content: [{ type: 'text'; text: string }]; isError?: true };
 export type McpTool = {
@@ -33,8 +36,11 @@ export type McpTool = {
   call(ctx: Ctx, args: unknown): Promise<McpResult>;
 };
 
-export type ErrorCode = 'invalid' | 'not_found' | 'conflict' | 'ambiguous' | 'store_timeout' | 'internal';
-const STATUS: Record<ErrorCode, number> = { invalid: 422, not_found: 404, conflict: 409, ambiguous: 409, store_timeout: 504, internal: 500 };
+export type ErrorCode =
+  | 'invalid' | 'unauthorized' | 'not_found' | 'conflict' | 'stale_attempt' | 'idempotency_mismatch' | 'ambiguous' | 'store_timeout' | 'internal';
+const STATUS: Record<ErrorCode, number> = {
+  invalid: 422, unauthorized: 401, not_found: 404, conflict: 409, stale_attempt: 409, idempotency_mismatch: 409, ambiguous: 409, store_timeout: 504, internal: 500,
+};
 
 /** An error that becomes a reply. `extra` is merged into the error body (`path`, `candidates`). */
 export class ApiError extends Error {

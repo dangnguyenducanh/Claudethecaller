@@ -24,5 +24,23 @@ export const idempotencyRepo = (db: Db) => {
       );
       return r !== null;
     },
+    /** Replaces the response of the caller's receipt only while it is pending (`status` 0); `false` otherwise. */
+    async settle(ctx: Ctx, o: { key: string; route: string; response: unknown }): Promise<boolean> {
+      const r = await first(
+        k,
+        sql`update idempotency_keys set response = ${jsonb(o.response)}
+            where user_id = ${ctx.userId} and key = ${String(o?.key)} and route = ${String(o?.route)} and response->>'status' = '0' returning key`,
+      );
+      return r !== null;
+    },
+    /** Deletes the caller's receipt only while it is pending (`status` 0); `false` otherwise. */
+    async release(ctx: Ctx, o: { key: string; route: string }): Promise<boolean> {
+      const r = await first(
+        k,
+        sql`delete from idempotency_keys
+            where user_id = ${ctx.userId} and key = ${String(o?.key)} and route = ${String(o?.route)} and response->>'status' = '0' returning key`,
+      );
+      return r !== null;
+    },
   };
 };

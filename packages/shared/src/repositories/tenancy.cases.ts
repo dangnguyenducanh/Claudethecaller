@@ -22,6 +22,7 @@ export type Case = { expect: Expect; project?: boolean; run: (env: Env) => Promi
 export type Cases = Record<string, Record<string, Case | Case[]>>;
 
 export const unit = (i: number): number[] => Array.from({ length: 1024 }, (_, j) => (j === i ? 1 : 0));
+const pendingKey = (userId: string): string => `pending-${userId}`;
 const hostile = { userId: 'user-a', user_id: 'user-a', ownerId: 'user-a' };
 
 /** Writes at least one row into every table for `userId`, using this module's own write functions. */
@@ -38,6 +39,7 @@ export async function seed(r: Repositories, userId: string, vector: number): Pro
   const key = `key-${userId}`;
   const route = 'POST /x';
   await r.idempotency.store(ctx, { key, route, payloadHash: 'h', response: { ok: userId } });
+  await r.idempotency.store(ctx, { key: pendingKey(userId), route, payloadHash: 'h', response: { status: 0 } });
   const keyHash = `hash-${userId}`;
   const apiKey = await r.apiKeys.create(ctx, { name: `k-${userId}`, keyHash });
   const pair: [string, string] = [`x-${userId}`, `y-${userId}`];
@@ -127,6 +129,8 @@ export const cases: Cases = {
       await r.idempotency.store(ctx, { key: 'key-new-b', route: 'POST /x', payloadHash: 'h', response: {}, ...hostile });
       return (await r.idempotency.lookup(ctx, { key: 'key-new-b', route: 'POST /x' })) !== null && (await r.idempotency.lookup(a.ctx, { key: 'key-new-b', route: 'POST /x' })) === null;
     } },
+    settle: { expect: 'zero', run: ({ r, ctx, a }) => r.idempotency.settle(ctx, { key: pendingKey(a.ctx.userId), route: a.route, response: { status: 200, body: 'b' } }) },
+    release: { expect: 'zero', run: ({ r, ctx, a }) => r.idempotency.release(ctx, { key: pendingKey(a.ctx.userId), route: a.route }) },
   },
   apiKeys: {
     create: { expect: 'as-caller', run: async ({ r, ctx }) => {
