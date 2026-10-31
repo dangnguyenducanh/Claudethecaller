@@ -20,6 +20,8 @@ const ORIGINS = ['ast', 'parser', 'claude', 'commit', 'review', 'session'];
 /** FROM-SPEC (spec:268): rows of these origins are written by people and sessions, a rebuild never deletes them. */
 const KEPT = ['review', 'session'];
 const MAX_SEARCH = 50;
+const MAX_PENDING = 500;
+const DEFAULT_PENDING = 32;
 
 const NODE_COLS = sql.raw('id, kind, type, label, source_file, source_location, origin, content_hash, meta, updated_at');
 const EDGE_COLS = sql.raw('src, dst, relation, confidence, score, origin, source_location');
@@ -51,7 +53,10 @@ export const graphRepo = (db: Db) => {
       const u = ctx.userId;
       return k.transaction().execute(async (trx) => {
         let deleted = 0;
+        let kept: { id: string; contentHash: string; embedding: string }[] = [];
         if (!KEPT.includes(origin)) {
+          kept = await rows<{ id: string; contentHash: string; embedding: string }>(trx, sql`select id, content_hash, embedding::text as embedding from graph_nodes
+            where user_id = ${u} and project_id = ${projectId} and source_file = ${sourceFile} and origin = ${origin} and embedding is not null`);
           deleted += await changed(trx, sql`delete from graph_edges e where e.user_id = ${u} and e.project_id = ${projectId} and e.origin = ${origin}
             and e.src in (select n.id from graph_nodes n where n.user_id = ${u} and n.project_id = ${projectId} and n.source_file = ${sourceFile} and n.origin = ${origin})`);
           deleted += await changed(trx, sql`delete from graph_nodes n where n.user_id = ${u} and n.project_id = ${projectId} and n.source_file = ${sourceFile} and n.origin = ${origin}`);
@@ -69,12 +74,49 @@ export const graphRepo = (db: Db) => {
           on conflict (user_id, project_id, src, dst, relation) do update set confidence = excluded.confidence, score = excluded.score,
             origin = excluded.origin, source_location = excluded.source_location
           where graph_edges.origin not in ('review', 'session')`);
+        if (kept.length > 0) {
+          await changed(trx, sql`update graph_nodes g set embedding = x.embedding::vector
+            from jsonb_to_recordset(${jsonb(kept.map((x) => ({ id: x.id, content_hash: x.contentHash, embedding: x.embedding })))}) as x(id text, content_hash text, embedding text)
+            where g.user_id = ${u} and g.project_id = ${projectId} and g.id = x.id and g.content_hash = x.content_hash and g.embedding is null`);
+        }
         await changed(trx, sql`insert into graph_sources (user_id, project_id, file, content_hash, extractor_version, built_at_commit)
           values (${u}, ${projectId}, ${sourceFile}, ${source.contentHash}, ${source.extractorVersion}, ${source.builtAtCommit ?? null})
           on conflict (user_id, project_id, file) do update set content_hash = excluded.content_hash,
             extractor_version = excluded.extractor_version, built_at_commit = excluded.built_at_commit`);
         return { deleted, inserted: n + e };
       });
+    },
+    /**
+     * Removes the `origin` nodes of `sourceFile`, the `origin` edges leaving them and the `graph_sources` row in one transaction.
+     * `deleted` counts nodes plus edges. Origins `review`/`session` are never deleted: `{deleted: 0}`, the source row stays.
+     */
+    async deleteSource(ctx: Ctx, input: { origin: string; sourceFile: string }): Promise<{ deleted: number }> {
+      const projectId = needProject(ctx);
+      const { origin, sourceFile } = input ?? {};
+      if (typeof origin !== 'string' || !ORIGINS.includes(origin)) throw new RepoError('invalid', 'bad origin');
+      if (typeof sourceFile !== 'string' || sourceFile === '') throw new RepoError('invalid', 'sourceFile required');
+      if (KEPT.includes(origin)) return { deleted: 0 };
+      const u = ctx.userId;
+      return k.transaction().execute(async (trx) => {
+        let deleted = await changed(trx, sql`delete from graph_edges e where e.user_id = ${u} and e.project_id = ${projectId} and e.origin = ${origin}
+          and e.src in (select n.id from graph_nodes n where n.user_id = ${u} and n.project_id = ${projectId} and n.source_file = ${sourceFile} and n.origin = ${origin})`);
+        deleted += await changed(trx, sql`delete from graph_nodes n where n.user_id = ${u} and n.project_id = ${projectId} and n.source_file = ${sourceFile} and n.origin = ${origin}`);
+        await changed(trx, sql`delete from graph_sources where user_id = ${u} and project_id = ${projectId} and file = ${sourceFile}`);
+        return { deleted };
+      });
+    },
+    /** Nodes with no embedding and `id > afterId`, in id order; `limit` is clamped to 1..500 (default 32). */
+    async pendingEmbeddings(
+      ctx: Ctx,
+      o: { limit?: number; afterId?: string } | null = {},
+    ): Promise<{ id: string; label: string; sourceFile: string | null; contentHash: string; meta: unknown }[]> {
+      const projectId = needProject(ctx);
+      const after = typeof o?.afterId === 'string' ? sql`and id > ${o.afterId}` : sql``;
+      return rows(
+        k,
+        sql`select id, label, source_file, content_hash, meta from graph_nodes where user_id = ${ctx.userId} and project_id = ${projectId} and embedding is null ${after}
+            order by id limit ${clampLimit(o?.limit, MAX_PENDING, DEFAULT_PENDING)}`,
+      );
     },
     async sourceNodeCount(ctx: Ctx, sourceFile: string): Promise<number> {
       const projectId = needProject(ctx);

@@ -149,6 +149,8 @@ export const cases: Cases = {
       });
       return (await r.graph.getNode(ctx, 'nb-1')) !== null && (await r.graph.getNode(a.ctx, 'nb-1')) === null;
     } },
+    deleteSource: { expect: 'zero', project: true, run: ({ r, ctx, a }) => r.graph.deleteSource(ctx, { origin: 'ast', sourceFile: a.sourceFile }) },
+    pendingEmbeddings: { expect: 'zero', project: true, run: ({ r, ctx }) => r.graph.pendingEmbeddings(ctx, {}) },
     sourceNodeCount: { expect: 'zero', project: true, run: ({ r, ctx, a }) => r.graph.sourceNodeCount(ctx, a.sourceFile) },
     listSources: { expect: 'zero', project: true, run: ({ r, ctx }) => r.graph.listSources(ctx) },
     loadGraph: { expect: 'zero', project: true, run: ({ r, ctx }) => r.graph.loadGraph(ctx) },

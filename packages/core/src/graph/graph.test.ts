@@ -198,7 +198,7 @@ const GUIDE_MD = '# Title\n\n## Use `a.ts::A` and `top()`\n\nSee [b](./b.md#x) a
     assert.ok(md.nodes.every((n) => n.id.startsWith('doc:')));
     const pj = ex('package.json', '{"dependencies": {"zod": "4"}}');
     assert.ok(pj.nodes.every((n) => !n.id.includes('ref_')), show(ids(pj)));
-    for (const name of ['contextId', 'capabilityId', 'resolve', 'contentHash']) assert.equal((g as Record<string, unknown>)[name], undefined, `unexpected export ${name}`);
+    for (const name of ['contextId', 'capabilityId', 'resolve']) assert.equal((g as Record<string, unknown>)[name], undefined, `unexpected export ${name}`);
   });
 
   it('D8 silence rule: the module records its judgment calls', async () => {
@@ -358,8 +358,9 @@ const GUIDE_MD = '# Title\n\n## Use `a.ts::A` and `top()`\n\nSee [b](./b.md#x) a
       M('doc:d_p_h', 'symbol', 'createCache', 8)]);
   });
 
-  it('D22 exports exactly the D22 list; deps include the six exact pins; core index.ts unchanged', async () => {
-    const want = ['EXTRACTOR_VERSION', 'GrammarError', 'cleanLabel', 'extractFile', 'fileStem', 'langOf', 'limits', 'loadGrammars', 'makeId', 'normalizeId'];
+  it('D22 exports exactly the D22 list plus the T2.2 resolver; deps include the six exact pins; core index.ts unchanged', async () => {
+    const want = ['EXTRACTOR_VERSION', 'GrammarError', 'cleanLabel', 'extractFile', 'fileStem', 'langOf', 'limits', 'loadGrammars', 'makeId', 'normalizeId',
+      'resolveGraph', 'contentHash', 'resolveLimits', 'SCORES'];
     assert.deepEqual(Object.keys(g).sort(), want.sort());
     assert.ok(new g.GrammarError('x') instanceof Error && new g.GrammarError('x').code === 'grammar_missing');
     const pkg = JSON.parse(fs.readFileSync(path.join(PKG_DIR, 'package.json'), 'utf8')) as { dependencies: Record<string, string> };
