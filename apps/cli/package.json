@@ -8,5 +8,11 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
-  "dependencies": { "@ctc/core": "workspace:*", "@ctc/shared": "workspace:*" }
+  "dependencies": {
+    "@ctc/core": "workspace:*",
+    "@ctc/shared": "workspace:*"
+  },
+  "bin": {
+    "ctc": "./src/main.ts"
+  }
 }
