@@ -1,0 +1,45 @@
+### User Story 1 - Build both graphs for this repo and see their state (Priority: P1) 🎯 MVP
+### User Story 2 - Context is linked to the code that implements it (Priority: P1)
+### User Story 3 - The agent sees a code map with each prompt (Priority: P1)
+### User Story 4 - The agent sees file notes before reading or editing a file (Priority: P2)
+### User Story 5 - The agent can ask the graphs on demand (Priority: P2)
+### User Story 6 - Context stays fresh without manual steps (Priority: P2)
+### User Story 7 - Links get confirmed from Claude's own work (Priority: P3)
+### User Story 8 - The owner can prove it works on real history (Priority: P2)
+- **FR-001**: The system MUST import graphify's code and rationale nodes and the edges among them for this repo as the coding graph, and MUST NOT import graphify's document, concept or hyperedge entries.
+- **FR-002**: The system MUST build a context graph with node types feature, story, requirement, criterion, task, ticket, decision, constraint, plan step and observation, from `specs/*/{spec,plan,tasks}.md`, `.scratch/*/spec.md` and `issues/*.md`, `PLAN.md`, `.claude/prds/*.md` and the CLAUDE.md Decisions list.
+- **FR-003**: Node identities MUST be stable across rebuilds and namespaced by source, so equal local ids in different features stay distinct.
+- **FR-004**: Context edges MUST cover: feature has story, story needs requirement, criterion measures story/feature, task serves story, task part of ticket, task/ticket blocks task/ticket, decision/constraint constrains requirement/task/plan step, requirement refines requirement.
+- **FR-005**: Context→code links MUST be one of implemented-in, tested-by (targets under `tests/`) or mentions, and every link MUST carry a confidence (extracted, inferred, confirmed), a score and its origin.
+- **FR-006**: The system MUST store both graphs durably in the project's single source of truth and keep a fast in-memory copy per service worker, reloaded after any import or build.
+- **FR-007**: The system MUST export either graph (or both) in graphify's file format on request, and MUST NOT commit generated graph files.
+- **FR-008**: The system MUST parse structured ids without any model: user stories, FR/SC ids, tasks with their story tags and named file paths, ticket files and their blocking refs, PLAN.md step ids and Done-when lines, dated Decisions.
+- **FR-009**: The system MUST run a background extraction pass over prose, driven by a written mode file (node and edge types, field rules, skip rules, dedup by content), using the owner's subscription and a small model, sending only sections whose content changed and caching results by section content and mode-file version.
+- **FR-010**: The extraction pass MUST pause on a usage limit until its reset time, MUST NOT retry in a loop, and MUST log its token totals per pass.
+- **FR-011**: The extraction pass's own sessions MUST NOT trigger claudethecaller's prompt or file hooks or further extraction.
+- **FR-012**: The system MUST rebuild the parsed context for a file when the agent writes under `specs/`, `.scratch/`, `PLAN.md`, `.claude/prds/` or `CLAUDE.md`, in the background and within the existing tool-hook budget.
+- **FR-013**: The project MUST register speckit after-specify, after-plan and after-tasks hooks that rebuild the context graph, a before-implement hook that shows task→code matches, and an after-implement hook that runs the link review.
+- **FR-014**: The system MUST re-import graphify's output once when its recorded build commit changes, checked cheaply on the next hook call or graph command, and on an explicit import command.
+- **FR-015**: A status command MUST show graphify's build commit vs HEAD, per-source last-read times, node and edge counts per kind, and the share of tasks with at least one code link.
+- **FR-016**: The system MUST import claude-mem observations of type decision, bugfix, feature, refactor and discovery for this repo, read-only and incrementally, and MUST NOT write to claude-mem's store.
+- **FR-017**: The system MUST create extracted links from file paths and function names named in tasks and tickets, from commits whose message or branch names a ticket (to the functions their changes touched; merge commits excluded), and from claude-mem observations' files read and modified.
+- **FR-018**: The system MUST create inferred links by meaning between context text and code text, keeping only the best few per context node above a cut-off.
+- **FR-019**: Commit-derived links MUST be switchable off for evaluation.
+- **FR-020**: When a task box is ticked in tasks.md, the files edited in that session since the previous tick MUST become confirmed links of that task.
+- **FR-021**: Claude MUST be able to keep or drop an inferred link by a command; kept becomes confirmed, dropped is excluded from pushes and searches.
+- **FR-022**: On each prompt in this repo, the system MUST add at most one line (about 80 tokens) naming the best-matching context node, up to 3 code pointers (file, function, line; confirmed before extracted before inferred) and at most one constraining decision, and MUST add nothing when the best match is under the tuned cut-off.
+- **FR-023**: The prompt line MUST be recorded with that prompt's routing decision.
+- **FR-024**: Before the agent reads, edits or writes a file, the system MUST add a note (about 60 tokens) naming at most 3 tasks/requirements and 1 decision/constraint tied to that file, and nothing when none exist.
+- **FR-025**: All hooks MUST fail open: on any error, timeout or unreachable service the agent proceeds unchanged and unblocked.
+- **FR-026**: The agent MUST be able to search the graphs by question (context, coding or both), explain a node, list what a node affects, and find a path between two nodes, each answer within a fixed size budget that reports truncation.
+- **FR-027**: The owner MUST have commands to import, build, show status, export and confirm/drop links.
+- **FR-028**: Installing claudethecaller's hooks MUST add the new file hook, and MUST support a dry run against a temporary home; writes to the real Claude settings need the owner's go-ahead.
+- **FR-029**: An evaluation MUST use n8n-parity tickets with commits: truth = non-test source files changed by each ticket's commits; prompt = the ticket title; commit-derived links off; tickets 01–08 for tuning, 09–16 for scoring only.
+- **FR-030**: The evaluation MUST report recall of truth files among the line's first 3 code pointers, the false-trigger rate on unrelated prompts (MetaTool's no-tool set), and hook timings, each against the pass bar in SC-001–SC-004.
+- **SC-001**: On held-out n8n-parity tickets 09–16, the prompt line names at least one file the ticket really changed among its first three code pointers for at least 80% of tickets (an absent line counts as a miss).
+- **SC-002**: The prompt line appears for at most 10% of unrelated requests (MetaTool no-tool prompts).
+- **SC-003**: Prompts are not slowed: 95% of prompt hooks still answer within 150 ms, and 95% of file notes within 50 ms, with both graphs loaded.
+- **SC-004**: A rebuild with no doc changes makes zero model calls; a one-section edit sends only that section.
+- **SC-005**: The build of this repo reports 16 user stories for n8n-parity, all 17 tickets, every dated decision, and the share of tasks with at least one code link.
+- **SC-006**: The coding graph's staleness is always visible: status shows its build commit next to HEAD.
+- **SC-007**: With the service or database down, 100% of prompts and file reads proceed unchanged.

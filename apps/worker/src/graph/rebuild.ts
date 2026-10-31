@@ -51,7 +51,7 @@ type NodeIn = Replace['nodes'][number];
 type Read = { ok: true; text: string } | { ok: false; reason: string };
 type Item = { file: string; text: string; hash: string };
 
-const sha = (s: string): string => createHash('sha256').update(s, 'utf8').digest('hex');
+export const sha = (s: string): string => createHash('sha256').update(s, 'utf8').digest('hex');
 const byCode = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 const dirOf = (p: string): string => p.slice(0, Math.max(p.lastIndexOf('/'), 0));
 const baseOf = (p: string): string => p.slice(p.lastIndexOf('/') + 1);
@@ -59,7 +59,7 @@ const NUL_SCAN = 8000;
 const VECTOR_DIM = 1024;
 
 /** Reads one file under the root: regular file whose real path stays inside the root, within the size limit, valid UTF-8 without NUL. */
-async function readText(rootReal: string, rel: string): Promise<Read> {
+export async function readText(rootReal: string, rel: string): Promise<Read> {
   if (!safeRel(rel)) return { ok: false, reason: 'bad_path' };
   const abs = path.join(rootReal, rel);
   try {
@@ -81,7 +81,9 @@ async function readText(rootReal: string, rel: string): Promise<Read> {
 }
 
 /** Node embed text: label, a newline, the node's source lines, cut to `embedTextChars` code points (label only without lines). */
-function embedText(label: string, meta: unknown, lines: string[] | null): string {
+export function embedText(label: string, meta: unknown, lines: string[] | null): string {
+  const own = (meta as { embedText?: unknown } | null)?.embedText;
+  if (typeof own === 'string') return Array.from(own.slice(0, graphLimits.embedTextChars * 2)).slice(0, graphLimits.embedTextChars).join('');
   const range = (meta as { lines?: unknown } | null)?.lines;
   let text = label;
   if (lines && Array.isArray(range)) {

@@ -1,0 +1,6 @@
+- 2026-10-20 — Built from scratch: ratel, MCPGateway, metamcp and similar are references only, never dependencies (portfolio project).
+- 2026-10-20 — Local models ≤ 3B params; embedder `ThakiCloud/SKILLRET-Embedding-0.6B` (baseline `BAAI/bge-m3`), reranker `BAAI/bge-reranker-v2-m3`, LLM `Qwen2.5-3B-Instruct` Q4 via llama.cpp.
+The owner decides what happens. The agent proposes, waits, then executes exactly what was approved.
+- 2026-10-20 — Offline LLM default is the local llama-server (`CTC_LLM=openai:http://127.0.0.1:18302/v1:qwen2.5-3b`) because no Anthropic key is set; this also keeps transcripts on-machine. Set `CTC_LLM=anthropic:<model>` to switch.
+- 2026-10-20 — Hook suggests, never blocks. Router abstains rather than returning a weak top-1.
+- 2026-10-20 — Eval data: SkillRet (main), MetaTool (abstain), SRA-Bench, ToolRet, own transcripts (held-out truth; test queries never come from the enricher).

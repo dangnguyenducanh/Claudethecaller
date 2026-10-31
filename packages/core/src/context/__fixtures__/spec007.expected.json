@@ -1,0 +1,262 @@
+{
+ "path": "specs/007-ctc/spec.md",
+ "spec": {
+  "label": "spec",
+  "line": 1,
+  "lines": [
+   1,
+   47
+  ]
+ },
+ "nodes": [
+  {
+   "id": "T0.1",
+   "type": "task",
+   "line": 7,
+   "label": "record fixtures: `/v1/search` top-5 for 200 prompts, 30 graph answers, `/api` reply shapes"
+  },
+  {
+   "id": "T0.2",
+   "type": "task",
+   "line": 8,
+   "label": "latency + skillret baselines on the Python daemon"
+  },
+  {
+   "id": "T0.3",
+   "type": "task",
+   "line": 9,
+   "label": "archive `decisions` + `events`"
+  },
+  {
+   "id": "T1.1",
+   "type": "task",
+   "line": 10,
+   "label": "pnpm workspace, TS strict, Vitest, ESLint SQL ban, Zod config"
+  },
+  {
+   "id": "T1.2",
+   "type": "task",
+   "line": 11,
+   "label": "migrations + `ctc migrate --from-python`"
+  },
+  {
+   "id": "T1.3",
+   "type": "task",
+   "line": 12,
+   "label": "`[P]` repositories with `ctx`"
+  },
+  {
+   "id": "T1.4",
+   "type": "task",
+   "line": 13,
+   "label": "`[P]` cache, epochs, `ctc:inval`, 7 queues, `dlq-retry`, systemd units"
+  },
+  {
+   "id": "T2.1",
+   "type": "task",
+   "line": 14,
+   "label": "ids + web-tree-sitter extract + markdown"
+  },
+  {
+   "id": "T2.2",
+   "type": "task",
+   "line": 15,
+   "label": "resolve, incremental rebuild, shrink guard, `graph` queue"
+  },
+  {
+   "id": "T2.3",
+   "type": "task",
+   "line": 16,
+   "label": "context parsers, doc extract, capability nodes"
+  },
+  {
+   "id": "T2.4",
+   "type": "task",
+   "line": 17,
+   "label": "query, explain, path, affected, neighbors; MCP + `/api/graph`"
+  },
+  {
+   "id": "T3.1",
+   "type": "task",
+   "line": 18,
+   "label": "scanner → versions, labels, manifest, blobs; `library` queue"
+  },
+  {
+   "id": "T3.2",
+   "type": "task",
+   "line": 19,
+   "label": "MCP pair, versions/labels/restore/override API, blob cleanup"
+  },
+  {
+   "id": "T3.3",
+   "type": "task",
+   "line": 20,
+   "label": "SKILLRET dense + rerank channel"
+  },
+  {
+   "id": "T4.1",
+   "type": "task",
+   "line": 21,
+   "label": "spool script + drain + nudge"
+  },
+  {
+   "id": "T4.2",
+   "type": "task",
+   "line": 22,
+   "label": "extract (bands), summarize, retry-once, content hash"
+  },
+  {
+   "id": "T4.3",
+   "type": "task",
+   "line": 23,
+   "label": "recall + `/v1/hook/start` + MCP memory tools + import + distill"
+  },
+  {
+   "id": "T5.1",
+   "type": "task",
+   "line": 24,
+   "label": "`/v1/hook/prompt` + `/v1/suggest` (three seed channels, walk, rank, render, `sug:` cache)"
+  },
+  {
+   "id": "T5.2",
+   "type": "task",
+   "line": 25,
+   "label": "`/v1/hook/pre` note + hint with caps"
+  },
+  {
+   "id": "T6.1",
+   "type": "task",
+   "line": 26,
+   "label": "transition table, attempts, stages, idempotency keys"
+  },
+  {
+   "id": "T6.2",
+   "type": "task",
+   "line": 27,
+   "label": "worktree recipe, setup hook, agent registry, stream, report token"
+  },
+  {
+   "id": "T6.3",
+   "type": "task",
+   "line": 28,
+   "label": "gates with options, fanout + join, handoff, cleanup"
+  },
+  {
+   "id": "T7.1",
+   "type": "task",
+   "line": 29,
+   "label": "point [`.claude/settings.json`](../../.claude/settings.json) hooks at the new routes and spool script; stop the Python daemon"
+  },
+  {
+   "id": "T7.2",
+   "type": "task",
+   "line": 30,
+   "label": "delete the Python service code (keep [`evaluation`](../../evaluation/)); retire [adoption.md](../../.claude/metric/eval/adoption.md)"
+  },
+  {
+   "id": "D1",
+   "type": "decision",
+   "line": 38,
+   "label": "analytics store",
+   "value": "**no ClickHouse**"
+  },
+  {
+   "id": "D2",
+   "type": "decision",
+   "line": 39,
+   "label": "SQL layer",
+   "value": "**Kysely on `pg`**"
+  },
+  {
+   "id": "D3",
+   "type": "decision",
+   "line": 40,
+   "label": "memory extraction",
+   "value": "**local llama-server**"
+  },
+  {
+   "id": "D4",
+   "type": "decision",
+   "line": 41,
+   "label": "model output format",
+   "value": "**llama.cpp JSON grammar** + retry once"
+  },
+  {
+   "id": "D5",
+   "type": "decision",
+   "line": 42,
+   "label": "prompt line content",
+   "value": "**task → file:symbol · skill · decision**, ≤ 400 chars"
+  },
+  {
+   "id": "D6",
+   "type": "decision",
+   "line": 43,
+   "label": "workflow agents",
+   "value": "**`claude` and `codex`**"
+  },
+  {
+   "id": "D7",
+   "type": "decision",
+   "line": 44,
+   "label": "fan-out",
+   "value": "**3 at once, depth 1**"
+  },
+  {
+   "id": "D8",
+   "type": "decision",
+   "line": 45,
+   "label": "worktree retention",
+   "value": "**7 days, branch kept forever**"
+  },
+  {
+   "id": "D9",
+   "type": "decision",
+   "line": 46,
+   "label": "local supervisor",
+   "value": "**`systemd --user`**"
+  },
+  {
+   "id": "D10",
+   "type": "decision",
+   "line": 47,
+   "label": "skill library in 007",
+   "value": "**yes, as F2** (also versions workflows for F4)"
+  }
+ ],
+ "partOf": [
+  "T0.1",
+  "T0.2",
+  "T0.3",
+  "T1.1",
+  "T1.2",
+  "T1.3",
+  "T1.4",
+  "T2.1",
+  "T2.2",
+  "T2.3",
+  "T2.4",
+  "T3.1",
+  "T3.2",
+  "T3.3",
+  "T4.1",
+  "T4.2",
+  "T4.3",
+  "T5.1",
+  "T5.2",
+  "T6.1",
+  "T6.2",
+  "T6.3",
+  "T7.1",
+  "T7.2"
+ ],
+ "refs": [
+  [
+   "T7.1",
+   "implements",
+   "path",
+   ".claude/settings.json",
+   29
+  ]
+ ]
+}
