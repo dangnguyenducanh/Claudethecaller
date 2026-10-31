@@ -10,9 +10,10 @@ import type { Ctx } from '@ctc/shared/repositories';
 import type { LibraryApiDeps } from './http.ts';
 
 type OverrideRow = { projectId: string | null; capId: string; action: string; label: string | null; version: number | null };
+type OverrideDeps = { repos: LibraryApiDeps['repos']; cache?: Pick<NonNullable<LibraryApiDeps['cache']>, 'get' | 'set'>; log?: LibraryApiDeps['log'] };
 
 /** Override rows of the ctx (globals plus its project's), cache-aside under `ovr:` when there is a cache and a project. */
-async function overrideRows(deps: LibraryApiDeps, ctx: Ctx): Promise<OverrideRow[]> {
+export async function overrideRows(deps: OverrideDeps, ctx: Ctx): Promise<OverrideRow[]> {
   const { cache } = deps;
   let key: string | undefined;
   if (cache && ctx.projectId) {

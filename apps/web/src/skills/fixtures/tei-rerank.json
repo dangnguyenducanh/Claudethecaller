@@ -1,0 +1,21 @@
+{
+ "request": {
+  "query": "write tests first",
+  "texts": [
+   "tdd | test driven development",
+   "cooking | recipes"
+  ],
+  "raw_scores": true,
+  "truncate": true
+ },
+ "reply": [
+  {
+   "index": 0,
+   "score": -5.4101562
+  },
+  {
+   "index": 1,
+   "score": -11.0234375
+  }
+ ]
+}
