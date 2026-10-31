@@ -1,0 +1,241 @@
+[
+ {
+  "id": "g01",
+  "tool": "graph_search",
+  "args": {
+   "question": "hybrid search rrf fusion of dense and keyword",
+   "graph": "coding",
+   "k": 8
+  }
+ },
+ {
+  "id": "g02",
+  "tool": "graph_search",
+  "args": {
+   "question": "embed prompt cached in redis",
+   "graph": "coding",
+   "k": 8
+  }
+ },
+ {
+  "id": "g03",
+  "tool": "graph_search",
+  "args": {
+   "question": "hook prompt budget",
+   "graph": "coding",
+   "k": 8
+  }
+ },
+ {
+  "id": "g04",
+  "tool": "graph_search",
+  "args": {
+   "question": "scan skill library and index",
+   "graph": "coding",
+   "k": 8
+  }
+ },
+ {
+  "id": "g05",
+  "tool": "graph_search",
+  "args": {
+   "question": "workflow runner engine step",
+   "graph": "coding",
+   "k": 8
+  }
+ },
+ {
+  "id": "g06",
+  "tool": "graph_search",
+  "args": {
+   "question": "memory extraction from transcript",
+   "graph": "coding",
+   "k": 8
+  }
+ },
+ {
+  "id": "g07",
+  "tool": "graph_search",
+  "args": {
+   "question": "build graph from specs",
+   "graph": "coding",
+   "k": 8
+  }
+ },
+ {
+  "id": "g08",
+  "tool": "graph_search",
+  "args": {
+   "question": "project id from cwd",
+   "graph": "coding",
+   "k": 8
+  }
+ },
+ {
+  "id": "g09",
+  "tool": "graph_search",
+  "args": {
+   "question": "rate limit sliding window",
+   "graph": "both",
+   "k": 5
+  }
+ },
+ {
+  "id": "g10",
+  "tool": "graph_search",
+  "args": {
+   "question": "which tasks cover the dashboard runs page",
+   "graph": "context",
+   "k": 5
+  }
+ },
+ {
+  "id": "g11",
+  "tool": "graph_search",
+  "args": {
+   "question": "api key authentication in shared mode",
+   "graph": "both",
+   "k": 8
+  }
+ },
+ {
+  "id": "g12",
+  "tool": "graph_search",
+  "args": {
+   "question": "history import of claude transcripts",
+   "graph": "both",
+   "k": 3
+  }
+ },
+ {
+  "id": "g13",
+  "tool": "graph_explain",
+  "args": {
+   "node": "code:src_ctc_retrieval_hybrid_search"
+  }
+ },
+ {
+  "id": "g14",
+  "tool": "graph_explain",
+  "args": {
+   "node": "code:src_ctc_ingestion_scanner_scan_library"
+  }
+ },
+ {
+  "id": "g15",
+  "tool": "graph_explain",
+  "args": {
+   "node": "code:src_ctc_server_hooks_hook_prompt"
+  }
+ },
+ {
+  "id": "g16",
+  "tool": "graph_explain",
+  "args": {
+   "node": "code:src_ctc_graph_build_build"
+  }
+ },
+ {
+  "id": "g17",
+  "tool": "graph_explain",
+  "args": {
+   "node": "code:src_ctc_ai_extract_extract_session"
+  }
+ },
+ {
+  "id": "g18",
+  "tool": "graph_explain",
+  "args": {
+   "node": "code:src_ctc_storage_cache"
+  }
+ },
+ {
+  "id": "g19",
+  "tool": "graph_explain",
+  "args": {
+   "node": "src/ctc/server/mcp.py"
+  }
+ },
+ {
+  "id": "g20",
+  "tool": "graph_path",
+  "args": {
+   "a": "code:src_ctc_server_hooks_hook_prompt",
+   "b": "code:src_ctc_retrieval_hybrid_search"
+  }
+ },
+ {
+  "id": "g21",
+  "tool": "graph_path",
+  "args": {
+   "a": "code:src_ctc_cli_index",
+   "b": "code:src_ctc_ingestion_scanner_scan_library"
+  }
+ },
+ {
+  "id": "g22",
+  "tool": "graph_path",
+  "args": {
+   "a": "code:src_ctc_graph_build_build",
+   "b": "code:src_ctc_storage_cache"
+  }
+ },
+ {
+  "id": "g23",
+  "tool": "graph_path",
+  "args": {
+   "a": "code:src_ctc_ai_extract_extract_session",
+   "b": "code:src_ctc_server_hooks_hook_prompt"
+  }
+ },
+ {
+  "id": "g24",
+  "tool": "graph_path",
+  "args": {
+   "a": "code:src_ctc_server_hooks_hook_prompt",
+   "b": "no_such_symbol_zzz"
+  }
+ },
+ {
+  "id": "g25",
+  "tool": "graph_affected",
+  "args": {
+   "node": "code:src_ctc_retrieval_hybrid_search"
+  }
+ },
+ {
+  "id": "g26",
+  "tool": "graph_affected",
+  "args": {
+   "node": "code:src_ctc_ingestion_scanner_project_id"
+  }
+ },
+ {
+  "id": "g27",
+  "tool": "graph_affected",
+  "args": {
+   "node": "code:src_ctc_storage_cache"
+  }
+ },
+ {
+  "id": "g28",
+  "tool": "graph_affected",
+  "args": {
+   "node": "code:src_ctc_ingestion_scanner_scan_library"
+  }
+ },
+ {
+  "id": "g29",
+  "tool": "graph_affected",
+  "args": {
+   "node": "search"
+  }
+ },
+ {
+  "id": "g30",
+  "tool": "graph_affected",
+  "args": {
+   "node": "no_such_symbol_zzz"
+  }
+ }
+]
