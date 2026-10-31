@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"t1"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"type":"agent_message","text":"Done with the change."}}
+{"type":"turn.completed","usage":{"input_tokens":5,"cached_input_tokens":1,"output_tokens":3}}

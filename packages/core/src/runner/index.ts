@@ -239,3 +239,8 @@ export async function cancelRun(port: RunnerPort, ctx: Ctx, runId: number): Prom
   if (run === null) throw new RunnerError('not_found', 'run not found');
   return { run, cancelled };
 }
+
+export {
+  AGENTS, PERMISSIONS, agentArgv, buildPreamble, emptyStream, exitOutcome, parseRepoSetup, readStreamLine, runnerExecLimits, sweepAction, worktreeRecipe,
+} from './exec.ts';
+export type { AgentNode, StreamState, SweepProbe } from './exec.ts';
