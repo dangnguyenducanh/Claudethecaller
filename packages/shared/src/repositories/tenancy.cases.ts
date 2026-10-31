@@ -183,6 +183,7 @@ export const cases: Cases = {
     clearOverride: { expect: 'zero', run: ({ r, ctx, a }) => r.library.clearOverride(ctx, a.capId) },
     listOverrides: { expect: 'no-a', run: ({ r, ctx }) => r.library.listOverrides(ctx) },
     upsertVector: { expect: 'zero', run: ({ r, ctx, a }) => r.library.upsertVector(ctx, { capId: a.capId, textHash: 'z', embedding: a.embedding }) },
+    pruneVectors: { expect: 'zero', run: ({ r, ctx, a }) => r.library.pruneVectors(ctx, a.capId, 'keep-nothing-of-a') },
     loadVectors: { expect: 'no-a', run: ({ r, ctx }) => r.library.loadVectors(ctx) },
   },
   memory: {
