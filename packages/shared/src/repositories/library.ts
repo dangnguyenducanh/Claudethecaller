@@ -252,6 +252,15 @@ export const libraryRepo = (db: Db) => {
             on conflict (cap_id, text_hash) do update set embedding = excluded.embedding, model = excluded.model`,
       );
     },
+    /** Deletes the capability's vectors whose `text_hash` is not `keepTextHash` (only the served version is embedded). Foreign or non-uuid id gives 0. */
+    async pruneVectors(ctx: Ctx, capId: string, keepTextHash: string): Promise<number> {
+      if (!isUuid(capId)) return 0;
+      return changed(
+        k,
+        sql`delete from cap_vectors x using capabilities c
+            where c.id = x.cap_id and c.user_id = ${ctx.userId} and x.cap_id = ${capId} and x.text_hash <> ${String(keepTextHash)}`,
+      );
+    },
     async loadVectors(ctx: Ctx): Promise<{ capId: string; textHash: string; embedding: number[] }[]> {
       const got = await rows<{ capId: string; textHash: string; embedding: string }>(
         k,
