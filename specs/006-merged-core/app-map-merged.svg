@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="560" viewBox="0 0 1180 560"><rect width="100%" height="100%" fill="#FFFFFF"/>
+<text x="16" y="26" font-size="16" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">006: what ctc is for after the merge (surface, store); grey = removed</text>
+<rect x="20" y="50" width="370" height="235" rx="10" fill="none" stroke="#993556" stroke-width="1"/>
+<text x="30" y="68" font-size="12" fill="#4B1528" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Context graph (graphify + ctc)</text>
+<rect x="32" y="80" width="346" height="58" rx="6" fill="#FBEAF0" stroke="#993556" stroke-width="1"/>
+<text x="205.0" y="95.0" font-size="13" fill="#4B1528" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Suggest per prompt</text>
+<text x="205.0" y="111.0" font-size="11" fill="#993556" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">POST /v1/hook/prompt</text>
+<text x="205.0" y="125.0" font-size="11" fill="#993556" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">store: RAM graph + Redis</text>
+<rect x="32" y="146" width="346" height="58" rx="6" fill="#FBEAF0" stroke="#993556" stroke-width="1"/>
+<text x="205.0" y="161.0" font-size="13" fill="#4B1528" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Notes before Read/Edit/Grep</text>
+<text x="205.0" y="177.0" font-size="11" fill="#993556" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">POST /v1/hook/pre</text>
+<text x="205.0" y="191.0" font-size="11" fill="#993556" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">store: RAM graph</text>
+<rect x="32" y="212" width="346" height="58" rx="6" fill="#FBEAF0" stroke="#993556" stroke-width="1"/>
+<text x="205.0" y="227.0" font-size="13" fill="#4B1528" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Search / explain / affected / path</text>
+<text x="205.0" y="243.0" font-size="11" fill="#993556" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">MCP graph_*, Graph page</text>
+<text x="205.0" y="257.0" font-size="11" fill="#993556" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">store: graph_nodes, graph_edges</text>
+<rect x="405" y="50" width="370" height="235" rx="10" fill="none" stroke="#0F6E56" stroke-width="1"/>
+<text x="415" y="68" font-size="12" fill="#04342C" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Skill library (Langfuse)</text>
+<rect x="417" y="80" width="346" height="58" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1"/>
+<text x="590.0" y="95.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Browse, version, label</text>
+<text x="590.0" y="111.0" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Library page, /api/capabilities</text>
+<text x="590.0" y="125.0" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">store: capability_versions</text>
+<rect x="417" y="146" width="346" height="58" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1"/>
+<text x="590.0" y="161.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Load a skill and its files</text>
+<text x="590.0" y="177.0" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">MCP get_capability, load_..</text>
+<text x="590.0" y="191.0" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">store: cap_files, cap_blobs</text>
+<rect x="417" y="212" width="346" height="58" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1"/>
+<text x="590.0" y="227.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Pin per project</text>
+<text x="590.0" y="243.0" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">PUT .../override (label)</text>
+<text x="590.0" y="257.0" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">store: overrides</text>
+<rect x="790" y="50" width="370" height="235" rx="10" fill="none" stroke="#534AB7" stroke-width="1"/>
+<text x="800" y="68" font-size="12" fill="#26215C" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Memory (claude-mem + ctc)</text>
+<rect x="802" y="80" width="346" height="58" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1"/>
+<text x="975.0" y="95.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Learn from sessions</text>
+<text x="975.0" y="111.0" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">hooks -&gt; spool -&gt; queue llm</text>
+<text x="975.0" y="125.0" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">store: memories, session_summaries</text>
+<rect x="802" y="146" width="346" height="58" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1"/>
+<text x="975.0" y="161.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Context at session start</text>
+<text x="975.0" y="177.0" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">POST /v1/hook/start</text>
+<text x="975.0" y="191.0" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">store: memories (RRF)</text>
+<rect x="802" y="212" width="346" height="58" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1"/>
+<text x="975.0" y="227.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Search memories</text>
+<text x="975.0" y="243.0" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">MCP mem_search/timeline/get</text>
+<text x="975.0" y="257.0" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">store: memories</text>
+<rect x="20" y="300" width="370" height="235" rx="10" fill="none" stroke="#854F0B" stroke-width="1"/>
+<text x="30" y="318" font-size="12" fill="#412402" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Workflows (Orca)</text>
+<rect x="32" y="330" width="346" height="58" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="205.0" y="345.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Run a saved workflow</text>
+<text x="205.0" y="361.0" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Workflows page, MCP run_workflow</text>
+<text x="205.0" y="375.0" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">store: wf_runs, wf_steps</text>
+<rect x="32" y="396" width="346" height="58" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="205.0" y="411.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Approve with options</text>
+<text x="205.0" y="427.0" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">POST /api/runs/:id/approve</text>
+<text x="205.0" y="441.0" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">store: wf_steps.resolution</text>
+<rect x="32" y="462" width="346" height="58" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="205.0" y="477.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Fan out, hand off, clean up</text>
+<text x="205.0" y="493.0" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">fanout node, /api/runs/...</text>
+<text x="205.0" y="507.0" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">store: worktrees, branches</text>
+<rect x="405" y="300" width="370" height="235" rx="10" fill="none" stroke="#185FA5" stroke-width="1"/>
+<text x="415" y="318" font-size="12" fill="#042C53" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Ops</text>
+<rect x="417" y="330" width="346" height="58" rx="6" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+<text x="590.0" y="345.0" font-size="13" fill="#042C53" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Jobs and dead jobs</text>
+<text x="590.0" y="361.0" font-size="11" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Jobs page, /api/jobs</text>
+<text x="590.0" y="375.0" font-size="11" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">store: jobs + BullMQ</text>
+<rect x="417" y="396" width="346" height="58" rx="6" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+<text x="590.0" y="411.0" font-size="13" fill="#042C53" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">API keys (shared mode)</text>
+<text x="590.0" y="427.0" font-size="11" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Keys page, /api/keys</text>
+<text x="590.0" y="441.0" font-size="11" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">store: api_keys</text>
+<rect x="417" y="462" width="346" height="58" rx="6" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+<text x="590.0" y="477.0" font-size="13" fill="#042C53" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Health</text>
+<text x="590.0" y="493.0" font-size="11" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">GET /v1/health</text>
+<text x="590.0" y="507.0" font-size="11" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">store: -</text>
+<rect x="790" y="300" width="370" height="235" rx="10" fill="none" stroke="#5F5E5A" stroke-width="1" stroke-dasharray="6 4"/>
+<text x="800" y="318" font-size="12" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Removed in 006</text>
+<rect x="802" y="330" width="346" height="58" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="975.0" y="345.0" font-size="13" fill="#2C2C2A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Plan for a suggestion</text>
+<text x="975.0" y="361.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">MCP find_capabilities, /v1/bundle</text>
+<text x="975.0" y="375.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">store: bundle:{ref} cache</text>
+<rect x="802" y="396" width="346" height="58" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="975.0" y="411.0" font-size="13" fill="#2C2C2A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Follow tracking + adoption KPI</text>
+<text x="975.0" y="427.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">hook/tool follow, /api/kpis</text>
+<text x="975.0" y="441.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">store: decisions.followed</text>
+<rect x="802" y="462" width="346" height="58" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="975.0" y="477.0" font-size="13" fill="#2C2C2A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Route/decide pipeline</text>
+<text x="975.0" y="493.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">/v1/route, bundle.decide</text>
+<text x="975.0" y="507.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">store: decisions</text>
+</svg>

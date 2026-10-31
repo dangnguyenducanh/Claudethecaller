@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="620" viewBox="0 0 1180 620"><rect width="100%" height="100%" fill="#FFFFFF"/>
+<text x="16" y="26" font-size="16" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">F4 step attempt state machine: every write goes through transition(step, from, to)</text>
+<rect x="40" y="250" width="200" height="56" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text x="140.0" y="282.0" font-size="13" fill="#2C2C2A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">queued</text>
+<rect x="300" y="250" width="200" height="56" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text x="400.0" y="264.0" font-size="13" fill="#2C2C2A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">running</text>
+<text x="400.0" y="280.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">stages: worktree, setup,</text>
+<text x="400.0" y="294.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">spawn, stream, report</text>
+<rect x="620" y="90" width="200" height="56" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1"/>
+<text x="720.0" y="122.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">done</text>
+<rect x="620" y="190" width="200" height="56" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1"/>
+<text x="720.0" y="222.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">waiting</text>
+<rect x="620" y="290" width="200" height="56" rx="6" fill="#FAECE7" stroke="#993C1D" stroke-width="1"/>
+<text x="720.0" y="322.0" font-size="13" fill="#4A1B0C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">failed</text>
+<rect x="620" y="390" width="200" height="56" rx="6" fill="#FAECE7" stroke="#993C1D" stroke-width="1"/>
+<text x="720.0" y="422.0" font-size="13" fill="#4A1B0C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">timeout</text>
+<rect x="880" y="90" width="200" height="56" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text x="980.0" y="122.0" font-size="13" fill="#2C2C2A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">cancelled</text>
+<rect x="300" y="420" width="200" height="56" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="400.0" y="452.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">start_unknown</text>
+<rect x="300" y="90" width="200" height="56" rx="6" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+<text x="400.0" y="122.0" font-size="13" fill="#042C53" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">quota</text>
+<rect x="40" y="420" width="200" height="56" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text x="140.0" y="452.0" font-size="13" fill="#2C2C2A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">skipped</text>
+<rect x="880" y="390" width="200" height="56" rx="6" fill="#FAECE7" stroke="#993C1D" stroke-width="1"/>
+<text x="980.0" y="422.0" font-size="13" fill="#4A1B0C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">circuit_broken</text>
+<path d="M240,278 L300,278" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="300.0,278.0 291.7,281.5 291.7,274.5" fill="#444441"/>
+<circle cx="270.0" cy="278.0" r="9" fill="#FFFFFF" stroke="#444441" stroke-width="1"/>
+<text x="270.0" y="282.0" font-size="10" fill="#444441" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">1</text>
+<path d="M140,306 L140,420" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="140.0,420.0 136.5,411.7 143.5,411.7" fill="#444441"/>
+<circle cx="140.0" cy="363.0" r="9" fill="#FFFFFF" stroke="#444441" stroke-width="1"/>
+<text x="140.0" y="367.0" font-size="10" fill="#444441" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">2</text>
+<path d="M500,262 L560,262 L560,118 L620,118" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="620.0,118.0 611.7,121.5 611.7,114.5" fill="#444441"/>
+<circle cx="530.0" cy="262.0" r="9" fill="#FFFFFF" stroke="#444441" stroke-width="1"/>
+<text x="530.0" y="266.0" font-size="10" fill="#444441" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">3</text>
+<path d="M500,272 L580,272 L580,218 L620,218" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="620.0,218.0 611.7,221.5 611.7,214.5" fill="#444441"/>
+<circle cx="540.0" cy="272.0" r="9" fill="#FFFFFF" stroke="#444441" stroke-width="1"/>
+<text x="540.0" y="276.0" font-size="10" fill="#444441" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">4</text>
+<path d="M500,284 L560,284 L560,318 L620,318" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="620.0,318.0 611.7,321.5 611.7,314.5" fill="#444441"/>
+<circle cx="530.0" cy="284.0" r="9" fill="#FFFFFF" stroke="#444441" stroke-width="1"/>
+<text x="530.0" y="288.0" font-size="10" fill="#444441" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">5</text>
+<path d="M500,296 L540,296 L540,418 L620,418" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="620.0,418.0 611.7,421.5 611.7,414.5" fill="#444441"/>
+<circle cx="520.0" cy="296.0" r="9" fill="#FFFFFF" stroke="#444441" stroke-width="1"/>
+<text x="520.0" y="300.0" font-size="10" fill="#444441" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">6</text>
+<path d="M400,306 L400,420" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="400.0,420.0 396.5,411.7 403.5,411.7" fill="#444441"/>
+<circle cx="400.0" cy="363.0" r="9" fill="#FFFFFF" stroke="#444441" stroke-width="1"/>
+<text x="400.0" y="367.0" font-size="10" fill="#444441" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">7</text>
+<path d="M400,250 L400,146" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="400.0,146.0 403.5,154.3 396.5,154.3" fill="#444441"/>
+<circle cx="400.0" cy="198.0" r="9" fill="#FFFFFF" stroke="#444441" stroke-width="1"/>
+<text x="400.0" y="202.0" font-size="10" fill="#444441" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">8</text>
+<path d="M300,118 L140,118 L140,250" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="140.0,250.0 136.5,241.7 143.5,241.7" fill="#444441"/>
+<circle cx="220.0" cy="118.0" r="9" fill="#FFFFFF" stroke="#444441" stroke-width="1"/>
+<text x="220.0" y="122.0" font-size="10" fill="#444441" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">9</text>
+<path d="M720,190 L720,146" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="720.0,146.0 723.5,154.3 716.5,154.3" fill="#444441"/>
+<circle cx="720.0" cy="168.0" r="9" fill="#FFFFFF" stroke="#444441" stroke-width="1"/>
+<text x="720.0" y="172.0" font-size="10" fill="#444441" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">10</text>
+<path d="M820,205 L850,205 L850,118 L880,118" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="880.0,118.0 871.7,121.5 871.7,114.5" fill="#444441"/>
+<circle cx="835.0" cy="205.0" r="9" fill="#FFFFFF" stroke="#444441" stroke-width="1"/>
+<text x="835.0" y="209.0" font-size="10" fill="#444441" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">11</text>
+<path d="M720,346 L720,380 L80,380 L80,306" fill="none" stroke="#185FA5" stroke-width="1.2"/>
+<polygon points="80.0,306.0 83.5,314.3 76.5,314.3" fill="#185FA5"/>
+<circle cx="720.0" cy="363.0" r="9" fill="#FFFFFF" stroke="#185FA5" stroke-width="1"/>
+<text x="720.0" y="367.0" font-size="10" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">12</text>
+<path d="M820,418 L880,418" fill="none" stroke="#A32D2D" stroke-width="1.2"/>
+<polygon points="880.0,418.0 871.7,421.5 871.7,414.5" fill="#A32D2D"/>
+<circle cx="850.0" cy="418.0" r="9" fill="#FFFFFF" stroke="#A32D2D" stroke-width="1"/>
+<text x="850.0" y="422.0" font-size="10" fill="#A32D2D" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">13</text>
+<path d="M500,448 L590,448 L590,330 L620,330" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="620.0,330.0 611.7,333.5 611.7,326.5" fill="#444441"/>
+<circle cx="545.0" cy="448.0" r="9" fill="#FFFFFF" stroke="#444441" stroke-width="1"/>
+<text x="545.0" y="452.0" font-size="10" fill="#444441" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">14</text>
+<text x="25" y="500" font-size="11" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif">1. claim: runner job starts attempt n (SKIP LOCKED; job id run:node:visit:attempt)</text>
+<text x="25" y="516" font-size="11" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif">2. walker: branch not taken (if / merge rules)</text>
+<text x="25" y="532" font-size="11" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif">3. agent exit 0 + report, or shell exit 0</text>
+<text x="25" y="548" font-size="11" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif">4. approval node, or ctc.yaml setup policy ask: options[] shown</text>
+<text x="25" y="564" font-size="11" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif">5. exit != 0, report outcome failed, setup or worktree stage failed</text>
+<text x="25" y="580" font-size="11" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif">6. node timeout_s passed: process group killed</text>
+<text x="25" y="596" font-size="11" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif">7. worker restart finds no live pid and no exit record (never act on absence)</text>
+<text x="605" y="500" font-size="11" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif">8. agent reports usage limit; run paused until reset</text>
+<text x="605" y="516" font-size="11" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif">9. quota reset time reached: same attempt re-queued</text>
+<text x="605" y="532" font-size="11" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif">10. user picks an option: resolution stored, injected into the next prompt</text>
+<text x="605" y="548" font-size="11" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif">11. user cancels the run (any non-final state also allows cancel)</text>
+<text x="605" y="564" font-size="11" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif">12. POST .../retry: new attempt row n+1 (retry_of_step_id), only if failure_count &lt; 3</text>
+<text x="605" y="580" font-size="11" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif">13. third failed / timeout / start_unknown attempt: retry refused</text>
+<text x="605" y="596" font-size="11" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif">14. user marks the unknown attempt failed from the Runs page</text>
+</svg>

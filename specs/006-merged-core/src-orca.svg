@@ -1,0 +1,153 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="470" viewBox="0 0 1180 470"><rect width="100%" height="100%" fill="#FFFFFF"/>
+<text x="16" y="26" font-size="16" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Orca 1.4.214 (2c4eb87): agents in git worktrees</text>
+<text x="250" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Entry</text>
+<text x="440" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Logic</text>
+<text x="630" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Queue / process</text>
+<text x="820" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Side effects</text>
+<text x="1010" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Storage</text>
+<text x="20" y="100" font-size="13" fill="#412402" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Create worktree</text>
+<rect x="165" y="70" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="250.0" y="104.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="96" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">orca worktree create</text>
+<text x="250" y="112" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">(RPC over socket)</text>
+<rect x="355" y="70" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="440.0" y="104.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="96" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">sanitize name,</text>
+<text x="440" y="112" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">resolve base</text>
+<path d="M335,100 L355,100" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,100.0 346.7,103.5 346.7,96.5" fill="#444441"/>
+<rect x="545" y="70" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="630.0" y="104.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="96" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">git worktree add</text>
+<text x="630" y="112" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">--no-track -b (180 s)</text>
+<path d="M525,100 L545,100" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,100.0 536.7,103.5 536.7,96.5" fill="#444441"/>
+<rect x="735" y="70" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="820.0" y="104.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="96" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">orca.yaml setup</text>
+<text x="820" y="112" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">script (120 s)</text>
+<path d="M715,100 L735,100" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,100.0 726.7,103.5 726.7,96.5" fill="#444441"/>
+<rect x="925" y="70" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="1010.0" y="104.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="96" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">branch.&lt;b&gt;.base</text>
+<text x="1010" y="112" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">config + app store</text>
+<path d="M905,100 L925,100" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,100.0 916.7,103.5 916.7,96.5" fill="#444441"/>
+<text x="20" y="176" font-size="13" fill="#412402" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Launch agent</text>
+<rect x="165" y="146" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="250.0" y="180.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="172" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">agent launch</text>
+<text x="250" y="188" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">--prompt</text>
+<rect x="355" y="146" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="440.0" y="180.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="172" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">pick surface:</text>
+<text x="440" y="188" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">terminal or chat</text>
+<path d="M335,176 L355,176" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,176.0 346.7,179.5 346.7,172.5" fill="#444441"/>
+<rect x="545" y="146" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="630.0" y="180.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="172" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">PTY in terminal</text>
+<text x="630" y="188" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">daemon / SDK child</text>
+<path d="M525,176 L545,176" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,176.0 536.7,179.5 536.7,172.5" fill="#444441"/>
+<rect x="735" y="146" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="820.0" y="180.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="172" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">prompt.outcome:</text>
+<text x="820" y="188" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">journaled, handed..</text>
+<path d="M715,176 L735,176" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,176.0 726.7,179.5 726.7,172.5" fill="#444441"/>
+<rect x="925" y="146" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="1010.0" y="180.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="172" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">launch record</text>
+<text x="1010" y="188" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">(operationId)</text>
+<path d="M905,176 L925,176" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,176.0 916.7,179.5 916.7,172.5" fill="#444441"/>
+<text x="20" y="252" font-size="13" fill="#412402" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Monitor status</text>
+<rect x="165" y="222" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="250.0" y="256.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="248" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">managed hooks in</text>
+<text x="250" y="264" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">the agent config</text>
+<rect x="355" y="222" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="440.0" y="256.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="248" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">curl POST to</text>
+<text x="440" y="264" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">loopback (token)</text>
+<path d="M335,252 L355,252" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,252.0 346.7,255.5 346.7,248.5" fill="#444441"/>
+<rect x="545" y="222" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="630.0" y="256.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="248" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">status per pane:</text>
+<text x="630" y="264" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">working, blocked..</text>
+<path d="M525,252 L545,252" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,252.0 536.7,255.5 536.7,248.5" fill="#444441"/>
+<rect x="735" y="222" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="820.0" y="256.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="248" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">OSC 7501 fallback</text>
+<text x="820" y="264" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">after 2 min</text>
+<path d="M715,252 L735,252" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,252.0 726.7,255.5 726.7,248.5" fill="#444441"/>
+<rect x="925" y="222" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="1010.0" y="256.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="248" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">status snapshot</text>
+<text x="1010" y="264" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">(7 d)</text>
+<path d="M905,252 L925,252" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,252.0 916.7,255.5 916.7,248.5" fill="#444441"/>
+<text x="20" y="328" font-size="13" fill="#412402" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Orchestrate N</text>
+<rect x="165" y="298" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="250.0" y="332.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="324" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">coordinator agent</text>
+<text x="250" y="340" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">(an LLM)</text>
+<rect x="355" y="298" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="440.0" y="332.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="324" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">worker-start:</text>
+<text x="440" y="340" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Task + Dispatch txn</text>
+<path d="M335,328 L355,328" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,328.0 346.7,331.5 346.7,324.5" fill="#444441"/>
+<rect x="545" y="298" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="630.0" y="332.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="324" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">worker sends</text>
+<text x="630" y="340" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">worker_done once</text>
+<path d="M525,328 L545,328" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,328.0 536.7,331.5 536.7,324.5" fill="#444441"/>
+<rect x="735" y="298" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="820.0" y="332.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="324" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">atomic settle; dup</text>
+<text x="820" y="340" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">no-op, stale reject</text>
+<path d="M715,328 L735,328" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,328.0 726.7,331.5 726.7,324.5" fill="#444441"/>
+<rect x="925" y="298" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="1010.0" y="332.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="324" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">orchestration.db</text>
+<text x="1010" y="340" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">(SQLite v43)</text>
+<path d="M905,328 L925,328" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,328.0 916.7,331.5 916.7,324.5" fill="#444441"/>
+<text x="20" y="404" font-size="13" fill="#412402" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Cleanup</text>
+<rect x="165" y="374" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="250.0" y="408.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="400" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">worker-release,</text>
+<text x="250" y="416" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">worktree rm</text>
+<rect x="355" y="374" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="440.0" y="408.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="400" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">archive hook</text>
+<text x="440" y="416" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">gate</text>
+<path d="M335,404 L355,404" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,404.0 346.7,407.5 346.7,400.5" fill="#444441"/>
+<rect x="545" y="374" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="630.0" y="408.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="400" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">close exact</text>
+<text x="630" y="416" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">agent terminal</text>
+<path d="M525,404 L545,404" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,404.0 536.7,407.5 536.7,400.5" fill="#444441"/>
+<rect x="735" y="374" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="820.0" y="408.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="400" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">git worktree remove;</text>
+<text x="820" y="416" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">keep branch</text>
+<path d="M715,404 L735,404" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,404.0 726.7,407.5 726.7,400.5" fill="#444441"/>
+<rect x="925" y="374" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+<text x="1010.0" y="408.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="400" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">removal</text>
+<text x="1010" y="416" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">records</text>
+<path d="M905,404 L925,404" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,404.0 916.7,407.5 916.7,400.5" fill="#444441"/>
+</svg>

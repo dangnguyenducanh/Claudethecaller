@@ -1,0 +1,218 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="622" viewBox="0 0 1180 622"><rect width="100%" height="100%" fill="#FFFFFF"/>
+<text x="16" y="26" font-size="16" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">F3 memory: capture, learn, recall (dashed = not built)</text>
+<text x="250" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Entry</text>
+<text x="440" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Logic</text>
+<text x="630" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Queue / process</text>
+<text x="820" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Side effects</text>
+<text x="1010" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Storage</text>
+<text x="20" y="100" font-size="13" fill="#26215C" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Capture</text>
+<text x="20" y="116" font-size="11" fill="#534AB7" text-anchor="start" font-family="Helvetica, Arial, sans-serif">hooks/spool.sh</text>
+<rect x="165" y="70" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="104.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="96" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">PostToolUse, Stop,</text>
+<text x="250" y="112" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">SessionEnd hooks</text>
+<rect x="355" y="70" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="104.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="96" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">strip &lt;private&gt;,</text>
+<text x="440" y="112" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">harness tags</text>
+<path d="M335,100 L355,100" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,100.0 346.7,103.5 346.7,96.5" fill="#444441"/>
+<rect x="545" y="70" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="104.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="96" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">1 spool file per event</text>
+<text x="630" y="112" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">(.tmp + rename)</text>
+<path d="M525,100 L545,100" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,100.0 536.7,103.5 536.7,96.5" fill="#444441"/>
+<rect x="735" y="70" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="104.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="96" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">nudge web</text>
+<text x="820" y="112" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">(250 ms, best effort)</text>
+<path d="M715,100 L735,100" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,100.0 726.7,103.5 726.7,96.5" fill="#444441"/>
+<rect x="925" y="70" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="104.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="96" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">~/.claudethecaller/</text>
+<text x="1010" y="112" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">spool</text>
+<path d="M905,100 L925,100" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,100.0 916.7,103.5 916.7,96.5" fill="#444441"/>
+<text x="20" y="176" font-size="13" fill="#26215C" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Drain</text>
+<text x="20" y="192" font-size="11" fill="#534AB7" text-anchor="start" font-family="Helvetica, Arial, sans-serif">web</text>
+<rect x="165" y="146" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="180.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="172" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">boot, file watch,</text>
+<text x="250" y="188" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">30 s sweep</text>
+<rect x="355" y="146" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="180.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="172" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Zod parse;</text>
+<text x="440" y="188" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">bad -&gt; corrupt/</text>
+<path d="M335,176 L355,176" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,176.0 346.7,179.5 346.7,172.5" fill="#444441"/>
+<rect x="545" y="146" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="180.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="172" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">route event:</text>
+<text x="630" y="188" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Edit -&gt; graph, Stop -&gt; llm</text>
+<path d="M525,176 L545,176" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,176.0 536.7,179.5 536.7,172.5" fill="#444441"/>
+<rect x="735" y="146" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="180.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="172" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">delete file after</text>
+<text x="820" y="188" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">BullMQ add</text>
+<path d="M715,176 L735,176" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,176.0 726.7,179.5 726.7,172.5" fill="#444441"/>
+<rect x="925" y="146" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="180.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="172" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">jobs rows +</text>
+<text x="1010" y="188" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">BullMQ</text>
+<path d="M905,176 L925,176" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,176.0 916.7,179.5 916.7,172.5" fill="#444441"/>
+<text x="20" y="252" font-size="13" fill="#26215C" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Learn facts</text>
+<text x="20" y="268" font-size="11" fill="#534AB7" text-anchor="start" font-family="Helvetica, Arial, sans-serif">llm.extract</text>
+<rect x="165" y="222" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="256.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="248" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Stop: transcript</text>
+<text x="250" y="264" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">user words</text>
+<rect x="355" y="222" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="256.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="248" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">llama-server JSON</text>
+<text x="440" y="264" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">grammar; retry once</text>
+<path d="M335,252 L355,252" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,252.0 346.7,255.5 346.7,248.5" fill="#444441"/>
+<rect x="545" y="222" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="256.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="248" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">band vs nearest:</text>
+<text x="630" y="264" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">NOOP/UPD/SUPERSEDE/ADD</text>
+<path d="M525,252 L545,252" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,252.0 536.7,255.5 536.7,248.5" fill="#444441"/>
+<rect x="735" y="222" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="256.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="248" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">content hash;</text>
+<text x="820" y="264" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">reinforce today</text>
+<path d="M715,252 L735,252" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,252.0 726.7,255.5 726.7,248.5" fill="#444441"/>
+<rect x="925" y="222" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="256.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="248" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">memories,</text>
+<text x="1010" y="264" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">rotate mem_epoch</text>
+<path d="M905,252 L925,252" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,252.0 916.7,255.5 916.7,248.5" fill="#444441"/>
+<text x="20" y="328" font-size="13" fill="#26215C" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Summarize</text>
+<text x="20" y="344" font-size="11" fill="#534AB7" text-anchor="start" font-family="Helvetica, Arial, sans-serif">llm.summarize</text>
+<rect x="165" y="298" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="332.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="324" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">SessionEnd:</text>
+<text x="250" y="340" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">whole session</text>
+<rect x="355" y="298" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="332.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="324" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">6 fields: request,</text>
+<text x="440" y="340" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">investigated, learned..</text>
+<path d="M335,328 L355,328" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,328.0 346.7,331.5 346.7,324.5" fill="#444441"/>
+<rect x="545" y="298" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="332.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="324" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">retry once,</text>
+<text x="630" y="340" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">then drop</text>
+<path d="M525,328 L545,328" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,328.0 536.7,331.5 536.7,324.5" fill="#444441"/>
+<rect x="735" y="298" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="332.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="324" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">content_hash</text>
+<text x="820" y="340" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">ON CONFLICT</text>
+<path d="M715,328 L735,328" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,328.0 726.7,331.5 726.7,324.5" fill="#444441"/>
+<rect x="925" y="298" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="332.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="324" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">session_</text>
+<text x="1010" y="340" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">summaries</text>
+<path d="M905,328 L925,328" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,328.0 916.7,331.5 916.7,324.5" fill="#444441"/>
+<text x="20" y="404" font-size="13" fill="#26215C" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Import</text>
+<text x="20" y="420" font-size="11" fill="#534AB7" text-anchor="start" font-family="Helvetica, Arial, sans-serif">memory.import</text>
+<rect x="165" y="374" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="408.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="400" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">~/.claude/.../memory</text>
+<text x="250" y="416" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">md files, watcher</text>
+<rect x="355" y="374" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="408.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="400" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">frontmatter type -&gt;</text>
+<text x="440" y="416" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">kind</text>
+<path d="M335,404 L355,404" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,404.0 346.7,407.5 346.7,400.5" fill="#444441"/>
+<rect x="545" y="374" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="408.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="400" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">same bands as</text>
+<text x="630" y="416" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">extract</text>
+<path d="M525,404 L545,404" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,404.0 536.7,407.5 536.7,400.5" fill="#444441"/>
+<rect x="735" y="374" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="408.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="400" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">source = file path</text>
+<text x="820" y="416" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">(read only)</text>
+<path d="M715,404 L735,404" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,404.0 726.7,407.5 726.7,400.5" fill="#444441"/>
+<rect x="925" y="374" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="408.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="400" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">memories</text>
+<text x="1010" y="416" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">(scope, kind)</text>
+<path d="M905,404 L925,404" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,404.0 916.7,407.5 916.7,400.5" fill="#444441"/>
+<text x="20" y="480" font-size="13" fill="#26215C" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Recall at start</text>
+<text x="20" y="496" font-size="11" fill="#534AB7" text-anchor="start" font-family="Helvetica, Arial, sans-serif">/v1/hook/start</text>
+<rect x="165" y="450" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="484.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="476" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">SessionStart</text>
+<text x="250" y="492" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">(curl, 1.5 s)</text>
+<rect x="355" y="450" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="484.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="476" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">last summaries +</text>
+<text x="440" y="492" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">RRF tsv + vector K=60</text>
+<path d="M335,480 L355,480" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,480.0 346.7,483.5 346.7,476.5" fill="#444441"/>
+<rect x="545" y="450" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="484.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="476" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">score x recency x</text>
+<text x="630" y="492" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">reinforcement</text>
+<path d="M525,480 L545,480" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,480.0 536.7,483.5 536.7,476.5" fill="#444441"/>
+<rect x="735" y="450" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="484.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="476" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">render, measure,</text>
+<text x="820" y="492" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">trim to 10,000 chars</text>
+<path d="M715,480 L735,480" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,480.0 726.7,483.5 726.7,476.5" fill="#444441"/>
+<rect x="925" y="450" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="484.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="476" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">context block</text>
+<text x="1010" y="492" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">or empty</text>
+<path d="M905,480 L925,480" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,480.0 916.7,483.5 916.7,476.5" fill="#444441"/>
+<text x="20" y="556" font-size="13" fill="#26215C" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Search</text>
+<text x="20" y="572" font-size="11" fill="#534AB7" text-anchor="start" font-family="Helvetica, Arial, sans-serif">MCP</text>
+<rect x="165" y="526" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="560.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="552" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">mem_search</text>
+<text x="250" y="568" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">(query, filters)</text>
+<rect x="355" y="526" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="560.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="552" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">RRF, 100 per leg;</text>
+<text x="440" y="568" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">id index rows</text>
+<path d="M335,556 L355,556" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,556.0 346.7,559.5 346.7,552.5" fill="#444441"/>
+<rect x="545" y="526" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="560.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="552" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">mem_timeline</text>
+<text x="630" y="568" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">(anchor, 3 + 3)</text>
+<path d="M525,556 L545,556" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,556.0 536.7,559.5 536.7,552.5" fill="#444441"/>
+<rect x="735" y="526" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="560.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="552" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">mem_get(ids)</text>
+<text x="820" y="568" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">full rows</text>
+<path d="M715,556 L735,556" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,556.0 726.7,559.5 726.7,552.5" fill="#444441"/>
+<rect x="925" y="526" width="170" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="560.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="552" font-size="11" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">memories,</text>
+<text x="1010" y="568" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">session_summaries</text>
+<path d="M905,556 L925,556" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,556.0 916.7,559.5 916.7,552.5" fill="#444441"/>
+</svg>
