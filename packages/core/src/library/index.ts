@@ -152,6 +152,19 @@ export function buildVersion(input: BuildInput, limits: Limits = libraryLimits):
   };
 }
 
+/** The file that defines a capability: `SKILL.md` when present, else the only file, else `null`. */
+export function mainPathOf(paths: readonly string[]): string | null {
+  if (paths.includes('SKILL.md')) return 'SKILL.md';
+  return paths.length === 1 ? (paths[0] ?? null) : null;
+}
+
+/** Body of the main file: whole text for a YAML/JSON workflow, else the text after its frontmatter (whole text when the header does not parse). */
+export function bodyOf(kind: string, mainPath: string, content: string): string {
+  if (kind === 'workflow' && isWholeFileYaml(mainPath)) return content;
+  const parsed = parseFrontmatter(content);
+  return parsed.ok ? parsed.body : content;
+}
+
 type ManifestFile = { path: string; blobHash: string };
 const entryKey = (f: ManifestFile): string => `${f.path}\0${f.blobHash}`;
 

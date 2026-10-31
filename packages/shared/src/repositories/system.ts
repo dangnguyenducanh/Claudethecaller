@@ -72,12 +72,17 @@ export const systemRepo = (db: Db) => {
       /** The only deleter of `cap_blobs`: blobs that no file of the owner's versions references. */
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       async deleteUnreferencedBlobs(_sctx: SystemCtx): Promise<number> {
-        return changed(
-          k,
-          sql`delete from cap_blobs b where not exists (
-                select 1 from cap_files f join capability_versions v on v.id = f.version_id join capabilities c on c.id = v.cap_id
-                where f.blob_hash = b.hash and c.user_id = b.user_id)`,
-        );
+        // The table lock conflicts with the ROW EXCLUSIVE lock of every open createVersion insert, so the delete waits for it and sees its cap_files.
+        return k.transaction().execute(async (trx) => {
+          await sql`set local lock_timeout = '5s'`.execute(trx);
+          await sql`lock table cap_blobs in share row exclusive mode`.execute(trx);
+          return changed(
+            trx,
+            sql`delete from cap_blobs b where not exists (
+                  select 1 from cap_files f join capability_versions v on v.id = f.version_id join capabilities c on c.id = v.cap_id
+                  where f.blob_hash = b.hash and c.user_id = b.user_id)`,
+          );
+        });
       },
       async pruneIdempotencyKeys(_sctx: SystemCtx, olderThanDays = 30): Promise<number> {
         return changed(k, sql`delete from idempotency_keys where created_at < now() - (${days(olderThanDays, 30)}::float8 * interval '1 day')`);

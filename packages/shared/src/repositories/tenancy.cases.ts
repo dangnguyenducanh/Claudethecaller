@@ -164,6 +164,7 @@ export const cases: Cases = {
     listCapabilities: { expect: 'no-a', run: ({ r, ctx }) => r.library.listCapabilities(ctx, { limit: 500 }) },
     get: { expect: 'zero', run: ({ r, ctx, a }) => r.library.get(ctx, a.capId) },
     byName: { expect: 'zero', run: ({ r, ctx, a }) => r.library.byName(ctx, { namespace: 'user', kind: 'skill', name: a.capName }) },
+    listByName: { expect: 'zero', run: ({ r, ctx, a }) => r.library.listByName(ctx, a.capName) },
     createVersion: { expect: 'as-caller', run: async ({ r, ctx, a }) => {
       const { version } = await r.library.createVersion(ctx, {
         namespace: 'user', kind: 'skill', name: 'skill-new-b', rootPath: '/x', description: 'd', bodyHash: 'h', commitMessage: 'm', ...hostile,
