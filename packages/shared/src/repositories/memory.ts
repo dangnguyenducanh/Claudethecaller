@@ -168,9 +168,9 @@ export const memoryRepo = (db: Db) => {
       if (!isUuid(id)) return 0;
       return changed(k, sql`update memories set deleted_at = now() where user_id = ${ctx.userId} and id = ${id} and deleted_at is null`);
     },
-    /** The two candidate lists for hybrid recall (full-text and vector), `perLeg` clamped to 1..100. */
-    async recallLegs(ctx: Ctx, o: { queryText: string; queryVector: number[]; perLeg: number }): Promise<{ fts: Memory[]; vec: Memory[] }> {
-      const embedding = vec(o?.queryVector);
+    /** The two candidate lists for hybrid recall (full-text and vector), `perLeg` clamped to 1..100. A `null` vector skips the vector leg (embedder down). */
+    async recallLegs(ctx: Ctx, o: { queryText: string; queryVector: number[] | null; perLeg: number }): Promise<{ fts: Memory[]; vec: Memory[] }> {
+      const embedding = o?.queryVector === null ? null : vec(o?.queryVector);
       const perLeg = clampLimit(o.perLeg, MAX_LEG, MAX_LEG);
       const text = typeof o.queryText === 'string' ? o.queryText.trim() : '';
       const fts = text === ''
@@ -181,11 +181,13 @@ export const memoryRepo = (db: Db) => {
                 and m.tsv @@ plainto_tsquery('simple', ${text})
                 order by ts_rank(m.tsv, plainto_tsquery('simple', ${text})) desc, m.id limit ${perLeg}`,
           );
-      const near = await rows<Memory>(
-        k,
-        sql`select ${COLS} from memories m where m.user_id = ${ctx.userId} and ${LIVE} ${visible(ctx)} and m.embedding is not null
-            order by m.embedding <=> ${embedding}, m.id limit ${perLeg}`,
-      );
+      const near = embedding === null
+        ? []
+        : await rows<Memory>(
+            k,
+            sql`select ${COLS} from memories m where m.user_id = ${ctx.userId} and ${LIVE} ${visible(ctx)} and m.embedding is not null
+                order by m.embedding <=> ${embedding}, m.id limit ${perLeg}`,
+          );
       return { fts, vec: near };
     },
     /** The anchor memory with up to 10 neighbours each way (by creation time), and the session summaries around it. Unknown anchor gives empty lists. */

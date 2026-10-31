@@ -109,6 +109,7 @@ export const cases: Cases = {
   history: {
     upsert: { expect: 'as-caller', run: async ({ r, ctx }) => (await r.history.upsert(ctx, { path: '/new/b.jsonl', size: 1, mtime: 1, status: 'imported', ...hostile })).userId === ctx.userId },
     listByStatus: { expect: 'no-a', run: ({ r, ctx }) => r.history.listByStatus(ctx, { status: 'imported' }) },
+    byPaths: { expect: 'no-a', run: ({ r, ctx, a }) => r.history.byPaths(ctx, [a.path]) },
     setStatus: { expect: 'zero', run: ({ r, ctx, a }) => r.history.setStatus(ctx, a.path, 'failed') },
   },
   jobs: {

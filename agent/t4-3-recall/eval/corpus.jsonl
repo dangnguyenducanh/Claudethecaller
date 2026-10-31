@@ -1,0 +1,120 @@
+{"id":"m001","kind":"preference","scope":"global","text":"The user wants a short proposal first and no edits, commits or pushes until the owner approves."}
+{"id":"m002","kind":"preference","scope":"global","text":"Keep agent runs lean: one simple reviewer, and state the token cost in every proposal."}
+{"id":"m003","kind":"convention","scope":"global","text":"Never use emojis in commit messages, code comments or reports."}
+{"id":"m004","kind":"convention","scope":"global","text":"Commit messages follow the conventional style, for example feat(007): or fix(retrieval):."}
+{"id":"m005","kind":"preference","scope":"global","text":"Reports start with the verdict in the first sentence, without greetings or filler."}
+{"id":"m006","kind":"convention","scope":"global","text":"Cite code as file path plus line number instead of describing it vaguely."}
+{"id":"m007","kind":"preference","scope":"global","text":"Prefer the standard library over adding a new dependency for a few lines of code."}
+{"id":"m008","kind":"convention","scope":"global","text":"Never use pkill -f from the agent shell; it killed the shell once."}
+{"id":"m009","kind":"convention","scope":"global","text":"Run every test command under timeout so a hanging test cannot block the session."}
+{"id":"m010","kind":"preference","scope":"global","text":"Never git push without being asked."}
+{"id":"m011","kind":"convention","scope":"global","text":"Use pnpm, not npm or yarn, in JavaScript projects."}
+{"id":"m012","kind":"preference","scope":"global","text":"Answer in plain English with short sentences."}
+{"id":"m013","kind":"convention","scope":"global","text":"Mark unverified claims with [UNVERIFIED HYPOTHESIS] and name the command that would prove them."}
+{"id":"m014","kind":"preference","scope":"global","text":"The owner reviews YOUR-CHOICE decisions only in the final pull request."}
+{"id":"m015","kind":"convention","scope":"global","text":"Put temporary files in the session scratchpad, never in the project tree."}
+{"id":"m016","kind":"fact","scope":"project","text":"The TEI embedder runs on 127.0.0.1:18300 and serves SKILLRET-Embedding-0.6B with 1024-dimensional vectors."}
+{"id":"m017","kind":"fact","scope":"project","text":"The bge reranker runs in TEI on port 18301."}
+{"id":"m018","kind":"fact","scope":"project","text":"llama-server on port 18302 serves Qwen2.5-3B with one slot and a 32768-token context."}
+{"id":"m019","kind":"fact","scope":"project","text":"The scratch Postgres for the new stack is the container ctc-dev-pg on 127.0.0.1:18304."}
+{"id":"m020","kind":"fact","scope":"project","text":"The scratch Redis is ctc-scratch-redis on 127.0.0.1:18395."}
+{"id":"m021","kind":"convention","scope":"project","text":"The live Python daemon on port 18310 may only receive read-only requests and must never be restarted."}
+{"id":"m022","kind":"convention","scope":"project","text":"Dev runs of the new stack use CTC_HOME=.ctc-dev and port 18410 for the web process."}
+{"id":"m023","kind":"convention","scope":"project","text":"Supabase is never touched during the 007 build."}
+{"id":"m024","kind":"convention","scope":"project","text":"Never write to the real ~/.claude settings, skills or hooks from a build task."}
+{"id":"m025","kind":"fact","scope":"project","text":"TEI accepts at most 32 inputs per /embed request."}
+{"id":"m026","kind":"fact","scope":"project","text":"The toolchain is pinned to Node 22.22.1 and pnpm 10.34.5; do not install Node 24."}
+{"id":"m027","kind":"fact","scope":"project","text":"TypeScript runs as source through Node type stripping, with no dist build."}
+{"id":"m028","kind":"fact","scope":"project","text":"Tests run with Vitest 4, and lint runs ESLint 10 plus tsc --noEmit."}
+{"id":"m029","kind":"convention","scope":"project","text":"ESLint bans pg and kysely imports outside packages/shared/repositories."}
+{"id":"m030","kind":"fact","scope":"project","text":"The pnpm workspace covers apps/* and packages/* only; the dashboard stays standalone."}
+{"id":"m031","kind":"fact","scope":"project","text":"Python code runs through uv, which creates .venv inside the worktree."}
+{"id":"m032","kind":"fact","scope":"project","text":"packages/core is pure and does no I/O; the apps wire it to stores."}
+{"id":"m033","kind":"fact","scope":"project","text":"Zod 4 validates routes, MCP tools, queue payloads and YAML config."}
+{"id":"m034","kind":"fact","scope":"project","text":"The SQL layer is Kysely on pg; Prisma was rejected."}
+{"id":"m035","kind":"fact","scope":"project","text":"createDb installs the CamelCasePlugin, so rows come back with camelCase keys like reinforcementDates."}
+{"id":"m036","kind":"convention","scope":"project","text":"Each task gets a planner that writes SPEC.md, DECISIONS.md, PROCESS.md, checks.mjs and selfcheck.py under agent/<task>/."}
+{"id":"m037","kind":"convention","scope":"project","text":"The coder may change only the module paths that SPEC.md allows plus new test files."}
+{"id":"m038","kind":"convention","scope":"project","text":"Every decision line is tagged FROM-OWNER, FROM-SPEC, FROM-CALLERS or YOUR-CHOICE."}
+{"id":"m039","kind":"fact","scope":"project","text":"The owner accepted every planner default under O11 while asleep."}
+{"id":"m040","kind":"convention","scope":"project","text":"A task branch is cut from dangnguyenducanh/ctc-007-build and merged back into it."}
+{"id":"m041","kind":"fact","scope":"project","text":"The selfcheck prints SELFCHECK: DONE as its last line only when a full run passed."}
+{"id":"m042","kind":"convention","scope":"project","text":"A defect that traces to the decision list is fixed in the list, never patched into the coder's code."}
+{"id":"m043","kind":"convention","scope":"project","text":"Never show the coder the reference module, hidden tests or earlier run reports."}
+{"id":"m044","kind":"fact","scope":"project","text":"The contract files are frozen with a .contract.sha256 file that the selfcheck verifies."}
+{"id":"m045","kind":"fact","scope":"project","text":"The schema-assumptions test is red on the base branch because the migrations lack projects.graph_epoch and mem_epoch."}
+{"id":"m046","kind":"fact","scope":"project","text":"Write bands: similarity of at least 0.95 is NOOP, 0.85 to 0.95 is UPDATE or SUPERSEDE, and below 0.85 is ADD."}
+{"id":"m047","kind":"fact","scope":"project","text":"A NOOP appends today to reinforcement_dates at most once."}
+{"id":"m048","kind":"fact","scope":"project","text":"The llama judge decides same meaning versus contradicts only inside the 0.85 to 0.95 band."}
+{"id":"m049","kind":"fact","scope":"project","text":"An invalid llama reply is retried once with a fresh prompt and then dropped with bad_reply."}
+{"id":"m050","kind":"fact","scope":"project","text":"The session summary has six fields: request, investigated, learned, completed, next_steps and notes."}
+{"id":"m051","kind":"fact","scope":"project","text":"The summary content hash is sha256 of the summary input, not of the model reply."}
+{"id":"m052","kind":"fact","scope":"project","text":"llm.extract reads only the user's own typed words, never assistant text or tool output."}
+{"id":"m053","kind":"fact","scope":"project","text":"There is no extract cursor, so each Stop re-reads the newest 12000 characters of user words."}
+{"id":"m054","kind":"fact","scope":"project","text":"Spool files are written as .tmp and renamed, and a corrupt file moves to spool/corrupt/."}
+{"id":"m055","kind":"fact","scope":"project","text":"The spool hook nudges POST /v1/spool/nudge with a 250 ms timeout and always exits 0."}
+{"id":"m056","kind":"fact","scope":"project","text":"Spool files the web cannot deliver are kept for 7 days."}
+{"id":"m057","kind":"fact","scope":"project","text":"The SessionStart block must stay within 10000 characters and the hook has a 1200 ms budget."}
+{"id":"m058","kind":"fact","scope":"project","text":"Recall fuses the full-text and vector legs with reciprocal rank fusion, k = 60 and 100 per leg."}
+{"id":"m059","kind":"fact","scope":"project","text":"The recall score decays with a 30-day half-life and is doubled for pinned memories."}
+{"id":"m060","kind":"fact","scope":"project","text":"mem_epoch is a per-project token that every memory write rotates."}
+{"id":"m061","kind":"fact","scope":"project","text":"sanitize strips private, system-reminder and persisted-output blocks and lines that start with the ctc prefix."}
+{"id":"m062","kind":"fact","scope":"project","text":"Runner sessions are recognised by a cwd under /.ctc/wt/ and are never extracted."}
+{"id":"m063","kind":"fact","scope":"project","text":"The prompt hook has a 140 ms budget with curl -m 0.15."}
+{"id":"m064","kind":"fact","scope":"project","text":"The prompt line is at most 400 characters: task, file and symbol, skill and decision."}
+{"id":"m065","kind":"fact","scope":"project","text":"web-tree-sitter WASM grammars parse code files for the context graph."}
+{"id":"m066","kind":"fact","scope":"project","text":"The graph walk is a BFS of depth 2 with a hub cut-off and a 0.5 decay per hop."}
+{"id":"m067","kind":"fact","scope":"project","text":"A graph rebuild rotates graph_epoch so cached prompt lines die without a key scan."}
+{"id":"m068","kind":"fact","scope":"project","text":"The PreToolUse hook has a 50 ms budget and returns additionalContext JSON or nothing."}
+{"id":"m069","kind":"fact","scope":"project","text":"Doc extraction for the graph calls claude -p with the haiku model."}
+{"id":"m070","kind":"fact","scope":"project","text":"The skill library stores each served version of a skill with labels such as production."}
+{"id":"m071","kind":"fact","scope":"project","text":"get_capability and load_capability_resource are the MCP pair that reads one skill version and its files."}
+{"id":"m072","kind":"fact","scope":"project","text":"Skill retrieval takes dense 50 plus keyword 50 fused by RRF, reranks the top 20 and keeps 5."}
+{"id":"m073","kind":"fact","scope":"project","text":"The skillret document text is name, description and body capped at 8000 characters."}
+{"id":"m074","kind":"fact","scope":"project","text":"Workflow steps run claude -p --output-format stream-json or codex exec."}
+{"id":"m075","kind":"fact","scope":"project","text":"Worktrees for workflow steps live in <repo>/.ctc/wt/<run>/<step> and are kept 7 days."}
+{"id":"m076","kind":"fact","scope":"project","text":"Fan-out runs at most 3 children at once with depth 1."}
+{"id":"m077","kind":"fact","scope":"project","text":"A step report from an old attempt is refused with stale_attempt."}
+{"id":"m078","kind":"fact","scope":"project","text":"BullMQ runs seven queues: graph, library, llm, memory, runner, cleanup and dlq-retry."}
+{"id":"m079","kind":"fact","scope":"project","text":"The llm queue retries once and then writes jobs.error."}
+{"id":"m080","kind":"fact","scope":"project","text":"dlq-retry re-runs each failed job up to 5 times, every 10 minutes."}
+{"id":"m081","kind":"fact","scope":"project","text":"The L2 Redis cache has a 20 ms timeout and is marked down for 10 s after a miss."}
+{"id":"m082","kind":"fact","scope":"project","text":"When Redis is down the worker polls the jobs table every 5 seconds."}
+{"id":"m083","kind":"fact","scope":"project","text":"The jobs row in Postgres is the truth; BullMQ only carries it."}
+{"id":"m084","kind":"fact","scope":"project","text":"JobDropped marks a job dead with the error dropped:<code>, and BullMQ does not retry it."}
+{"id":"m085","kind":"fact","scope":"project","text":"The rate limit is 600 requests per minute per key in a Redis fixed window."}
+{"id":"m086","kind":"fact","scope":"project","text":"API errors use the body {error: {code, message}} with codes like invalid, not_found and conflict."}
+{"id":"m087","kind":"fact","scope":"project","text":"Lists take a limit up to 500 with keyset paging on created_at and id."}
+{"id":"m088","kind":"fact","scope":"project","text":"Hooks never error: any failure gives the empty reply within budget."}
+{"id":"m089","kind":"fact","scope":"project","text":"Every repository function takes ctx with userId first, and userId never comes from a request body."}
+{"id":"m090","kind":"fact","scope":"project","text":"The tenancy test checks that user B reads zero of user A's rows on every repository function."}
+{"id":"m091","kind":"fact","scope":"project","text":"The project docs CLAUDE.md, PLAN.md and older specs were deleted on 2026-10-30; spec 007 supersedes them."}
+{"id":"m092","kind":"fact","scope":"project","text":"The decisions and events tables are archived to jsonl.gz and dropped, with no ClickHouse."}
+{"id":"m093","kind":"fact","scope":"project","text":"The baseline fixtures hold 200 prompts: 71 own prompts and 129 SkillRet prompts."}
+{"id":"m094","kind":"fact","scope":"project","text":"Own-transcript prompts stay local and gitignored, with a committed sha256 manifest."}
+{"id":"m095","kind":"fact","scope":"project","text":"The /api fixtures cover GET routes only; mutating routes are skipped."}
+{"id":"m096","kind":"fact","scope":"project","text":"systemd user units are written into the repo but not installed on this machine."}
+{"id":"m097","kind":"fact","scope":"project","text":"At the end of the build there is one pull request from ctc-007-build into staging."}
+{"id":"m098","kind":"fact","scope":"project","text":"T7.2 deletes the Python service only if every verification gate is green on the new stack."}
+{"id":"m099","kind":"skill_outcome","scope":"project","text":"The tdd skill worked well for the repositories module: tests first caught two tenancy leaks."}
+{"id":"m100","kind":"skill_outcome","scope":"project","text":"graphify query answered architecture questions faster than grepping raw files."}
+{"id":"m101","kind":"skill_outcome","scope":"project","text":"A paused Node socket never sees the peer FIN, so a test server that never answers must call s.resume()."}
+{"id":"m102","kind":"skill_outcome","scope":"project","text":"sanitize was quadratic on nested blocks until it became a single left-to-right pass."}
+{"id":"m103","kind":"skill_outcome","scope":"project","text":"A pytest run over a module that opens FIFOs hung for 300 seconds without a timeout."}
+{"id":"m104","kind":"skill_outcome","scope":"project","text":"Two coders that agree are not proof; their differences only show silence in the decision list."}
+{"id":"m105","kind":"skill_outcome","scope":"project","text":"A contract transcribed from the reference implementation carried its flaws into every run."}
+{"id":"m106","kind":"fact","scope":"project","text":"Memory rows carry a tsvector column generated with the simple text search configuration."}
+{"id":"m107","kind":"fact","scope":"project","text":"The HNSW index on memories uses vector_cosine_ops."}
+{"id":"m108","kind":"fact","scope":"project","text":"projects.id is the first 8 hex characters of the sha256 of the project root."}
+{"id":"m109","kind":"fact","scope":"project","text":"The dashboard is React with Vite and has pages for Library versions, Memories and Runs."}
+{"id":"m110","kind":"fact","scope":"project","text":"The dashboard rework has no frontend spec, so the dashboard-e2e gate is reported as not run."}
+{"id":"m111","kind":"fact","scope":"project","text":"Claude memory files map type user to preference, feedback to convention, and project or reference to fact."}
+{"id":"m112","kind":"fact","scope":"project","text":"The worker RSS budget is 1 GB and the web RSS budget is 600 MB."}
+{"id":"m113","kind":"fact","scope":"project","text":"The web process exits 78 if it cannot bind within 60 seconds."}
+{"id":"m114","kind":"fact","scope":"project","text":"Offline evals stay in Python and call POST /v1/suggest."}
+{"id":"m115","kind":"fact","scope":"project","text":"The spool body format is {v: 1, event, received_at, payload}."}
+{"id":"m116","kind":"preference","scope":"global","text":"Prefer boring, readable code over clever code."}
+{"id":"m117","kind":"convention","scope":"project","text":"Merge a task only if the scope check shows that just the module and new test files changed."}
+{"id":"m118","kind":"convention","scope":"project","text":"Blind reviewers must not be told which solution is the reference."}
+{"id":"m119","kind":"fact","scope":"project","text":"The hook body is capped at 1 MB and prompt text at 20000 characters."}
+{"id":"m120","kind":"fact","scope":"project","text":"Idempotency keys are pruned after 30 days."}

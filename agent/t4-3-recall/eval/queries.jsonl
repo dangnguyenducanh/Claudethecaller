@@ -1,0 +1,50 @@
+{"id":"q01","style":"paraphrase","query":"which port does the embedding model listen on","relevant":["m016"]}
+{"id":"q02","style":"keyword","query":"llama-server 18302","relevant":["m018"]}
+{"id":"q03","style":"paraphrase","query":"am I allowed to restart the old python service","relevant":["m021"]}
+{"id":"q04","style":"keyword","query":"CTC_HOME dev runs port","relevant":["m022"]}
+{"id":"q05","style":"paraphrase","query":"can the build write to the hosted cloud database","relevant":["m023"]}
+{"id":"q06","style":"keyword","query":"Node 22.22.1 pin","relevant":["m026"]}
+{"id":"q07","style":"keyword","query":"ESLint kysely imports","relevant":["m029"]}
+{"id":"q08","style":"paraphrase","query":"why do database rows come back with camelCase field names","relevant":["m035"]}
+{"id":"q09","style":"paraphrase","query":"what files does the planner write for a task","relevant":["m036"]}
+{"id":"q10","style":"paraphrase","query":"which files is the coder allowed to change","relevant":["m037","m117"]}
+{"id":"q11","style":"keyword","query":"FROM-OWNER YOUR-CHOICE tags","relevant":["m038"]}
+{"id":"q12","style":"keyword","query":"schema-assumptions graph_epoch","relevant":["m045"]}
+{"id":"q13","style":"keyword","query":"NOOP UPDATE ADD similarity 0.95","relevant":["m046"]}
+{"id":"q14","style":"paraphrase","query":"how many times a day can the same memory be strengthened","relevant":["m047"]}
+{"id":"q15","style":"paraphrase","query":"who decides whether a new fact conflicts with an old one","relevant":["m048"]}
+{"id":"q16","style":"paraphrase","query":"what happens when the local model answers with broken JSON","relevant":["m049"]}
+{"id":"q17","style":"keyword","query":"summary next_steps notes fields","relevant":["m050"]}
+{"id":"q18","style":"paraphrase","query":"does the assistant's own text become a learned fact","relevant":["m052"]}
+{"id":"q19","style":"keyword","query":"corrupt spool file","relevant":["m054"]}
+{"id":"q20","style":"keyword","query":"SessionStart 1200 ms budget","relevant":["m057"]}
+{"id":"q21","style":"keyword","query":"reciprocal rank fusion k = 60","relevant":["m058"]}
+{"id":"q22","style":"paraphrase","query":"how pinning and age change the ranking of memories","relevant":["m059"]}
+{"id":"q23","style":"paraphrase","query":"what is removed from text before the model sees it","relevant":["m061"]}
+{"id":"q24","style":"paraphrase","query":"are automated workflow sessions mined for facts","relevant":["m062"]}
+{"id":"q25","style":"keyword","query":"prompt hook 140 ms","relevant":["m063"]}
+{"id":"q26","style":"keyword","query":"PreToolUse additionalContext","relevant":["m068"]}
+{"id":"q27","style":"keyword","query":"graph_epoch rebuild","relevant":["m067"]}
+{"id":"q28","style":"paraphrase","query":"how skills are ranked before the final five are kept","relevant":["m072"]}
+{"id":"q29","style":"paraphrase","query":"how many child steps can run in parallel","relevant":["m076"]}
+{"id":"q30","style":"keyword","query":"BullMQ queues list","relevant":["m078"]}
+{"id":"q31","style":"keyword","query":"dlq-retry failed job","relevant":["m080"]}
+{"id":"q32","style":"paraphrase","query":"what happens while the cache server is unreachable","relevant":["m081","m082"]}
+{"id":"q33","style":"keyword","query":"error body code message","relevant":["m086"]}
+{"id":"q34","style":"paraphrase","query":"how one user is kept from seeing another user's data","relevant":["m089","m090"]}
+{"id":"q35","style":"paraphrase","query":"why the old planning documents disappeared","relevant":["m091"]}
+{"id":"q36","style":"keyword","query":"ClickHouse","relevant":["m092"]}
+{"id":"q37","style":"keyword","query":"baseline prompts SkillRet","relevant":["m093"]}
+{"id":"q38","style":"paraphrase","query":"where do my own private prompts live","relevant":["m094"]}
+{"id":"q39","style":"paraphrase","query":"should I ask before changing anything","relevant":["m001"]}
+{"id":"q40","style":"keyword","query":"token cost proposal","relevant":["m002"]}
+{"id":"q41","style":"keyword","query":"emojis","relevant":["m003"]}
+{"id":"q42","style":"paraphrase","query":"which javascript package manager should I use","relevant":["m011","m026"]}
+{"id":"q43","style":"paraphrase","query":"test server hangs because the connection close is never noticed","relevant":["m101"]}
+{"id":"q44","style":"keyword","query":"quadratic sanitize","relevant":["m102"]}
+{"id":"q45","style":"keyword","query":"pytest FIFOs hung","relevant":["m103"]}
+{"id":"q46","style":"paraphrase","query":"how the project identifier is derived","relevant":["m108"]}
+{"id":"q47","style":"keyword","query":"memory files type feedback convention","relevant":["m111"]}
+{"id":"q48","style":"start","query":"claudethecaller build recall and the session start hook within the size limit","relevant":["m057","m058"]}
+{"id":"q49","style":"start","query":"claudethecaller finish the dlq retry and the polling while redis is down","relevant":["m080","m082"]}
+{"id":"q50","style":"start","query":"claudethecaller run the tenancy gate on the scratch postgres","relevant":["m090","m019"]}
