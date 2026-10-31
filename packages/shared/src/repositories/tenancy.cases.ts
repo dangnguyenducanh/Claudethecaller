@@ -186,6 +186,7 @@ export const cases: Cases = {
     upsertVector: { expect: 'zero', run: ({ r, ctx, a }) => r.library.upsertVector(ctx, { capId: a.capId, textHash: 'z', embedding: a.embedding }) },
     pruneVectors: { expect: 'zero', run: ({ r, ctx, a }) => r.library.pruneVectors(ctx, a.capId, 'keep-nothing-of-a') },
     loadVectors: { expect: 'no-a', run: ({ r, ctx }) => r.library.loadVectors(ctx) },
+    loadSkillIndex: { expect: 'no-a', run: ({ r, ctx }) => r.library.loadSkillIndex(ctx) },
   },
   memory: {
     nearest: { expect: 'no-a', run: ({ r, ctx, a }) => r.memory.nearest(ctx, { scope: 'global', embedding: a.embedding, limit: 50 }) },

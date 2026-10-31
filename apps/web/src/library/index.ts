@@ -5,5 +5,5 @@
  */
 export { libraryRoutes } from './routes.ts';
 export { libraryTools } from './tools.ts';
-export { servedVersion } from './served.ts';
+export { servedVersion, overrideRows } from './served.ts';
 export type { LibraryApiDeps, McpResult, McpTool, Route } from './http.ts';

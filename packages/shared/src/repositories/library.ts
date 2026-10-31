@@ -277,5 +277,21 @@ export const libraryRepo = (db: Db) => {
       );
       return got.map((r) => ({ capId: r.capId, textHash: r.textHash, embedding: parseVec(r.embedding) }));
     },
+    /**
+     * Live capabilities of the caller that have a vector, one row each (the lowest `text_hash` when pruning lags), with the description of the
+     * served version (`''` when none), ordered by `cap_id`. One statement: the skill channel loads its RAM matrix from this.
+     */
+    async loadSkillIndex(ctx: Ctx): Promise<{ capId: string; namespace: string; kind: string; name: string; description: string; embedding: number[] }[]> {
+      const got = await rows<{ capId: string; namespace: string; kind: string; name: string; description: string; embedding: string }>(
+        k,
+        sql`select distinct on (x.cap_id) x.cap_id, c.namespace, c.kind, c.name, coalesce(v.description, '') as description, x.embedding::text as embedding
+            from cap_vectors x
+            join capabilities c on c.id = x.cap_id
+            left join capability_versions v on v.cap_id = c.id and v.version = c.served_version
+            where c.user_id = ${ctx.userId} and c.removed_at is null
+            order by x.cap_id, x.text_hash`,
+      );
+      return got.map((r) => ({ capId: r.capId, namespace: r.namespace, kind: r.kind, name: r.name, description: r.description, embedding: parseVec(r.embedding) }));
+    },
   };
 };
