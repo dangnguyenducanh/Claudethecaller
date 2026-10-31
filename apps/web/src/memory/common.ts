@@ -43,7 +43,11 @@ export const labelOf = (root: string): string => (root === '/' ? '/' : (root.spl
 export const isAbs = (cwd: unknown): cwd is string => typeof cwd === 'string' && path.posix.isAbsolute(cwd);
 
 /** The user's project of `root`: the `proj:` cache first (a cache error is a miss), then the store; a found project is cached, a miss is not. */
-export async function projectOf(deps: MemoryApiDeps, ctx: Ctx, root: string): Promise<{ id: string; root: string } | null> {
+export async function projectOf(
+  deps: { repos: Pick<Repositories, 'projects'>; cache?: { get<T>(key: string): Promise<T | undefined>; set(key: string, value: unknown, ttlSeconds: number): Promise<void> } },
+  ctx: Ctx,
+  root: string,
+): Promise<{ id: string; root: string } | null> {
   const key = keys.proj(ctx.userId, root);
   try {
     const hit = await deps.cache?.get<{ id: string; root: string }>(key);

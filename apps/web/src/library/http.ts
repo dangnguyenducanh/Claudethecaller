@@ -37,9 +37,9 @@ export type McpTool = {
 };
 
 export type ErrorCode =
-  | 'invalid' | 'unauthorized' | 'not_found' | 'conflict' | 'stale_attempt' | 'idempotency_mismatch' | 'ambiguous' | 'store_timeout' | 'internal';
+  | 'invalid' | 'unauthorized' | 'not_found' | 'conflict' | 'stale_attempt' | 'idempotency_mismatch' | 'ambiguous' | 'store_timeout' | 'model_unavailable' | 'internal';
 const STATUS: Record<ErrorCode, number> = {
-  invalid: 422, unauthorized: 401, not_found: 404, conflict: 409, stale_attempt: 409, idempotency_mismatch: 409, ambiguous: 409, store_timeout: 504, internal: 500,
+  invalid: 422, unauthorized: 401, not_found: 404, conflict: 409, stale_attempt: 409, idempotency_mismatch: 409, ambiguous: 409, store_timeout: 504, model_unavailable: 503, internal: 500,
 };
 
 /** An error that becomes a reply. `extra` is merged into the error body (`path`, `candidates`). */
