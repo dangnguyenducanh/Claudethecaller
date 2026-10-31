@@ -786,6 +786,18 @@
   "is_nullable": "NO"
  },
  {
+  "table_name": "projects",
+  "column_name": "graph_epoch",
+  "data_type": "bigint",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "projects",
+  "column_name": "mem_epoch",
+  "data_type": "bigint",
+  "is_nullable": "NO"
+ },
+ {
   "table_name": "session_summaries",
   "column_name": "session_id",
   "data_type": "text",
