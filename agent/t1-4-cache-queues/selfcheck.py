@@ -21,8 +21,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 TASK = "T1.4"
-MODULE_DIRS = ["packages/shared/cache", "packages/shared/queues", "apps/worker/jobs", "deploy/systemd"]          # change here if T1.1 puts sources under src/
-ENTRY_FILES = ["packages/shared/cache/index.ts", "packages/shared/queues/index.ts", "apps/worker/jobs/index.ts"]          # each must exist before anything else runs
+MODULE_DIRS = ["packages/shared/src/cache", "packages/shared/src/queues", "apps/worker/src/jobs", "deploy/systemd"]          # T1.1 D3b puts sources under src/
+ENTRY_FILES = ["packages/shared/src/cache/index.ts", "packages/shared/src/queues/index.ts", "apps/worker/src/jobs/index.ts"]          # each must exist before anything else runs
 REQUIRED_TESTS = []    # test files that must exist (gate tests)
 SLOW_TEST_GLOBS = ["**/*.int.test.ts"]       # skipped by --fast
 EXTRA_ALLOWED = []      # non-module paths this task may also create (prefixes)

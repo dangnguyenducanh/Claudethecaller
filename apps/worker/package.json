@@ -8,5 +8,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
-  "dependencies": { "@ctc/core": "workspace:*", "@ctc/shared": "workspace:*" }
+  "dependencies": {
+    "@ctc/core": "workspace:*",
+    "@ctc/shared": "workspace:*",
+    "bullmq": "5.81.5",
+    "ioredis": "5.11.1"
+  }
 }

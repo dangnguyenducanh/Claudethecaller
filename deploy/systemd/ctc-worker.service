@@ -1,0 +1,22 @@
+[Unit]
+Description=ctc worker (BullMQ consumers, job poller)
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=%h/.claudethecaller/bin/ctc-worker
+WorkingDirectory=%h/.claudethecaller
+EnvironmentFile=-%h/.claudethecaller/env
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=20
+MemoryHigh=1G
+# agents started by runner steps survive a worker restart so the restart sweep can reattach them
+KillMode=process
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

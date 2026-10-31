@@ -16,3 +16,4 @@ dashboard/tsconfig.tsbuildinfo
 fixtures/py-baseline/local/
 node_modules/
 *.tsbuildinfo
+agent/*/.baseline.json
