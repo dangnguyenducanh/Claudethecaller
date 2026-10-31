@@ -1,0 +1,13 @@
+# Process for packages/core/src/graph (T2.1, TypeScript)
+
+Every step ends with a check; the next step does not start before it passes. Language and file names adapted from the standard process: Python → TypeScript strict on Node 22 (type stripping, `.ts` import suffixes, `erasableSyntaxOnly`), `pytest` → Vitest, `tests/test_*.py` → `packages/core/src/graph/*.test.ts`, `NotImplementedError` → `throw new Error('not implemented')`, docstring → TSDoc comment, `monkeypatch` → assign to the exported `limits` object and restore it in `afterEach`. Module path: `packages/core/src/graph/`.
+
+1. Read the callers and rules. Grep every call site. Done when you can say, per call site, what goes in, what is done with the result, and what the module must never do. Also run the real upstream producer on a sample and keep the output as a fixture.
+   (Here: no call site exists yet; the "call sites" are the ones DECISIONS D0 names: `packages/shared/src/repositories/graph.ts` (`GraphNodeInput`, `GraphEdgeInput`, `replaceSource`), `packages/shared/src/queues/payloads.ts` (`graph.rebuild`, `graph.extract`), `packages/shared/src/env/schema.ts` (`graph.languages`). The real upstream producer is graphify 0.9.93; its output on 20 files is already recorded in `agent/t2-1-extract/golden/`. Copy it into `packages/core/src/graph/__fixtures__/ids/` as D21 says; that copy is the fixture.)
+2. Write header, constants, signatures only (bodies `throw new Error('not implemented')`). Header: what the module is, called from, why it exists, deliberately NOT done. Each constant gets the real reason, or `chosen by judgment`: never an invented reason. Each function gets a TSDoc comment: trust, return, copies or modifies, bad input. Done when it imports and the header answers who calls it, why, and what it does not do.
+   (Here: also install the six pinned packages (SPEC.md step 4) and make `loadGrammars()` work first, so the next steps can parse.)
+3. Write tests first, covering every decision id. One behaviour per test. For every limit: shrink by assigning to `limits` (restore it after), equal is valid, one more is an error, pin the default. Compare errors with `toEqual` on `code` and `message`. Must-NOT tests for every non-goal. Public names and tmp paths only. Done when the tests collect and fail.
+   (Here: the gate file `graph.ids.test.ts` with `describe('graph.ids')` is one of them, D21.)
+4. Smallest code that passes. Reuse the repo's helpers. Add nothing the decisions do not list. Silence rule D8. Done when tests, checks, lint and scope pass.
+5. Run the self-check, fix every FAIL. Done at `SELFCHECK: DONE`.
+6. Report in at most 150 words: commands and results, every `judgment:` call, doubts.

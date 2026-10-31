@@ -1,0 +1,1793 @@
+{
+ "graphify": "0.9.93",
+ "python_grammars": {
+  "tree-sitter": "0.25.2",
+  "tree-sitter-bash": "0.25.1",
+  "tree-sitter-javascript": "0.25.0",
+  "tree-sitter-json": "0.24.8",
+  "tree-sitter-python": "0.25.0",
+  "tree-sitter-typescript": "0.23.2"
+ },
+ "root": "golden/src",
+ "files": {
+  ".claude/skills/ctc-context/SKILL.md": {
+   "lang": "markdown",
+   "nodes": [
+    {
+     "id": "claude_skills_ctc_context_skill",
+     "label": "SKILL.md",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "claude_skills_ctc_context_skill_ctc_context",
+     "label": "/ctc-context",
+     "line": "L6",
+     "parent": "claude_skills_ctc_context_skill"
+    }
+   ],
+   "excluded": []
+  },
+  ".claude/workflows/edit-demo.js": {
+   "lang": "js",
+   "nodes": [
+    {
+     "id": "claude_workflows_edit_demo",
+     "label": "edit-demo.js",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "claude_workflows_edit_demo_ag",
+     "label": "ag()",
+     "line": "L14",
+     "parent": "claude_workflows_edit_demo"
+    },
+    {
+     "id": "claude_workflows_edit_demo_get",
+     "label": "get()",
+     "line": "L6",
+     "parent": "claude_workflows_edit_demo"
+    },
+    {
+     "id": "claude_workflows_edit_demo_meta",
+     "label": "meta",
+     "line": "L1",
+     "parent": "claude_workflows_edit_demo"
+    },
+    {
+     "id": "claude_workflows_edit_demo_on",
+     "label": "on()",
+     "line": "L9",
+     "parent": "claude_workflows_edit_demo"
+    },
+    {
+     "id": "claude_workflows_edit_demo_out",
+     "label": "out",
+     "line": "L5",
+     "parent": "claude_workflows_edit_demo"
+    },
+    {
+     "id": "claude_workflows_edit_demo_q",
+     "label": "q()",
+     "line": "L8",
+     "parent": "claude_workflows_edit_demo"
+    },
+    {
+     "id": "claude_workflows_edit_demo_ran",
+     "label": "ran",
+     "line": "L5",
+     "parent": "claude_workflows_edit_demo"
+    },
+    {
+     "id": "claude_workflows_edit_demo_set",
+     "label": "set()",
+     "line": "L10",
+     "parent": "claude_workflows_edit_demo"
+    },
+    {
+     "id": "claude_workflows_edit_demo_sh",
+     "label": "sh()",
+     "line": "L15",
+     "parent": "claude_workflows_edit_demo"
+    },
+    {
+     "id": "claude_workflows_edit_demo_shell",
+     "label": "SHELL",
+     "line": "L4",
+     "parent": "claude_workflows_edit_demo"
+    },
+    {
+     "id": "claude_workflows_edit_demo_test",
+     "label": "test()",
+     "line": "L11",
+     "parent": "claude_workflows_edit_demo"
+    },
+    {
+     "id": "claude_workflows_edit_demo_txt",
+     "label": "txt()",
+     "line": "L7",
+     "parent": "claude_workflows_edit_demo"
+    },
+    {
+     "id": "claude_workflows_edit_demo_visits",
+     "label": "visits",
+     "line": "L5",
+     "parent": "claude_workflows_edit_demo"
+    }
+   ],
+   "excluded": []
+  },
+  "README.md": {
+   "lang": "markdown",
+   "nodes": [
+    {
+     "id": "readme",
+     "label": "README.md",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "readme_claudethecaller",
+     "label": "claudethecaller",
+     "line": "L1",
+     "parent": "readme"
+    },
+    {
+     "id": "readme_team_runs",
+     "label": "Team runs",
+     "line": "L5",
+     "parent": "readme_claudethecaller"
+    }
+   ],
+   "excluded": []
+  },
+  "dashboard/src/Jobs.tsx": {
+   "lang": "tsx",
+   "nodes": [
+    {
+     "id": "dashboard_src_jobs",
+     "label": "Jobs.tsx",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "dashboard_src_jobs_active",
+     "label": "active()",
+     "line": "L11",
+     "parent": "dashboard_src_jobs"
+    },
+    {
+     "id": "dashboard_src_jobs_jobs",
+     "label": "Jobs()",
+     "line": "L13",
+     "parent": "dashboard_src_jobs"
+    },
+    {
+     "id": "dashboard_src_jobs_kinds",
+     "label": "KINDS",
+     "line": "L9",
+     "parent": "dashboard_src_jobs"
+    },
+    {
+     "id": "dashboard_src_jobs_pill",
+     "label": "PILL",
+     "line": "L10",
+     "parent": "dashboard_src_jobs"
+    },
+    {
+     "id": "dashboard_src_jobs_status",
+     "label": "STATUS",
+     "line": "L8",
+     "parent": "dashboard_src_jobs"
+    }
+   ],
+   "excluded": []
+  },
+  "dashboard/src/ui.tsx": {
+   "lang": "tsx",
+   "nodes": [
+    {
+     "id": "dashboard_src_ui",
+     "label": "ui.tsx",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "dashboard_src_ui_colorof",
+     "label": "colorOf()",
+     "line": "L9",
+     "parent": "dashboard_src_ui"
+    },
+    {
+     "id": "dashboard_src_ui_drawer",
+     "label": "Drawer()",
+     "line": "L107",
+     "parent": "dashboard_src_ui"
+    },
+    {
+     "id": "dashboard_src_ui_extra",
+     "label": "extra",
+     "line": "L8",
+     "parent": "dashboard_src_ui"
+    },
+    {
+     "id": "dashboard_src_ui_fmtday",
+     "label": "fmtDay()",
+     "line": "L20",
+     "parent": "dashboard_src_ui"
+    },
+    {
+     "id": "dashboard_src_ui_fmtint",
+     "label": "fmtInt()",
+     "line": "L16",
+     "parent": "dashboard_src_ui"
+    },
+    {
+     "id": "dashboard_src_ui_fmtms",
+     "label": "fmtMs()",
+     "line": "L18",
+     "parent": "dashboard_src_ui"
+    },
+    {
+     "id": "dashboard_src_ui_fmtpct",
+     "label": "fmtPct()",
+     "line": "L17",
+     "parent": "dashboard_src_ui"
+    },
+    {
+     "id": "dashboard_src_ui_fmttime",
+     "label": "fmtTime()",
+     "line": "L21",
+     "parent": "dashboard_src_ui"
+    },
+    {
+     "id": "dashboard_src_ui_fmttokens",
+     "label": "fmtTokens()",
+     "line": "L19",
+     "parent": "dashboard_src_ui"
+    },
+    {
+     "id": "dashboard_src_ui_header",
+     "label": "Header()",
+     "line": "L124",
+     "parent": "dashboard_src_ui"
+    },
+    {
+     "id": "dashboard_src_ui_hex",
+     "label": "HEX",
+     "line": "L83",
+     "parent": "dashboard_src_ui"
+    },
+    {
+     "id": "dashboard_src_ui_hexmap",
+     "label": "Hexmap()",
+     "line": "L85",
+     "parent": "dashboard_src_ui"
+    },
+    {
+     "id": "dashboard_src_ui_kpicard",
+     "label": "KpiCard()",
+     "line": "L64",
+     "parent": "dashboard_src_ui"
+    },
+    {
+     "id": "dashboard_src_ui_palette",
+     "label": "PALETTE",
+     "line": "L5",
+     "parent": "dashboard_src_ui"
+    },
+    {
+     "id": "dashboard_src_ui_search",
+     "label": "Search()",
+     "line": "L36",
+     "parent": "dashboard_src_ui"
+    },
+    {
+     "id": "dashboard_src_ui_segmented",
+     "label": "Segmented()",
+     "line": "L24",
+     "parent": "dashboard_src_ui"
+    },
+    {
+     "id": "dashboard_src_ui_sparkline",
+     "label": "Sparkline()",
+     "line": "L45",
+     "parent": "dashboard_src_ui"
+    }
+   ],
+   "excluded": []
+  },
+  "eslint.config.js": {
+   "lang": "js",
+   "nodes": [
+    {
+     "id": "eslint_config",
+     "label": "eslint.config.js",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "eslint_config_banned",
+     "label": "banned()",
+     "line": "L6",
+     "parent": "eslint_config"
+    },
+    {
+     "id": "eslint_config_sql_driver",
+     "label": "SQL_DRIVER",
+     "line": "L3",
+     "parent": "eslint_config"
+    }
+   ],
+   "excluded": []
+  },
+  "fixtures/synthetic/edge.ts": {
+   "lang": "ts",
+   "nodes": [
+    {
+     "id": "fixtures_synthetic_edge",
+     "label": "edge.ts",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "fixtures_synthetic_edge_base",
+     "label": "Base",
+     "line": "L12",
+     "parent": "fixtures_synthetic_edge"
+    },
+    {
+     "id": "fixtures_synthetic_edge_base_area",
+     "label": ".area()",
+     "line": "L13",
+     "parent": "fixtures_synthetic_edge_base"
+    },
+    {
+     "id": "fixtures_synthetic_edge_base_create",
+     "label": ".create()",
+     "line": "L15",
+     "parent": "fixtures_synthetic_edge_base"
+    },
+    {
+     "id": "fixtures_synthetic_edge_base_name",
+     "label": ".name()",
+     "line": "L14",
+     "parent": "fixtures_synthetic_edge_base"
+    },
+    {
+     "id": "fixtures_synthetic_edge_colour",
+     "label": "Colour",
+     "line": "L5",
+     "parent": "fixtures_synthetic_edge"
+    },
+    {
+     "id": "fixtures_synthetic_edge_colour_green",
+     "label": "Green",
+     "line": "L5",
+     "parent": "fixtures_synthetic_edge_colour"
+    },
+    {
+     "id": "fixtures_synthetic_edge_colour_red",
+     "label": "Red",
+     "line": "L5",
+     "parent": "fixtures_synthetic_edge_colour"
+    },
+    {
+     "id": "fixtures_synthetic_edge_grösse",
+     "label": "größe()",
+     "line": "L33",
+     "parent": "fixtures_synthetic_edge"
+    },
+    {
+     "id": "fixtures_synthetic_edge_limit",
+     "label": "LIMIT",
+     "line": "L30",
+     "parent": "fixtures_synthetic_edge"
+    },
+    {
+     "id": "fixtures_synthetic_edge_limits",
+     "label": "limits",
+     "line": "L29",
+     "parent": "fixtures_synthetic_edge"
+    },
+    {
+     "id": "fixtures_synthetic_edge_main",
+     "label": "main()",
+     "line": "L35",
+     "parent": "fixtures_synthetic_edge"
+    },
+    {
+     "id": "fixtures_synthetic_edge_main_inner",
+     "label": "inner()",
+     "line": "L36",
+     "parent": "fixtures_synthetic_edge_main"
+    },
+    {
+     "id": "fixtures_synthetic_edge_pair",
+     "label": "Pair",
+     "line": "L25",
+     "parent": "fixtures_synthetic_edge"
+    },
+    {
+     "id": "fixtures_synthetic_edge_shape",
+     "label": "Shape",
+     "line": "L7",
+     "parent": "fixtures_synthetic_edge"
+    },
+    {
+     "id": "fixtures_synthetic_edge_shape_area",
+     "label": ".area()",
+     "line": "L8",
+     "parent": "fixtures_synthetic_edge_shape"
+    },
+    {
+     "id": "fixtures_synthetic_edge_square",
+     "label": "Square",
+     "line": "L18",
+     "parent": "fixtures_synthetic_edge"
+    },
+    {
+     "id": "fixtures_synthetic_edge_square_area",
+     "label": ".area()",
+     "line": "L21",
+     "parent": "fixtures_synthetic_edge_square"
+    },
+    {
+     "id": "fixtures_synthetic_edge_square_constructor",
+     "label": ".constructor()",
+     "line": "L20",
+     "parent": "fixtures_synthetic_edge_square"
+    },
+    {
+     "id": "fixtures_synthetic_edge_square_scale",
+     "label": ".scale()",
+     "line": "L22",
+     "parent": "fixtures_synthetic_edge_square"
+    },
+    {
+     "id": "fixtures_synthetic_edge_walk",
+     "label": "walk()",
+     "line": "L27",
+     "parent": "fixtures_synthetic_edge"
+    }
+   ],
+   "excluded": []
+  },
+  "fixtures/synthetic/notes.md": {
+   "lang": "markdown",
+   "nodes": [
+    {
+     "id": "fixtures_synthetic_notes",
+     "label": "notes.md",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "fixtures_synthetic_notes_deep_jump",
+     "label": "Deep jump",
+     "line": "L23",
+     "parent": "fixtures_synthetic_notes_setup_19"
+    },
+    {
+     "id": "fixtures_synthetic_notes_grösse_ümlaut",
+     "label": "Größe & Ümlaut ###",
+     "line": "L25",
+     "parent": "fixtures_synthetic_notes_setup_19"
+    },
+    {
+     "id": "fixtures_synthetic_notes_notes_on_ids",
+     "label": "Notes on ids",
+     "line": "L9",
+     "parent": "fixtures_synthetic_notes"
+    },
+    {
+     "id": "fixtures_synthetic_notes_setup",
+     "label": "Setup",
+     "line": "L11",
+     "parent": "fixtures_synthetic_notes_notes_on_ids"
+    },
+    {
+     "id": "fixtures_synthetic_notes_setup_19",
+     "label": "Setup",
+     "line": "L19",
+     "parent": "fixtures_synthetic_notes_notes_on_ids"
+    }
+   ],
+   "excluded": []
+  },
+  "fixtures/synthetic/shapes.py": {
+   "lang": "python",
+   "nodes": [
+    {
+     "id": "fixtures_synthetic_shapes",
+     "label": "shapes.py",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "fixtures_synthetic_shapes_cached",
+     "label": "cached()",
+     "line": "L29",
+     "parent": "fixtures_synthetic_shapes"
+    },
+    {
+     "id": "fixtures_synthetic_shapes_cached_helper",
+     "label": "helper()",
+     "line": "L30",
+     "parent": "fixtures_synthetic_shapes_cached"
+    },
+    {
+     "id": "fixtures_synthetic_shapes_grösse_berechnen",
+     "label": "Größe_Berechnen()",
+     "line": "L35",
+     "parent": "fixtures_synthetic_shapes"
+    },
+    {
+     "id": "fixtures_synthetic_shapes_outer",
+     "label": "Outer",
+     "line": "L9",
+     "parent": "fixtures_synthetic_shapes"
+    },
+    {
+     "id": "fixtures_synthetic_shapes_outer_doubled",
+     "label": ".doubled()",
+     "line": "L17",
+     "parent": "fixtures_synthetic_shapes_outer"
+    },
+    {
+     "id": "fixtures_synthetic_shapes_outer_fetch",
+     "label": ".fetch()",
+     "line": "L24",
+     "parent": "fixtures_synthetic_shapes_outer"
+    },
+    {
+     "id": "fixtures_synthetic_shapes_outer_inner",
+     "label": "Inner",
+     "line": "L12",
+     "parent": "fixtures_synthetic_shapes_outer"
+    },
+    {
+     "id": "fixtures_synthetic_shapes_outer_inner_deep",
+     "label": ".deep()",
+     "line": "L13",
+     "parent": "fixtures_synthetic_shapes_outer_inner"
+    },
+    {
+     "id": "fixtures_synthetic_shapes_outer_make",
+     "label": ".make()",
+     "line": "L21",
+     "parent": "fixtures_synthetic_shapes_outer"
+    },
+    {
+     "id": "fixtures_synthetic_shapes_private_async",
+     "label": "_private_async()",
+     "line": "L39",
+     "parent": "fixtures_synthetic_shapes"
+    }
+   ],
+   "excluded": [
+    {
+     "id": "fixtures_synthetic_shapes_rationale_1",
+     "reason": "file_type rationale"
+    }
+   ]
+  },
+  "fixtures/synthetic/tools.sh": {
+   "lang": "bash",
+   "nodes": [
+    {
+     "id": "fixtures_synthetic_tools",
+     "label": "tools.sh",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "fixtures_synthetic_tools_build_all",
+     "label": "build_all()",
+     "line": "L9",
+     "parent": "fixtures_synthetic_tools"
+    },
+    {
+     "id": "fixtures_synthetic_tools_cleanup_tmp",
+     "label": "cleanup_tmp()",
+     "line": "L14",
+     "parent": "fixtures_synthetic_tools"
+    },
+    {
+     "id": "fixtures_synthetic_tools_log",
+     "label": "log()",
+     "line": "L7",
+     "parent": "fixtures_synthetic_tools"
+    },
+    {
+     "id": "fixtures_synthetic_tools_sh__entry",
+     "label": "tools.sh script",
+     "line": "L1",
+     "parent": "fixtures_synthetic_tools"
+    }
+   ],
+   "excluded": []
+  },
+  "package.json": {
+   "lang": "json",
+   "nodes": [
+    {
+     "id": "package",
+     "label": "package.json",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "package_devdependencies",
+     "label": "devDependencies",
+     "line": "L16",
+     "parent": "package"
+    },
+    {
+     "id": "package_devdependencies_eslint",
+     "label": "eslint",
+     "line": "L18",
+     "parent": "package_devdependencies"
+    },
+    {
+     "id": "package_devdependencies_tsx",
+     "label": "tsx",
+     "line": "L19",
+     "parent": "package_devdependencies"
+    },
+    {
+     "id": "package_devdependencies_types_node",
+     "label": "@types/node",
+     "line": "L17",
+     "parent": "package_devdependencies"
+    },
+    {
+     "id": "package_devdependencies_typescript",
+     "label": "typescript",
+     "line": "L20",
+     "parent": "package_devdependencies"
+    },
+    {
+     "id": "package_devdependencies_typescript_eslint",
+     "label": "typescript-eslint",
+     "line": "L21",
+     "parent": "package_devdependencies"
+    },
+    {
+     "id": "package_devdependencies_vitest",
+     "label": "vitest",
+     "line": "L22",
+     "parent": "package_devdependencies"
+    },
+    {
+     "id": "package_engines",
+     "label": "engines",
+     "line": "L7",
+     "parent": "package"
+    },
+    {
+     "id": "package_engines_node",
+     "label": "node",
+     "line": "L8",
+     "parent": "package_engines"
+    },
+    {
+     "id": "package_engines_pnpm",
+     "label": "pnpm",
+     "line": "L9",
+     "parent": "package_engines"
+    },
+    {
+     "id": "package_name",
+     "label": "name",
+     "line": "L2",
+     "parent": "package"
+    },
+    {
+     "id": "package_packagemanager",
+     "label": "packageManager",
+     "line": "L6",
+     "parent": "package"
+    },
+    {
+     "id": "package_private",
+     "label": "private",
+     "line": "L3",
+     "parent": "package"
+    },
+    {
+     "id": "package_scripts",
+     "label": "scripts",
+     "line": "L11",
+     "parent": "package"
+    },
+    {
+     "id": "package_scripts_lint",
+     "label": "lint",
+     "line": "L12",
+     "parent": "package_scripts"
+    },
+    {
+     "id": "package_scripts_test",
+     "label": "test",
+     "line": "L14",
+     "parent": "package_scripts"
+    },
+    {
+     "id": "package_scripts_typecheck",
+     "label": "typecheck",
+     "line": "L13",
+     "parent": "package_scripts"
+    },
+    {
+     "id": "package_type",
+     "label": "type",
+     "line": "L5",
+     "parent": "package"
+    },
+    {
+     "id": "package_version",
+     "label": "version",
+     "line": "L4",
+     "parent": "package"
+    }
+   ],
+   "excluded": [
+    {
+     "id": "ref_eslint",
+     "reason": "file_type concept"
+    },
+    {
+     "id": "ref_tsx",
+     "reason": "file_type concept"
+    },
+    {
+     "id": "ref_types_node",
+     "reason": "file_type concept"
+    },
+    {
+     "id": "ref_typescript",
+     "reason": "file_type concept"
+    },
+    {
+     "id": "ref_typescript_eslint",
+     "reason": "file_type concept"
+    },
+    {
+     "id": "ref_vitest",
+     "reason": "file_type concept"
+    }
+   ]
+  },
+  "packages/shared/src/cache/index.ts": {
+   "lang": "ts",
+   "nodes": [
+    {
+     "id": "packages_shared_src_cache_index",
+     "label": "index.ts",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "packages_shared_src_cache_index_cache",
+     "label": "Cache",
+     "line": "L18",
+     "parent": "packages_shared_src_cache_index"
+    },
+    {
+     "id": "packages_shared_src_cache_index_createcache",
+     "label": "createCache()",
+     "line": "L48",
+     "parent": "packages_shared_src_cache_index"
+    },
+    {
+     "id": "packages_shared_src_cache_index_createcache_l2",
+     "label": "l2()",
+     "line": "L78",
+     "parent": "packages_shared_src_cache_index_createcache"
+    },
+    {
+     "id": "packages_shared_src_cache_index_l1entry",
+     "label": "L1Entry",
+     "line": "L38",
+     "parent": "packages_shared_src_cache_index"
+    },
+    {
+     "id": "packages_shared_src_cache_index_noop",
+     "label": "noop()",
+     "line": "L39",
+     "parent": "packages_shared_src_cache_index"
+    },
+    {
+     "id": "packages_shared_src_cache_index_normttl",
+     "label": "normTtl()",
+     "line": "L42",
+     "parent": "packages_shared_src_cache_index"
+    }
+   ],
+   "excluded": []
+  },
+  "packages/shared/src/memory-hash/index.test.ts": {
+   "lang": "ts",
+   "nodes": [
+    {
+     "id": "packages_shared_src_memory_hash_index_test",
+     "label": "index.test.ts",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "packages_shared_src_memory_hash_index_test_sha",
+     "label": "sha()",
+     "line": "L5",
+     "parent": "packages_shared_src_memory_hash_index_test"
+    }
+   ],
+   "excluded": []
+  },
+  "packages/shared/src/queues/submit.ts": {
+   "lang": "ts",
+   "nodes": [
+    {
+     "id": "packages_shared_src_queues_submit",
+     "label": "submit.ts",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "packages_shared_src_queues_submit_addtoqueue",
+     "label": "addToQueue()",
+     "line": "L53",
+     "parent": "packages_shared_src_queues_submit"
+    },
+    {
+     "id": "packages_shared_src_queues_submit_jobdropped",
+     "label": "JobDropped",
+     "line": "L43",
+     "parent": "packages_shared_src_queues_submit"
+    },
+    {
+     "id": "packages_shared_src_queues_submit_jobdropped_constructor",
+     "label": ".constructor()",
+     "line": "L45",
+     "parent": "packages_shared_src_queues_submit_jobdropped"
+    },
+    {
+     "id": "packages_shared_src_queues_submit_jobrow",
+     "label": "JobRow",
+     "line": "L11",
+     "parent": "packages_shared_src_queues_submit"
+    },
+    {
+     "id": "packages_shared_src_queues_submit_jobsport",
+     "label": "JobsPort",
+     "line": "L23",
+     "parent": "packages_shared_src_queues_submit"
+    },
+    {
+     "id": "packages_shared_src_queues_submit_jobtimeouterror",
+     "label": "JobTimeoutError",
+     "line": "L34",
+     "parent": "packages_shared_src_queues_submit"
+    },
+    {
+     "id": "packages_shared_src_queues_submit_jobtimeouterror_constructor",
+     "label": ".constructor()",
+     "line": "L36",
+     "parent": "packages_shared_src_queues_submit_jobtimeouterror"
+    },
+    {
+     "id": "packages_shared_src_queues_submit_submitjob",
+     "label": "submitJob()",
+     "line": "L79",
+     "parent": "packages_shared_src_queues_submit"
+    }
+   ],
+   "excluded": []
+  },
+  "packages/shared/src/repositories/errors.ts": {
+   "lang": "ts",
+   "nodes": [
+    {
+     "id": "packages_shared_src_repositories_errors",
+     "label": "errors.ts",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "packages_shared_src_repositories_errors_conflicterror",
+     "label": "ConflictError",
+     "line": "L19",
+     "parent": "packages_shared_src_repositories_errors"
+    },
+    {
+     "id": "packages_shared_src_repositories_errors_conflicterror_constructor",
+     "label": ".constructor()",
+     "line": "L20",
+     "parent": "packages_shared_src_repositories_errors_conflicterror"
+    },
+    {
+     "id": "packages_shared_src_repositories_errors_repoerror",
+     "label": "RepoError",
+     "line": "L6",
+     "parent": "packages_shared_src_repositories_errors"
+    },
+    {
+     "id": "packages_shared_src_repositories_errors_repoerror_constructor",
+     "label": ".constructor()",
+     "line": "L10",
+     "parent": "packages_shared_src_repositories_errors_repoerror"
+    },
+    {
+     "id": "packages_shared_src_repositories_errors_repoerrorcode",
+     "label": "RepoErrorCode",
+     "line": "L3",
+     "parent": "packages_shared_src_repositories_errors"
+    },
+    {
+     "id": "packages_shared_src_repositories_errors_storetimeouterror",
+     "label": "StoreTimeoutError",
+     "line": "L26",
+     "parent": "packages_shared_src_repositories_errors"
+    },
+    {
+     "id": "packages_shared_src_repositories_errors_storetimeouterror_constructor",
+     "label": ".constructor()",
+     "line": "L27",
+     "parent": "packages_shared_src_repositories_errors_storetimeouterror"
+    }
+   ],
+   "excluded": []
+  },
+  "scripts/check.sh": {
+   "lang": "bash",
+   "nodes": [
+    {
+     "id": "scripts_check",
+     "label": "check.sh",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "scripts_check_sh__entry",
+     "label": "check.sh script",
+     "line": "L1",
+     "parent": "scripts_check"
+    }
+   ],
+   "excluded": []
+  },
+  "specs/007-ctc/spec.md": {
+   "lang": "markdown",
+   "nodes": [
+    {
+     "id": "specs_007_ctc_spec",
+     "label": "spec.md",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "specs_007_ctc_spec_007_ctc_claudethecaller_the_target_system",
+     "label": "007-ctc: claudethecaller, the target system",
+     "line": "L1",
+     "parent": "specs_007_ctc_spec"
+    },
+    {
+     "id": "specs_007_ctc_spec_0_what_ctc_is",
+     "label": "0. What ctc is",
+     "line": "L24",
+     "parent": "specs_007_ctc_spec_007_ctc_claudethecaller_the_target_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_10_open_items",
+     "label": "10. Open items",
+     "line": "L812",
+     "parent": "specs_007_ctc_spec_007_ctc_claudethecaller_the_target_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_1_10_budgets_and_privacy",
+     "label": "1.10 Budgets and privacy",
+     "line": "L210",
+     "parent": "specs_007_ctc_spec_1_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_1_11_configuration",
+     "label": "1.11 Configuration",
+     "line": "L217",
+     "parent": "specs_007_ctc_spec_1_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_1_1_stack",
+     "label": "1.1 Stack",
+     "line": "L57",
+     "parent": "specs_007_ctc_spec_1_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_1_2_processes_and_code_map",
+     "label": "1.2 Processes and code map",
+     "line": "L76",
+     "parent": "specs_007_ctc_spec_1_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_1_3_interfaces",
+     "label": "1.3 Interfaces",
+     "line": "L101",
+     "parent": "specs_007_ctc_spec_1_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_1_4_storage",
+     "label": "1.4 Storage",
+     "line": "L115",
+     "parent": "specs_007_ctc_spec_1_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_1_5_auth_and_tenancy",
+     "label": "1.5 Auth and tenancy",
+     "line": "L136",
+     "parent": "specs_007_ctc_spec_1_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_1_6_api_rules",
+     "label": "1.6 API rules",
+     "line": "L144",
+     "parent": "specs_007_ctc_spec_1_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_1_7_caching",
+     "label": "1.7 Caching",
+     "line": "L168",
+     "parent": "specs_007_ctc_spec_1_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_1_8_queues",
+     "label": "1.8 Queues",
+     "line": "L184",
+     "parent": "specs_007_ctc_spec_1_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_1_9_system_failure_modes",
+     "label": "1.9 System failure modes",
+     "line": "L198",
+     "parent": "specs_007_ctc_spec_1_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_1_system",
+     "label": "1. System",
+     "line": "L55",
+     "parent": "specs_007_ctc_spec_007_ctc_claudethecaller_the_target_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_2_10_failure_modes",
+     "label": "2.10 Failure modes",
+     "line": "L348",
+     "parent": "specs_007_ctc_spec_2_f1_context_graph"
+    },
+    {
+     "id": "specs_007_ctc_spec_2_11_tests",
+     "label": "2.11 Tests",
+     "line": "L359",
+     "parent": "specs_007_ctc_spec_2_f1_context_graph"
+    },
+    {
+     "id": "specs_007_ctc_spec_2_1_purpose",
+     "label": "2.1 Purpose",
+     "line": "L225",
+     "parent": "specs_007_ctc_spec_2_f1_context_graph"
+    },
+    {
+     "id": "specs_007_ctc_spec_2_2_graph_model",
+     "label": "2.2 Graph model",
+     "line": "L235",
+     "parent": "specs_007_ctc_spec_2_f1_context_graph"
+    },
+    {
+     "id": "specs_007_ctc_spec_2_3_tables",
+     "label": "2.3 Tables",
+     "line": "L270",
+     "parent": "specs_007_ctc_spec_2_f1_context_graph"
+    },
+    {
+     "id": "specs_007_ctc_spec_2_4_build",
+     "label": "2.4 Build",
+     "line": "L280",
+     "parent": "specs_007_ctc_spec_2_f1_context_graph"
+    },
+    {
+     "id": "specs_007_ctc_spec_2_5_suggest_per_prompt_hot_path",
+     "label": "2.5 Suggest per prompt (hot path)",
+     "line": "L297",
+     "parent": "specs_007_ctc_spec_2_f1_context_graph"
+    },
+    {
+     "id": "specs_007_ctc_spec_2_6_note_before_a_tool_hot_path",
+     "label": "2.6 Note before a tool (hot path)",
+     "line": "L314",
+     "parent": "specs_007_ctc_spec_2_f1_context_graph"
+    },
+    {
+     "id": "specs_007_ctc_spec_2_7_query_tools",
+     "label": "2.7 Query tools",
+     "line": "L321",
+     "parent": "specs_007_ctc_spec_2_f1_context_graph"
+    },
+    {
+     "id": "specs_007_ctc_spec_2_8_api",
+     "label": "2.8 API",
+     "line": "L333",
+     "parent": "specs_007_ctc_spec_2_f1_context_graph"
+    },
+    {
+     "id": "specs_007_ctc_spec_2_9_config",
+     "label": "2.9 Config",
+     "line": "L337",
+     "parent": "specs_007_ctc_spec_2_f1_context_graph"
+    },
+    {
+     "id": "specs_007_ctc_spec_2_f1_context_graph",
+     "label": "2. F1 Context graph",
+     "line": "L223",
+     "parent": "specs_007_ctc_spec_007_ctc_claudethecaller_the_target_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_3_1_purpose",
+     "label": "3.1 Purpose",
+     "line": "L375",
+     "parent": "specs_007_ctc_spec_3_f2_skill_library"
+    },
+    {
+     "id": "specs_007_ctc_spec_3_2_model",
+     "label": "3.2 Model",
+     "line": "L385",
+     "parent": "specs_007_ctc_spec_3_f2_skill_library"
+    },
+    {
+     "id": "specs_007_ctc_spec_3_3_tables",
+     "label": "3.3 Tables",
+     "line": "L392",
+     "parent": "specs_007_ctc_spec_3_f2_skill_library"
+    },
+    {
+     "id": "specs_007_ctc_spec_3_4_flows",
+     "label": "3.4 Flows",
+     "line": "L408",
+     "parent": "specs_007_ctc_spec_3_f2_skill_library"
+    },
+    {
+     "id": "specs_007_ctc_spec_3_5_api",
+     "label": "3.5 API",
+     "line": "L429",
+     "parent": "specs_007_ctc_spec_3_f2_skill_library"
+    },
+    {
+     "id": "specs_007_ctc_spec_3_6_config",
+     "label": "3.6 Config",
+     "line": "L433",
+     "parent": "specs_007_ctc_spec_3_f2_skill_library"
+    },
+    {
+     "id": "specs_007_ctc_spec_3_7_failure_modes",
+     "label": "3.7 Failure modes",
+     "line": "L443",
+     "parent": "specs_007_ctc_spec_3_f2_skill_library"
+    },
+    {
+     "id": "specs_007_ctc_spec_3_8_tests",
+     "label": "3.8 Tests",
+     "line": "L453",
+     "parent": "specs_007_ctc_spec_3_f2_skill_library"
+    },
+    {
+     "id": "specs_007_ctc_spec_3_f2_skill_library",
+     "label": "3. F2 Skill library",
+     "line": "L373",
+     "parent": "specs_007_ctc_spec_007_ctc_claudethecaller_the_target_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_4_1_purpose",
+     "label": "4.1 Purpose",
+     "line": "L466",
+     "parent": "specs_007_ctc_spec_4_f3_memory"
+    },
+    {
+     "id": "specs_007_ctc_spec_4_2_model",
+     "label": "4.2 Model",
+     "line": "L476",
+     "parent": "specs_007_ctc_spec_4_f3_memory"
+    },
+    {
+     "id": "specs_007_ctc_spec_4_3_tables",
+     "label": "4.3 Tables",
+     "line": "L491",
+     "parent": "specs_007_ctc_spec_4_f3_memory"
+    },
+    {
+     "id": "specs_007_ctc_spec_4_4_flows",
+     "label": "4.4 Flows",
+     "line": "L500",
+     "parent": "specs_007_ctc_spec_4_f3_memory"
+    },
+    {
+     "id": "specs_007_ctc_spec_4_5_api",
+     "label": "4.5 API",
+     "line": "L539",
+     "parent": "specs_007_ctc_spec_4_f3_memory"
+    },
+    {
+     "id": "specs_007_ctc_spec_4_6_config",
+     "label": "4.6 Config",
+     "line": "L543",
+     "parent": "specs_007_ctc_spec_4_f3_memory"
+    },
+    {
+     "id": "specs_007_ctc_spec_4_7_failure_modes",
+     "label": "4.7 Failure modes",
+     "line": "L554",
+     "parent": "specs_007_ctc_spec_4_f3_memory"
+    },
+    {
+     "id": "specs_007_ctc_spec_4_8_tests",
+     "label": "4.8 Tests",
+     "line": "L565",
+     "parent": "specs_007_ctc_spec_4_f3_memory"
+    },
+    {
+     "id": "specs_007_ctc_spec_4_f3_memory",
+     "label": "4. F3 Memory",
+     "line": "L464",
+     "parent": "specs_007_ctc_spec_007_ctc_claudethecaller_the_target_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_5_10_config",
+     "label": "5.10 Config",
+     "line": "L704",
+     "parent": "specs_007_ctc_spec_5_f4_workflows"
+    },
+    {
+     "id": "specs_007_ctc_spec_5_11_failure_modes",
+     "label": "5.11 Failure modes",
+     "line": "L715",
+     "parent": "specs_007_ctc_spec_5_f4_workflows"
+    },
+    {
+     "id": "specs_007_ctc_spec_5_12_tests",
+     "label": "5.12 Tests",
+     "line": "L728",
+     "parent": "specs_007_ctc_spec_5_f4_workflows"
+    },
+    {
+     "id": "specs_007_ctc_spec_5_1_purpose",
+     "label": "5.1 Purpose",
+     "line": "L579",
+     "parent": "specs_007_ctc_spec_5_f4_workflows"
+    },
+    {
+     "id": "specs_007_ctc_spec_5_2_workflow_format",
+     "label": "5.2 Workflow format",
+     "line": "L589",
+     "parent": "specs_007_ctc_spec_5_f4_workflows"
+    },
+    {
+     "id": "specs_007_ctc_spec_5_3_tables",
+     "label": "5.3 Tables",
+     "line": "L610",
+     "parent": "specs_007_ctc_spec_5_f4_workflows"
+    },
+    {
+     "id": "specs_007_ctc_spec_5_4_step_states",
+     "label": "5.4 Step states",
+     "line": "L620",
+     "parent": "specs_007_ctc_spec_5_f4_workflows"
+    },
+    {
+     "id": "specs_007_ctc_spec_5_5_agent_step_attempt_cold_path",
+     "label": "5.5 Agent step attempt (cold path)",
+     "line": "L642",
+     "parent": "specs_007_ctc_spec_5_f4_workflows"
+    },
+    {
+     "id": "specs_007_ctc_spec_5_6_step_report_auth",
+     "label": "5.6 Step report auth",
+     "line": "L668",
+     "parent": "specs_007_ctc_spec_5_f4_workflows"
+    },
+    {
+     "id": "specs_007_ctc_spec_5_7_gates_fan_out_handoff",
+     "label": "5.7 Gates, fan-out, handoff",
+     "line": "L672",
+     "parent": "specs_007_ctc_spec_5_f4_workflows"
+    },
+    {
+     "id": "specs_007_ctc_spec_5_8_recovery_and_cleanup",
+     "label": "5.8 Recovery and cleanup",
+     "line": "L680",
+     "parent": "specs_007_ctc_spec_5_f4_workflows"
+    },
+    {
+     "id": "specs_007_ctc_spec_5_9_api_and_mcp",
+     "label": "5.9 API and MCP",
+     "line": "L689",
+     "parent": "specs_007_ctc_spec_5_f4_workflows"
+    },
+    {
+     "id": "specs_007_ctc_spec_5_f4_workflows",
+     "label": "5. F4 Workflows",
+     "line": "L577",
+     "parent": "specs_007_ctc_spec_007_ctc_claudethecaller_the_target_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_6_retrieval",
+     "label": "6. Retrieval",
+     "line": "L740",
+     "parent": "specs_007_ctc_spec_007_ctc_claudethecaller_the_target_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_7_verification_gates",
+     "label": "7. Verification gates",
+     "line": "L751",
+     "parent": "specs_007_ctc_spec_007_ctc_claudethecaller_the_target_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_8_tasks",
+     "label": "8. Tasks",
+     "line": "L764",
+     "parent": "specs_007_ctc_spec_007_ctc_claudethecaller_the_target_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_9_decisions",
+     "label": "9. Decisions",
+     "line": "L795",
+     "parent": "specs_007_ctc_spec_007_ctc_claudethecaller_the_target_system"
+    },
+    {
+     "id": "specs_007_ctc_spec_graphs",
+     "label": "Graphs",
+     "line": "L39",
+     "parent": "specs_007_ctc_spec_007_ctc_claudethecaller_the_target_system"
+    }
+   ],
+   "excluded": []
+  },
+  "src/ctc/decision/bundle.py": {
+   "lang": "python",
+   "nodes": [
+    {
+     "id": "src_ctc_decision_bundle",
+     "label": "bundle.py",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "src_ctc_decision_bundle_aovr",
+     "label": "aovr()",
+     "line": "L255",
+     "parent": "src_ctc_decision_bundle"
+    },
+    {
+     "id": "src_ctc_decision_bundle_bundle",
+     "label": "Bundle",
+     "line": "L43",
+     "parent": "src_ctc_decision_bundle"
+    },
+    {
+     "id": "src_ctc_decision_bundle_cap",
+     "label": "cap()",
+     "line": "L191",
+     "parent": "src_ctc_decision_bundle"
+    },
+    {
+     "id": "src_ctc_decision_bundle_decide",
+     "label": "decide()",
+     "line": "L104",
+     "parent": "src_ctc_decision_bundle"
+    },
+    {
+     "id": "src_ctc_decision_bundle_difficulty_models",
+     "label": "_difficulty_models()",
+     "line": "L57",
+     "parent": "src_ctc_decision_bundle"
+    },
+    {
+     "id": "src_ctc_decision_bundle_followed",
+     "label": "followed()",
+     "line": "L169",
+     "parent": "src_ctc_decision_bundle"
+    },
+    {
+     "id": "src_ctc_decision_bundle_lookup",
+     "label": "_lookup()",
+     "line": "L94",
+     "parent": "src_ctc_decision_bundle"
+    },
+    {
+     "id": "src_ctc_decision_bundle_plan_text",
+     "label": "plan_text()",
+     "line": "L160",
+     "parent": "src_ctc_decision_bundle"
+    },
+    {
+     "id": "src_ctc_decision_bundle_reason",
+     "label": "_reason()",
+     "line": "L77",
+     "parent": "src_ctc_decision_bundle"
+    },
+    {
+     "id": "src_ctc_decision_bundle_rerank",
+     "label": "_rerank()",
+     "line": "L73",
+     "parent": "src_ctc_decision_bundle"
+    },
+    {
+     "id": "src_ctc_decision_bundle_stage_rows",
+     "label": "stage_rows()",
+     "line": "L144",
+     "parent": "src_ctc_decision_bundle"
+    },
+    {
+     "id": "src_ctc_decision_bundle_stage_rows_row",
+     "label": "row()",
+     "line": "L145",
+     "parent": "src_ctc_decision_bundle_stage_rows"
+    },
+    {
+     "id": "src_ctc_decision_bundle_stagerow",
+     "label": "StageRow",
+     "line": "L34",
+     "parent": "src_ctc_decision_bundle"
+    },
+    {
+     "id": "src_ctc_decision_bundle_step",
+     "label": "Step",
+     "line": "L25",
+     "parent": "src_ctc_decision_bundle"
+    },
+    {
+     "id": "src_ctc_decision_bundle_suggestion_line",
+     "label": "suggestion_line()",
+     "line": "L153",
+     "parent": "src_ctc_decision_bundle"
+    },
+    {
+     "id": "src_ctc_decision_bundle_tiers",
+     "label": "_tiers()",
+     "line": "L62",
+     "parent": "src_ctc_decision_bundle"
+    },
+    {
+     "id": "src_ctc_decision_bundle_workflow_steps",
+     "label": "_workflow_steps()",
+     "line": "L82",
+     "parent": "src_ctc_decision_bundle"
+    }
+   ],
+   "excluded": [
+    {
+     "id": "src_ctc_decision_bundle_rationale_1",
+     "reason": "file_type rationale"
+    },
+    {
+     "id": "src_ctc_decision_bundle_rationale_83",
+     "reason": "file_type rationale"
+    },
+    {
+     "id": "src_ctc_decision_bundle_rationale_95",
+     "reason": "file_type rationale"
+    }
+   ]
+  },
+  "src/ctc/embedding/embedder.py": {
+   "lang": "python",
+   "nodes": [
+    {
+     "id": "src_ctc_embedding_embedder",
+     "label": "embedder.py",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "src_ctc_embedding_embedder_embedder",
+     "label": "Embedder",
+     "line": "L26",
+     "parent": "src_ctc_embedding_embedder"
+    },
+    {
+     "id": "src_ctc_embedding_embedder_embedder_aclose",
+     "label": ".aclose()",
+     "line": "L56",
+     "parent": "src_ctc_embedding_embedder_embedder"
+    },
+    {
+     "id": "src_ctc_embedding_embedder_embedder_client",
+     "label": ".client()",
+     "line": "L35",
+     "parent": "src_ctc_embedding_embedder_embedder"
+    },
+    {
+     "id": "src_ctc_embedding_embedder_embedder_embed",
+     "label": ".embed()",
+     "line": "L42",
+     "parent": "src_ctc_embedding_embedder_embedder"
+    },
+    {
+     "id": "src_ctc_embedding_embedder_embedder_init",
+     "label": ".__init__()",
+     "line": "L27",
+     "parent": "src_ctc_embedding_embedder_embedder"
+    }
+   ],
+   "excluded": [
+    {
+     "id": "src_ctc_embedding_embedder_rationale_36",
+     "reason": "file_type rationale"
+    }
+   ]
+  },
+  "src/ctc/ingestion/scanner.py": {
+   "lang": "python",
+   "nodes": [
+    {
+     "id": "src_ctc_ingestion_scanner",
+     "label": "scanner.py",
+     "line": "L1",
+     "parent": null
+    },
+    {
+     "id": "src_ctc_ingestion_scanner_capability",
+     "label": "Capability",
+     "line": "L29",
+     "parent": "src_ctc_ingestion_scanner"
+    },
+    {
+     "id": "src_ctc_ingestion_scanner_capability_invoke",
+     "label": ".invoke()",
+     "line": "L40",
+     "parent": "src_ctc_ingestion_scanner_capability"
+    },
+    {
+     "id": "src_ctc_ingestion_scanner_dedup_by_id",
+     "label": "_dedup_by_id()",
+     "line": "L197",
+     "parent": "src_ctc_ingestion_scanner"
+    },
+    {
+     "id": "src_ctc_ingestion_scanner_default_roots",
+     "label": "default_roots()",
+     "line": "L236",
+     "parent": "src_ctc_ingestion_scanner"
+    },
+    {
+     "id": "src_ctc_ingestion_scanner_lenient_frontmatter",
+     "label": "_lenient_frontmatter()",
+     "line": "L64",
+     "parent": "src_ctc_ingestion_scanner"
+    },
+    {
+     "id": "src_ctc_ingestion_scanner_load_plugin_manifest",
+     "label": "_load_plugin_manifest()",
+     "line": "L119",
+     "parent": "src_ctc_ingestion_scanner"
+    },
+    {
+     "id": "src_ctc_ingestion_scanner_make_capability",
+     "label": "_make_capability()",
+     "line": "L81",
+     "parent": "src_ctc_ingestion_scanner"
+    },
+    {
+     "id": "src_ctc_ingestion_scanner_project_id",
+     "label": "project_id()",
+     "line": "L228",
+     "parent": "src_ctc_ingestion_scanner"
+    },
+    {
+     "id": "src_ctc_ingestion_scanner_project_namespace",
+     "label": "project_namespace()",
+     "line": "L232",
+     "parent": "src_ctc_ingestion_scanner"
+    },
+    {
+     "id": "src_ctc_ingestion_scanner_scan_declared_path",
+     "label": "_scan_declared_path()",
+     "line": "L127",
+     "parent": "src_ctc_ingestion_scanner"
+    },
+    {
+     "id": "src_ctc_ingestion_scanner_scan_library",
+     "label": "scan_library()",
+     "line": "L214",
+     "parent": "src_ctc_ingestion_scanner"
+    },
+    {
+     "id": "src_ctc_ingestion_scanner_scan_manifest_paths",
+     "label": "_scan_manifest_paths()",
+     "line": "L148",
+     "parent": "src_ctc_ingestion_scanner"
+    },
+    {
+     "id": "src_ctc_ingestion_scanner_scan_root",
+     "label": "_scan_root()",
+     "line": "L167",
+     "parent": "src_ctc_ingestion_scanner"
+    },
+    {
+     "id": "src_ctc_ingestion_scanner_split_frontmatter",
+     "label": "_split_frontmatter()",
+     "line": "L46",
+     "parent": "src_ctc_ingestion_scanner"
+    }
+   ],
+   "excluded": [
+    {
+     "id": "src_ctc_ingestion_scanner_rationale_1",
+     "reason": "file_type rationale"
+    },
+    {
+     "id": "src_ctc_ingestion_scanner_rationale_47",
+     "reason": "file_type rationale"
+    },
+    {
+     "id": "src_ctc_ingestion_scanner_rationale_65",
+     "reason": "file_type rationale"
+    }
+   ]
+  }
+ },
+ "make_id": [
+  {
+   "parts": [
+    "src/ctc/decision/bundle",
+    "suggestion_line"
+   ],
+   "id": "src_ctc_decision_bundle_suggestion_line"
+  },
+  {
+   "parts": [
+    "Größe"
+   ],
+   "id": "grösse"
+  },
+  {
+   "parts": [
+    "İslemYap"
+   ],
+   "id": "i_slemyap"
+  },
+  {
+   "parts": [
+    "ΣΑΣ ὅς"
+   ],
+   "id": "σασ_ὅσ"
+  },
+  {
+   "parts": [
+    "ﬁle ﬀ"
+   ],
+   "id": "file_ff"
+  },
+  {
+   "parts": [
+    "ſtraße"
+   ],
+   "id": "strasse"
+  },
+  {
+   "parts": [
+    "ᏣᎳᎩ"
+   ],
+   "id": "ᏣᎳᎩ"
+  },
+  {
+   "parts": [
+    "数据_处理"
+   ],
+   "id": "数据_处理"
+  },
+  {
+   "parts": [
+    "مرحبا بك"
+   ],
+   "id": "مرحبا_بك"
+  },
+  {
+   "parts": [
+    "हिन्दी"
+   ],
+   "id": "ह_न_द"
+  },
+  {
+   "parts": [
+    "école"
+   ],
+   "id": "école"
+  },
+  {
+   "parts": [
+    "emoji 🙂 here"
+   ],
+   "id": "emoji_here"
+  },
+  {
+   "parts": [
+    "__init__"
+   ],
+   "id": "init"
+  },
+  {
+   "parts": [
+    "._a.b_."
+   ],
+   "id": "a_b"
+  },
+  {
+   "parts": [
+    "a..b--c"
+   ],
+   "id": "a_b_c"
+  },
+  {
+   "parts": [
+    "",
+    "x"
+   ],
+   "id": "x"
+  },
+  {
+   "parts": [
+    "x",
+    ""
+   ],
+   "id": "x"
+  },
+  {
+   "parts": [
+    "Ⅻ ½ ²"
+   ],
+   "id": "xii_1_2_2"
+  },
+  {
+   "parts": [
+    "CamelCase",
+    "HTTPServer"
+   ],
+   "id": "camelcase_httpserver"
+  },
+  {
+   "parts": [
+    "a",
+    "b",
+    "c"
+   ],
+   "id": "a_b_c"
+  },
+  {
+   "parts": [
+    "___"
+   ],
+   "id": ""
+  },
+  {
+   "parts": [
+    "tab\tnew\nline"
+   ],
+   "id": "tab_new_line"
+  },
+  {
+   "parts": [
+    "ǅungla"
+   ],
+   "id": "džungla"
+  },
+  {
+   "parts": [
+    "ΐ"
+   ],
+   "id": "ΐ"
+  },
+  {
+   "parts": [
+    "ᾀ"
+   ],
+   "id": "ἀι"
+  }
+ ]
+}
