@@ -1,0 +1,40 @@
+---
+description: "Task list for m6 context + coding graph"
+---
+
+# Tasks: Context + coding graph (m6)
+
+**Input**: `specs/002-context-coding-graph/` — [plan.md](plan.md), [spec.md](spec.md), [design.md](design.md), [data-model.md](data-model.md), [contracts/](contracts/), [research.md](research.md), [quickstart.md](quickstart.md)
+
+**Tests**: requested (CLAUDE.md "one runnable check", plan.md Testing). Each ticket writes its test file first and it must fail before the implementation tasks.
+
+**Organization**: by ticket and wave (plan.md "File Locks and Lane Plan"); each ticket maps to the user stories it delivers. Tickets are named **ticket 01–07** here (= G1–G7) to keep them apart from task ids T###.
+
+## Format: `[ID] [P?] [Story] Description`
+
+- **[P]**: can run in parallel (different files, no dependency on an unfinished task)
+- **[Story]**: US1–US8 from spec.md
+
+## Rules for every builder
+
+- Branch `m6-graph`; builders never commit, push, start/stop the daemon or containers, touch `.env`, the real `~/.claude`, or the Supabase URL (`.env` line 2). The lead commits each ticket.
+- Scratch DB only: `export CTC_DATABASE_URL=<the URL on .env line 3, commented, 127.0.0.1:18304>` in your shell; tests skip when it is unset or contains `supabase`.
+- Edit only the files your ticket owns (plan.md lock table). Code style: CLAUDE.md (shortest working solution, no new dependencies, `ponytail:` on known corner-cuts, match surrounding comment density).
+- Use `graphify query "<question>"` before grep/read when exploring code.
+
+---
+
+## Phase 1: Setup (lead, before wave 1)
+
+- [ ] T001 Verify the scratch DB and embedder without editing `.env`: `docker ps --filter name=ctc-dev-pg` shows pgvector pg17 on 127.0.0.1:18304; with the line-3 URL exported, `uv run python -c "import os,psycopg; print(psycopg.connect(os.environ['CTC_DATABASE_URL']).execute(\"select count(*) from pg_available_extensions where name in ('vector','unaccent')\").fetchone())"` prints `(2,)`; `curl -s 127.0.0.1:18300/health` answers.
+- [ ] T002 Baseline on `m6-graph`: `env -u CTC_DATABASE_URL scripts/check.sh` and `scripts/check.sh` with the scratch URL both end `check.sh: all ok`; keep both outputs for the PR body. Stop and report in one line if the base is red.
+- [ ] T003 Refresh graphify for HEAD (`graphify update .` when `built_at_commit` ≠ `git rev-parse HEAD`) and record the code + rationale node count and the count of links with both ends in that set (`python3 -c` over `graphify-out/graph.json`) for ticket 01's Done-when.
+
+---
+
+## Phase 2: Foundational — ticket 01 / G1: store, RAM graph, graphify import (wave 1, builder A)
+
+**Purpose**: tables, DB API, RAM graph and the coding graph every story reads. Delivers the coding half of US1.
+**Owns**: `src/ctc/storage/schema.sql`, `src/ctc/graph/__init__.py`, `src/ctc/graph/db.py`, `src/ctc/graph/core.py`, `src/ctc/graph/importer.py`, `src/ctc/server/state.py`, `src/ctc/cli.py` (wave 1), `tests/conftest.py`, `tests/test_graph_import.py`.
+
+- [ ] T004 [P] Create `tests/conftest.py` (new): fixture `scratch` (session scope) that reads `ctc.config.cfg()["database_url"]`, calls `pytest.skip("graph store tests need a scratch Postgres: CTC_DATABASE_URL unset or Supabase")` when it is empty or contains `supabase`, creates schema `ctc_test_<uuid4 hex[:8]>` by `asyncio.run` of `Store.open(dsn, schema, pool_min=1, pool_max=2)` + `close()` (Store.open applies `schema.sql` with `{schema}` replaced), yields `(dsn, schema)`, and in `finally` runs `drop schema if exists <schema> cascade` over `psycopg.connect(dsn, autocommit=True)` (never `ctc` or `extensions`). Helper fixture `in_store` returning `call(fn)` that opens `Store.open(dsn, schema, pool_min=1, pool_max=2)` inside its own `asyncio.run`, awaits `fn(store)`, closes the store. Add a `ponytail:` comment: one `asyncio.run` per call, no pytest-asyncio.

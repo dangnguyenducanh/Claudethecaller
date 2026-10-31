@@ -1,0 +1,64 @@
+{
+ "path": "CLAUDE.md",
+ "nodes": [
+  {
+   "id": "D2026-10-20",
+   "line": 1,
+   "lines": [
+    1,
+    1
+   ],
+   "date": "2026-10-20",
+   "labelStart": "Built from scratch: ratel, MCPGateway, metamcp and similar are references only"
+  },
+  {
+   "id": "D2026-10-20-2",
+   "line": 2,
+   "lines": [
+    2,
+    3
+   ],
+   "date": "2026-10-20",
+   "labelStart": "Local models ≤ 3B params; embedder `ThakiCloud/SKILLRET-Embedding-0.6B` (baseline `BAAI/bge-m3`), reranker"
+  },
+  {
+   "id": "D2026-10-20-3",
+   "line": 4,
+   "lines": [
+    4,
+    4
+   ],
+   "date": "2026-10-20",
+   "labelStart": "Offline LLM default is the local llama-server"
+  },
+  {
+   "id": "D2026-10-20-4",
+   "line": 5,
+   "lines": [
+    5,
+    5
+   ],
+   "date": "2026-10-20",
+   "label": "Hook suggests, never blocks"
+  },
+  {
+   "id": "D2026-10-20-5",
+   "line": 6,
+   "lines": [
+    6,
+    6
+   ],
+   "date": "2026-10-20",
+   "labelStart": "Eval data: SkillRet (main), MetaTool (abstain)"
+  }
+ ],
+ "refs": [
+  [
+   "D2026-10-20-2",
+   "decides",
+   "path",
+   "ThakiCloud/SKILLRET-Embedding-0.6B",
+   2
+  ]
+ ]
+}

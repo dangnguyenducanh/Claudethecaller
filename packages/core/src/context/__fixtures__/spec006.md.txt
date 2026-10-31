@@ -1,0 +1,42 @@
+Strict phase order; `[P]` = can run in parallel inside its phase. Each task ends with its named test green.
+
+**Phase 0: safety net (Python still serves)**
+- [ ] T0.1 Record fixtures: `/v1/search` top-5 for 200 prompts, graph `query` / `affected` answers for 30 questions, `/api/*` reply shapes. → `fixtures/`.
+- [ ] T0.2 Latency + skillret baselines on the Python daemon. → `specs/006-merged-core/baseline.json`.
+- [ ] T0.3 Archive `decisions` + `events` to `jsonl.gz`.
+
+**Phase 1: workspace and shared**
+- [ ] T1.1 pnpm workspace, Node 24, TS strict, Vitest, ESLint (SQL import ban), Zod env from `config/*.yaml`.
+- [ ] T1.2 Migrations: baseline of today's kept tables + new tables/columns (C0) + `ctc migrate --from-python`. → migration on a copy = expected row counts.
+- [ ] T1.3 `[P]` Repositories per domain with `ctx`. → `tenancy.test.ts`.
+- [ ] T1.4 `[P]` Cache (L1, L2, epochs, `ctc:inval`), queues (7, payload Zod, `dlq-retry`). → unit tests.
+
+**Phase 2: context graph (graphify)**
+- [ ] T2.1 `core/graph/ids` + extract with web-tree-sitter (ts, tsx, js, python, bash, sql, json) + markdown parser. → `graph.ids.test.ts`.
+- [ ] T2.2 Cross-file resolve + incremental rebuild + content-hash cache + shrink guard; `graph` queue. → `graph.resolve`, `graph.incremental`.
+- [ ] T2.3 Port ctc context parsers + doc extract job; skill / agent / command / workflow nodes and their edges (`uses`, `calls`, `serves`, `implements`, `references`).
+- [ ] T2.4 Query, explain, path, affected, neighbors + MCP tools + `/api/graph/*`. → `graph.query.test.ts`.
+
+**Phase 3: skill library (Langfuse)** `[P]` with Phase 4
+- [ ] T3.1 Scanner → versions (advisory lock, labels, manifest + blobs) + `library` queue (`changed` → embed, enrich, dedup, graph node).
+- [ ] T3.2 MCP `get_capability`, `load_capability_resource`; `/api` versions, labels, restore; overrides pin by label/version. → `library.*` tests.
+- [ ] T3.3 Port SKILLRET dense + rerank channel to `packages/core`. → `suggest.skills` (skillret gate).
+
+**Phase 4: memory (claude-mem)** `[P]` with Phase 3
+- [ ] T4.1 `hooks/spool.sh` + drain (boot, watch, 30 s sweep, corrupt dir) + `/v1/spool/nudge`. → `memory.spool.test.ts`.
+- [ ] T4.2 `llm.extract` (port bands) + `llm.summarize` (new) + retry-once-then-drop + content hash + reinforcement days. → `memory.idempotent.test.ts`.
+- [ ] T4.3 RRF recall + `/v1/hook/start` fit-by-measuring + MCP `mem_search / mem_timeline / mem_get / save_memory`; memory-file watcher; history → `distill`. → `memory.context.test.ts`, `memory.recall`.
+
+**Phase 5: suggestion from the graph**
+- [ ] T5.1 `/v1/hook/prompt` + `/v1/suggest`: seeds (lexical ∪ embedding ∪ skill channel), walk, rank, render, `sug:` cache. → `suggest.latency`, `suggest.context`.
+- [ ] T5.2 `/v1/hook/pre`: file note + search hint (caps, quiet window). → `failopen.test.ts`.
+
+**Phase 6: workflows (Orca)**
+- [ ] T6.1 Transition table + attempts + stages + `idempotency_keys`. → `runner.lifecycle.test.ts`.
+- [ ] T6.2 Worktree recipe + `ctc.yaml setup:` + agent registry (`claude`, `codex`) + stream-json status + step report endpoint with token. → `runner.crash.test.ts`.
+- [ ] T6.3 Gate options + resolution injection; `fanout` + join nodes (BullMQ Flow, depth 1); handoff action; cleanup job. → `runner.fanout.test.ts`, [`.claude/metric/eval/runner.md`](../../.claude/metric/eval/runner.md).
+
+**Phase 7: switch over**
+- [ ] T7.1 Point [`.claude/settings.json`](../../.claude/settings.json) hooks at the new routes + spool script; stop the Python daemon. → all C7 gates on the new stack.
+- [ ] T7.2 Delete the Python server, storage, runner, ingestion, ai, memory, retrieval, decision, graph and [`src/ctc/cli.py`](../../src/ctc/cli.py); keep `evaluation/` (calls `/v1/suggest`); retire [`.claude/metric/eval/adoption.md`](../../.claude/metric/eval/adoption.md). → [`.claude/metric/eval/ci.md`](../../.claude/metric/eval/ci.md) green.
+

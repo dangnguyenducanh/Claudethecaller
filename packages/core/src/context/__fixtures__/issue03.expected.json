@@ -1,0 +1,81 @@
+{
+ "path": ".scratch/context-coding-graph/issues/03-links-build-claudemem.md",
+ "id": "issue-03",
+ "type": "task",
+ "line": 1,
+ "lines": [
+  1,
+  19
+ ],
+ "label": "links, embeddings, claude-mem, ctc graph build (G3)",
+ "status": "ready-for-agent",
+ "blockedBy": "01, 02",
+ "refs": [
+  [
+   "part_of",
+   "node",
+   "ctx:.scratch/context-coding-graph/spec:spec",
+   1
+  ],
+  [
+   "implements",
+   "path",
+   ".scratch/context-coding-graph/spec.md",
+   6
+  ],
+  [
+   "implements",
+   "path",
+   "src/ctc/graph/link.py",
+   7
+  ],
+  [
+   "implements",
+   "path",
+   "src/ctc/graph/claudemem.py",
+   7
+  ],
+  [
+   "implements",
+   "path",
+   "src/ctc/graph/build.py",
+   7
+  ],
+  [
+   "implements",
+   "path",
+   "src/ctc/cli.py",
+   7
+  ],
+  [
+   "implements",
+   "path",
+   "config/retrieval.yaml",
+   7
+  ],
+  [
+   "implements",
+   "path",
+   "tests/test_graph_link.py",
+   7
+  ],
+  [
+   "implements",
+   "path",
+   "contracts/modules.md",
+   11
+  ],
+  [
+   "implements",
+   "path",
+   "contracts/cli.md",
+   11
+  ],
+  [
+   "implements",
+   "path",
+   "scripts/check.sh",
+   17
+  ]
+ ]
+}

@@ -1,0 +1,289 @@
+{
+ "path": "specs/002-context-coding-graph/spec.md",
+ "spec": {
+  "label": "spec",
+  "line": 1,
+  "lines": [
+   1,
+   45
+  ]
+ },
+ "nodes": [
+  {
+   "id": "US1",
+   "type": "requirement",
+   "line": 1,
+   "labelStart": "Build both graphs for this repo and see their state"
+  },
+  {
+   "id": "US2",
+   "type": "requirement",
+   "line": 2
+  },
+  {
+   "id": "US3",
+   "type": "requirement",
+   "line": 3
+  },
+  {
+   "id": "US4",
+   "type": "requirement",
+   "line": 4
+  },
+  {
+   "id": "US5",
+   "type": "requirement",
+   "line": 5
+  },
+  {
+   "id": "US6",
+   "type": "requirement",
+   "line": 6
+  },
+  {
+   "id": "US7",
+   "type": "requirement",
+   "line": 7
+  },
+  {
+   "id": "US8",
+   "type": "requirement",
+   "line": 8
+  },
+  {
+   "id": "FR-001",
+   "type": "requirement",
+   "line": 9,
+   "labelStart": "The system MUST import graphify's code and rationale nodes"
+  },
+  {
+   "id": "FR-002",
+   "type": "requirement",
+   "line": 10
+  },
+  {
+   "id": "FR-003",
+   "type": "requirement",
+   "line": 11
+  },
+  {
+   "id": "FR-004",
+   "type": "requirement",
+   "line": 12
+  },
+  {
+   "id": "FR-005",
+   "type": "requirement",
+   "line": 13
+  },
+  {
+   "id": "FR-006",
+   "type": "requirement",
+   "line": 14
+  },
+  {
+   "id": "FR-007",
+   "type": "requirement",
+   "line": 15
+  },
+  {
+   "id": "FR-008",
+   "type": "requirement",
+   "line": 16
+  },
+  {
+   "id": "FR-009",
+   "type": "requirement",
+   "line": 17
+  },
+  {
+   "id": "FR-010",
+   "type": "requirement",
+   "line": 18
+  },
+  {
+   "id": "FR-011",
+   "type": "requirement",
+   "line": 19
+  },
+  {
+   "id": "FR-012",
+   "type": "requirement",
+   "line": 20
+  },
+  {
+   "id": "FR-013",
+   "type": "requirement",
+   "line": 21
+  },
+  {
+   "id": "FR-014",
+   "type": "requirement",
+   "line": 22
+  },
+  {
+   "id": "FR-015",
+   "type": "requirement",
+   "line": 23
+  },
+  {
+   "id": "FR-016",
+   "type": "requirement",
+   "line": 24
+  },
+  {
+   "id": "FR-017",
+   "type": "requirement",
+   "line": 25
+  },
+  {
+   "id": "FR-018",
+   "type": "requirement",
+   "line": 26
+  },
+  {
+   "id": "FR-019",
+   "type": "requirement",
+   "line": 27
+  },
+  {
+   "id": "FR-020",
+   "type": "requirement",
+   "line": 28
+  },
+  {
+   "id": "FR-021",
+   "type": "requirement",
+   "line": 29
+  },
+  {
+   "id": "FR-022",
+   "type": "requirement",
+   "line": 30
+  },
+  {
+   "id": "FR-023",
+   "type": "requirement",
+   "line": 31
+  },
+  {
+   "id": "FR-024",
+   "type": "requirement",
+   "line": 32
+  },
+  {
+   "id": "FR-025",
+   "type": "requirement",
+   "line": 33
+  },
+  {
+   "id": "FR-026",
+   "type": "requirement",
+   "line": 34
+  },
+  {
+   "id": "FR-027",
+   "type": "requirement",
+   "line": 35
+  },
+  {
+   "id": "FR-028",
+   "type": "requirement",
+   "line": 36
+  },
+  {
+   "id": "FR-029",
+   "type": "requirement",
+   "line": 37
+  },
+  {
+   "id": "FR-030",
+   "type": "requirement",
+   "line": 38
+  },
+  {
+   "id": "SC-001",
+   "type": "requirement",
+   "line": 39,
+   "labelStart": "On held-out n8n-parity tickets 09–16"
+  },
+  {
+   "id": "SC-002",
+   "type": "requirement",
+   "line": 40
+  },
+  {
+   "id": "SC-003",
+   "type": "requirement",
+   "line": 41
+  },
+  {
+   "id": "SC-004",
+   "type": "requirement",
+   "line": 42
+  },
+  {
+   "id": "SC-005",
+   "type": "requirement",
+   "line": 43
+  },
+  {
+   "id": "SC-006",
+   "type": "requirement",
+   "line": 44
+  },
+  {
+   "id": "SC-007",
+   "type": "requirement",
+   "line": 45
+  }
+ ],
+ "partOf": [
+  "US1",
+  "US2",
+  "US3",
+  "US4",
+  "US5",
+  "US6",
+  "US7",
+  "US8",
+  "FR-001",
+  "FR-002",
+  "FR-003",
+  "FR-004",
+  "FR-005",
+  "FR-006",
+  "FR-007",
+  "FR-008",
+  "FR-009",
+  "FR-010",
+  "FR-011",
+  "FR-012",
+  "FR-013",
+  "FR-014",
+  "FR-015",
+  "FR-016",
+  "FR-017",
+  "FR-018",
+  "FR-019",
+  "FR-020",
+  "FR-021",
+  "FR-022",
+  "FR-023",
+  "FR-024",
+  "FR-025",
+  "FR-026",
+  "FR-027",
+  "FR-028",
+  "FR-029",
+  "FR-030",
+  "SC-001",
+  "SC-002",
+  "SC-003",
+  "SC-004",
+  "SC-005",
+  "SC-006",
+  "SC-007"
+ ],
+ "refs": []
+}

@@ -31,12 +31,13 @@ export const graphRepo = (db: Db) => {
   return {
     /**
      * One transaction per `(origin, source_file)`: deletes the old nodes and the edges leaving them, inserts the new ones and
-     * upserts `graph_sources`. Any failure leaves the old rows. `deleted`/`inserted` count nodes plus edges.
+     * upserts `graph_sources` (not when `source` is omitted). Edges of `origin` leaving any node of the file are replaced. Any failure leaves the old rows.
+     * `deleted`/`inserted` count nodes plus edges.
      * An edge a person reviewed (origin `review`) is never overwritten by a rebuild.
      */
     async replaceSource(
       ctx: Ctx,
-      input: { origin: string; sourceFile: string; nodes: GraphNodeInput[]; edges: GraphEdgeInput[]; source: { contentHash: string; extractorVersion: string; builtAtCommit?: string | null } },
+      input: { origin: string; sourceFile: string; nodes: GraphNodeInput[]; edges: GraphEdgeInput[]; source?: { contentHash: string; extractorVersion: string; builtAtCommit?: string | null } },
     ): Promise<{ deleted: number; inserted: number }> {
       const projectId = needProject(ctx);
       const { origin, sourceFile, source } = input;
@@ -44,7 +45,7 @@ export const graphRepo = (db: Db) => {
       if (typeof sourceFile !== 'string' || sourceFile === '') throw new RepoError('invalid', 'sourceFile required');
       const nodes = (input.nodes ?? []).map((n) => ({
         id: n.id, kind: n.kind, type: n.type, label: n.label, source_location: n.sourceLocation ?? null,
-        content_hash: n.contentHash ?? source.contentHash, meta: n.meta ?? {},
+        content_hash: n.contentHash ?? source?.contentHash ?? '', meta: n.meta ?? {},
       }));
       const edges = (input.edges ?? []).map((e) => ({
         src: e.src, dst: e.dst, relation: e.relation, confidence: e.confidence, score: e.score ?? 1, source_location: e.sourceLocation ?? null,
@@ -58,7 +59,7 @@ export const graphRepo = (db: Db) => {
           kept = await rows<{ id: string; contentHash: string; embedding: string }>(trx, sql`select id, content_hash, embedding::text as embedding from graph_nodes
             where user_id = ${u} and project_id = ${projectId} and source_file = ${sourceFile} and origin = ${origin} and embedding is not null`);
           deleted += await changed(trx, sql`delete from graph_edges e where e.user_id = ${u} and e.project_id = ${projectId} and e.origin = ${origin}
-            and e.src in (select n.id from graph_nodes n where n.user_id = ${u} and n.project_id = ${projectId} and n.source_file = ${sourceFile} and n.origin = ${origin})`);
+            and e.src in (select n.id from graph_nodes n where n.user_id = ${u} and n.project_id = ${projectId} and n.source_file = ${sourceFile})`);
           deleted += await changed(trx, sql`delete from graph_nodes n where n.user_id = ${u} and n.project_id = ${projectId} and n.source_file = ${sourceFile} and n.origin = ${origin}`);
         }
         const n = await changed(trx, sql`insert into graph_nodes (user_id, project_id, id, kind, type, label, source_file, source_location, origin, content_hash, meta)
@@ -79,29 +80,31 @@ export const graphRepo = (db: Db) => {
             from jsonb_to_recordset(${jsonb(kept.map((x) => ({ id: x.id, content_hash: x.contentHash, embedding: x.embedding })))}) as x(id text, content_hash text, embedding text)
             where g.user_id = ${u} and g.project_id = ${projectId} and g.id = x.id and g.content_hash = x.content_hash and g.embedding is null`);
         }
-        await changed(trx, sql`insert into graph_sources (user_id, project_id, file, content_hash, extractor_version, built_at_commit)
-          values (${u}, ${projectId}, ${sourceFile}, ${source.contentHash}, ${source.extractorVersion}, ${source.builtAtCommit ?? null})
-          on conflict (user_id, project_id, file) do update set content_hash = excluded.content_hash,
-            extractor_version = excluded.extractor_version, built_at_commit = excluded.built_at_commit`);
+        if (source) {
+          await changed(trx, sql`insert into graph_sources (user_id, project_id, file, content_hash, extractor_version, built_at_commit)
+            values (${u}, ${projectId}, ${sourceFile}, ${source.contentHash}, ${source.extractorVersion}, ${source.builtAtCommit ?? null})
+            on conflict (user_id, project_id, file) do update set content_hash = excluded.content_hash,
+              extractor_version = excluded.extractor_version, built_at_commit = excluded.built_at_commit`);
+        }
         return { deleted, inserted: n + e };
       });
     },
     /**
-     * Removes the `origin` nodes of `sourceFile`, the `origin` edges leaving them and the `graph_sources` row in one transaction.
+     * Removes the `origin` nodes of `sourceFile`, the `origin` edges leaving any node of the file and the `graph_sources` row (kept with `keepSource`) in one transaction.
      * `deleted` counts nodes plus edges. Origins `review`/`session` are never deleted: `{deleted: 0}`, the source row stays.
      */
-    async deleteSource(ctx: Ctx, input: { origin: string; sourceFile: string }): Promise<{ deleted: number }> {
+    async deleteSource(ctx: Ctx, input: { origin: string; sourceFile: string; keepSource?: boolean }): Promise<{ deleted: number }> {
       const projectId = needProject(ctx);
-      const { origin, sourceFile } = input ?? {};
+      const { origin, sourceFile, keepSource } = input ?? {};
       if (typeof origin !== 'string' || !ORIGINS.includes(origin)) throw new RepoError('invalid', 'bad origin');
       if (typeof sourceFile !== 'string' || sourceFile === '') throw new RepoError('invalid', 'sourceFile required');
       if (KEPT.includes(origin)) return { deleted: 0 };
       const u = ctx.userId;
       return k.transaction().execute(async (trx) => {
         let deleted = await changed(trx, sql`delete from graph_edges e where e.user_id = ${u} and e.project_id = ${projectId} and e.origin = ${origin}
-          and e.src in (select n.id from graph_nodes n where n.user_id = ${u} and n.project_id = ${projectId} and n.source_file = ${sourceFile} and n.origin = ${origin})`);
+          and e.src in (select n.id from graph_nodes n where n.user_id = ${u} and n.project_id = ${projectId} and n.source_file = ${sourceFile})`);
         deleted += await changed(trx, sql`delete from graph_nodes n where n.user_id = ${u} and n.project_id = ${projectId} and n.source_file = ${sourceFile} and n.origin = ${origin}`);
-        await changed(trx, sql`delete from graph_sources where user_id = ${u} and project_id = ${projectId} and file = ${sourceFile}`);
+        if (keepSource !== true) await changed(trx, sql`delete from graph_sources where user_id = ${u} and project_id = ${projectId} and file = ${sourceFile}`);
         return { deleted };
       });
     },
