@@ -50,6 +50,14 @@ export const libraryRepo = (db: Db) => {
         sql`select ${CAP_COLS} from capabilities c where c.user_id = ${ctx.userId} and c.namespace = ${String(o?.namespace)} and c.kind = ${String(o?.kind)} and c.name = ${String(o?.name)}`,
       );
     },
+    /** Live capabilities of the caller with exactly that name, ordered by namespace then kind. */
+    async listByName(ctx: Ctx, name: string): Promise<Capability[]> {
+      return rows<Capability>(
+        k,
+        sql`select ${CAP_COLS} from capabilities c where c.user_id = ${ctx.userId} and c.name = ${String(name)} and c.removed_at is null
+            order by c.namespace collate "C", c.kind collate "C"`,
+      );
+    },
     /**
      * One transaction under an advisory lock per (user, name): new version = max + 1, moves `latest`, stores blobs once.
      * A file manifest equal to the latest version's creates nothing (`created: false`). Version 1 also gets `production`.

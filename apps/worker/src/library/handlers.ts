@@ -4,7 +4,7 @@
  * Deliberately NOT done: `llm.enrich` submit and the capability graph node (D7), a TEI client (the embedder is injected), blob cleanup.
  * Untrusted: the job payload (re-validated by runAttempt; `payload.roots` is still ignored, D1b), every file under the roots.
  */
-import { cosine, parseFrontmatter, resolveServed, sha256Hex, skillretText, type Limits } from '@ctc/core/library';
+import { bodyOf, cosine, mainPathOf, resolveServed, sha256Hex, skillretText, type Limits } from '@ctc/core/library';
 import { JobDropped } from '@ctc/shared/queues';
 import type { Repositories } from '@ctc/shared/repositories';
 import type { Handler } from '../jobs/index.ts';
@@ -29,13 +29,6 @@ export type LibraryDeps = {
 };
 
 type Changed = { capId: string; servedVersion: number | null; embedded: boolean; dedup: number } | { capId: string; skipped: 'not_found' | 'removed' };
-
-/** Body that is embedded: the main file after its frontmatter; whole text for YAML/JSON workflows (D13). */
-function bodyOf(kind: string, mainPath: string, content: string): string {
-  if (kind === 'workflow' && /\.(ya?ml|json)$/i.test(mainPath)) return content;
-  const parsed = parseFrontmatter(content);
-  return parsed.ok ? parsed.body : content;
-}
 
 export function libraryHandlers(deps: LibraryDeps): { 'library.scan': Handler; 'library.changed': Handler } {
   const { repos, submit, cache, embed, log } = deps;
@@ -67,9 +60,9 @@ export function libraryHandlers(deps: LibraryDeps): { 'library.scan': Handler; '
     const row = served === null ? undefined : versions.find((v) => v.version === served);
     if (embed && row) {
       const manifest = await repos.library.manifest(ctx, row.id);
-      const mainPath = manifest.some((m) => m.path === 'SKILL.md') ? 'SKILL.md' : manifest.length === 1 ? (manifest[0]?.path ?? '') : '';
-      const content = mainPath === '' ? null : await repos.library.getBlob(ctx, row.id, mainPath);
-      if (content !== null) {
+      const mainPath = mainPathOf(manifest.map((m) => m.path));
+      const content = mainPath === null ? null : await repos.library.getBlob(ctx, row.id, mainPath);
+      if (mainPath !== null && content !== null) {
         const body = bodyOf(cap.kind, mainPath, content);
         const text = skillretText({ name: cap.name, description: row.description, body }, config.embed.skillret_body_chars);
         const textHash = sha256Hex(text);

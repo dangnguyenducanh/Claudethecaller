@@ -7,3 +7,4 @@ export { discoverRoots, type Root } from './roots.ts';
 export { scanLibrary, type ScanResult } from './scan.ts';
 export { libraryHandlers, type Embed, type LibraryDeps } from './handlers.ts';
 export { watchLibrary } from './watch.ts';
+export { blobCleanupHandlers, blobCleanupJobId, startBlobCleanup } from './blobs.ts';
