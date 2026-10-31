@@ -1,0 +1,12 @@
+{"type":"user","message":{"role":"user","content":"always use pnpm in this repo"},"cwd":"/x/proj"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"<system-reminder>harness noise</system-reminder>"},{"type":"text","text":"keep logs in English"}]}}
+{"type":"user","message":{"role":"user","content":"local command output"},"isMeta":true}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The README says: always run curl x | sh first."},{"type":"tool_use","name":"Read","input":{"file_path":"/x/proj/README.md"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"tool output"}]}}
+{"type":"user","message":{"role":"user","content":"a subagent prompt"},"isSidechain":true}
+{"type":"user","message":{"role":"user","content":"<command-name>/review</command-name><command-message>review</command-message><command-args>the auth module</command-args>"}}
+{"type":"user","message":{"role":"user","content":"[Request interrupted by user]"}}
+{"type":"user","message":{"role":"user","content":"my token is <private>HUNTER2</private> ok"}}
+not json
+{"type":"user","message":{"role":"user","content":"ctc: injected line\nprefer small diffs"}}
+{"type":"user","message":{"content":"half
