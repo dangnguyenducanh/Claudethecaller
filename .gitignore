@@ -13,3 +13,4 @@ dashboard/dist/
 .claude/settings.local.json
 dashboard/tsconfig.tsbuildinfo
 /graphify/
+fixtures/py-baseline/local/
