@@ -319,6 +319,12 @@ await check('D8', 'an unknown extra source column is ignored', () => {
   return [[0, 4], [r.code, count(tgt, 'memories')]];
 });
 
+await check('D8', 'a memory whose scope and project_id disagree is skipped as orphan, not an abort', () => {
+  const src = pySource(`insert into ctc.memories (scope,project_id,kind,text,hash,embedding) values ('global','p1','fact','stray global','hx',${VEC}),('project',null,'fact','stray project','hy',${VEC});`);
+  const tgt = migrated(); const r = imp(src, tgt);
+  return [[0, 4, 2], [r.code, count(tgt, 'memories'), entry(r.json, 'memories')?.skipped_by_reason?.orphan ?? 0]];
+});
+
 // ================= D9 scope: pg only under repositories; package wiring
 await check('D9', 'pg imported only under packages/shared/src/repositories; deps and bin present', () => {
   const g = spawnSync('grep', ['-rlE', "from ['\"](pg|pgvector|kysely)['\"]|require\\(['\"]pg['\"]\\)", 'apps', 'packages', '--include=*.ts', '--exclude-dir=node_modules'], { cwd: ROOT, encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
@@ -344,7 +350,7 @@ await check('D10', 'tenant tables carry user_id not null default local; child ta
   const uid = Object.fromEntries(rows(d.url, "select table_name||' '||is_nullable||' '||coalesce(column_default,'') from information_schema.columns where table_schema='ctc' and column_name='user_id'").map((l) => [l.split(' ')[0], l.slice(l.indexOf(' ') + 1)]));
   const badTenant = TENANT.filter((t) => !(uid[t] ?? '').startsWith("NO 'local'::text"));
   const rls = rows(d.url, "select relname from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='ctc' and relkind='r' and not relrowsecurity");
-  const dims = rows(d.url, "select a.attrelid::regclass||'.'||a.attname||'='||a.atttypmod from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='ctc' and a.attname='embedding' and not a.attisdropped order by 1");
+  const dims = rows(d.url, "select a.attrelid::regclass||'.'||a.attname||'='||a.atttypmod from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='ctc' and c.relkind='r' and a.attname='embedding' and not a.attisdropped order by 1");
   return [[[], [], [], ['ctc.cap_vectors.embedding=1024', 'ctc.graph_nodes.embedding=1024', 'ctc.memories.embedding=1024', 'ctc.projects.embedding=1024']],
     [badTenant, CHILD.filter((t) => t in uid), rls, dims]];
 });
@@ -380,8 +386,8 @@ await check('D11', 'uniques: memory hash with NULL project, one running run per 
 });
 await check('D11', 'label rule: one version per label; moving a label in one transaction is allowed', () => {
   const d = migrated();
-  return [[true, true], [fails(d, `${CAP} ${VER(1, 'v1', '{latest,production}')} ${VER(2, 'v2', '{production}')}`),
-    works(d, `${CAP} ${VER(1, 'v1', '{latest,production}')} update ctc.capability_versions set labels='{latest}' where id='${U}v1'; ${VER(2, 'v2', '{production}')}`)]];
+  return [[true, true], [fails(d, `${CAP} ${VER(1, 'a1', '{latest,production}')} ${VER(2, 'a2', '{production}')}`, /label/),
+    works(d, `${CAP} ${VER(1, 'a1', '{latest,production}')} update ctc.capability_versions set labels='{latest}' where id='${U}a1'; ${VER(2, 'a2', '{production}')}`)]];
 });
 await check('D11', 'index definitions', () => {
   const d = migrated();
@@ -433,9 +439,9 @@ await check('D13', 'projects, sessions', () => {
 await check('D13', 'capabilities: deterministic id, version 1 with labels, file, blob, enrichment, root_path', () => {
   const { tgt } = importOnce();
   const body = 'Write tests first';
-  return [[true, '1|{latest,production}|h1|{"name": "tdd", "description": "Test first"}', 'SKILL.md|' + sha(body), '/home/u/.claude/skills/tdd', 'S|["a", "b"]', body + '|17'], [
+  return [['t', '1|{latest,production}|h1|{"name": "tdd", "description": "Test first"}', 'SKILL.md|' + sha(body), '/home/u/.claude/skills/tdd', 'S|["a", "b"]', body + '|17'], [
     q(tgt.url, "select id = md5('local|user|skill|tdd')::uuid from ctc.capabilities where name='tdd'"),
-    q(tgt.url, "select v.version||'|'||v.labels||'|'||v.body_hash||'|'||v.frontmatter::text from ctc.capability_versions v join ctc.capabilities c on c.id=v.cap_id where c.name='tdd'"),
+    q(tgt.url, "select v.version||'|'||v.labels::text||'|'||v.body_hash||'|'||v.frontmatter::text from ctc.capability_versions v join ctc.capabilities c on c.id=v.cap_id where c.name='tdd'"),
     q(tgt.url, "select f.path||'|'||f.blob_hash from ctc.cap_files f join ctc.capability_versions v on v.id=f.version_id join ctc.capabilities c on c.id=v.cap_id where c.name='tdd'"),
     q(tgt.url, "select root_path from ctc.capabilities where name='tdd'"),
     q(tgt.url, "select enrichment->>'summary'||'|'||(enrichment->'triggers')::text from ctc.capabilities where name='tdd'"),
@@ -451,6 +457,16 @@ await check('D13', 'memories: recomputed hash, newest duplicate kept, superseded
   return [[4, sha('use pnpm'), id(4), '0'], [count(tgt, 'memories'), q(tgt.url, `select hash from ctc.memories where id='${id(2)}'`),
     q(tgt.url, `select superseded_by from ctc.memories where id='${id(3)}'`), q(tgt.url, `select count(*) from ctc.memories where id='${id(1)}'`)]];
 });
+await check('D13', 'memories: merging duplicates never makes a superseded_by cycle', () => {
+  const id = (n) => `00000000-0000-0000-0000-00000000009${n}`;
+  const src = pySource(`insert into ctc.memories (id,scope,kind,text,hash,supersedes,updated_at,embedding) values
+    ('${id(1)}','global','fact','cyc a','h',null,'2026-01-01',${VEC}), ('${id(2)}','global','fact','cyc b','h','${id(1)}','2026-01-02',${VEC}),
+    ('${id(3)}','global','fact','CYC B','h',null,'2026-01-03',${VEC}), ('${id(4)}','global','fact','CYC A','h','${id(3)}','2026-01-04',${VEC});`, false);
+  const tgt = migrated(); const r = imp(src, tgt);
+  return [[0, '0'], [r.code, q(tgt.url, `with recursive w(start, cur, depth) as (select id, superseded_by, 1 from ctc.memories where superseded_by is not null
+    union all select w.start, m.superseded_by, depth + 1 from w join ctc.memories m on m.id = w.cur where m.superseded_by is not null and depth < 50)
+    select count(*) from w where cur = start`)]];
+});
 await check('D13', 'graph: kind, origin, source_location, ids verbatim; edge relations verbatim', () => {
   const { tgt } = importOnce();
   return [['code:a_b|code|ast|12', 'ctx:mem:1|context|session|', 'ast,commit,parser', 'calls,implemented_in,serves'], [
@@ -460,7 +476,7 @@ await check('D13', 'graph: kind, origin, source_location, ids verbatim; edge rel
 });
 await check('D13', 'workflow runs and steps', () => {
   const { tgt } = importOnce();
-  return [[true, '{"input": "go"}', 'user:tdd', '1|report|/wt|{"a": 1}'], [
+  return [['t', '{"input": "go"}', 'user:tdd', '1|report|/wt|{"a": 1}'], [
     q(tgt.url, "select workflow_cap_id = md5('local|user|skill|tdd')::uuid from ctc.wf_runs where id=1"), q(tgt.url, 'select inputs::text from ctc.wf_runs where id=1'), q(tgt.url, "select legacy->>'workflow' from ctc.wf_runs where id=1"),
     q(tgt.url, "select attempt||'|'||stage||'|'||worktree||'|'||output::text from ctc.wf_steps where node_id='n1'")]];
 });
