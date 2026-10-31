@@ -1,5 +1,16 @@
 {
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LC_ALL=C curl -sf -m 0.15 -H 'Content-Type: application/json' --data-binary @- \"http://127.0.0.1:${CTC_PORT:-18310}/v1/hook/prompt\" || true",
+            "timeout": 1
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash|Grep",
@@ -18,6 +29,61 @@
             "type": "command",
             "command": "graphify hook-guard read",
             "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Edit|Write|MultiEdit|Grep|Glob|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LC_ALL=C curl -sf -m 0.05 -H 'Content-Type: application/json' --data-binary @- \"http://127.0.0.1:${CTC_PORT:-18310}/v1/hook/pre\" || true",
+            "timeout": 1
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LC_ALL=C curl -sf -m 1.5 -H 'Content-Type: application/json' --data-binary @- \"http://127.0.0.1:${CTC_PORT:-18310}/v1/hook/start\" || true",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/hooks/spool\" PostToolUse 2>/dev/null || true",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/hooks/spool\" Stop 2>/dev/null || true",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/hooks/spool\" SessionEnd 2>/dev/null || true",
+            "timeout": 2
           }
         ]
       }
