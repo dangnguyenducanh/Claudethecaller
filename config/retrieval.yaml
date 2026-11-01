@@ -3,12 +3,26 @@ k: 5
 depth: 50            # candidates per channel (dense, keyword)
 rerank_top: 20
 rrf_k: 60
-ranking: {keyword_rrf_weight: 0.25, rerank_weight: 1}   # K2 ranking sweep 2026-10-21, SkillRet dev (500 train q) NDCG@10 / R@5: this 0.605 / 0.599, old {1, 1} 0.600 / 0.583, dense-only 0.580 / 0.574; own dev NDCG@10 0.117 vs old 0.110
+embed: {text: skillret, instruction: skillret, skillret_body_chars: 8000}   # m8 2026-10-27: text = current | skillret (name | description | body, body cut at skillret_body_chars); instruction = coding | skillret query prefix, keep the pair together. SkillRet dev/test dense NDCG@10 0.580/0.787 (current) -> 0.757/0.812 (skillret); changing text re-embeds every capability on the next index. Revert = text: current, instruction: coding, ranking {0.25, 1}.
+ranking: {keyword_rrf_weight: 0, rerank_weight: 0, fusion: rrf, score_w: 0.7, rerank_by: sigmoid}   # m8 2026-10-27 with the skillret text: dense order. SkillRet dev NDCG@10 / R@5: {0,0} 0.758 / 0.713 vs {0.25, 1} 0.711 / 0.694 (p 1.6e-11); test (4,392 q) 0.811 / 0.825 vs 0.784 / 0.800 (p 8e-29). With the current text the 2026-10-21 pick {0.25, 1} stays best (dev 0.605). Score fusion and rerank_by: logit did not beat rrf / sigmoid (specs/004-flagship-adoption/results.md).
 abstain_below: null  # rerank-score floor; null = off (bge-reranker scores are uncalibrated, see CLAUDE.md)
 gate_path: models/abstain.joblib   # calibrated abstain gate from K2; used when the file exists
 gate_min_p: 0.5                    # K2 overwrites with the tuned threshold
+gate: {kind: "off", margin_ratio: 1.5, min_p: 0.5}   # m8: off | margin | platt | isotonic | lr; off = abstain off, the 2026-10-21 Decision (quote it: bare off is YAML false). ranking.fusion = rrf | score (score: (1 - score_w) * keyword + score_w * cosine)
 agent_min_rerank: 0.5              # B6: attach an agent hit only above this
 blend: {prompt: 0.6, session: 0.25, project: 0.15}   # B7 query vector
 memory_weight: 0.1                 # B8 recall() weight on the query vector
 memory_in_query: false             # K4 2026-10-21: blending recalled memories into the query lowered own-eval dev Recall@5 by 0.051 (test +0.005); memories still ride along in the bundle. Re-measure after H1/H4.
 topic_shift_below: 0.55            # B7: cosine(turn, session mean) below this clears the session
+graph_links:                       # m6 G3: context -> code links (src/ctc/graph/build.py)
+  inferred_floor: 0.45             # cosine a by-meaning (INFERRED) link must reach
+  inferred_k: 3                    # at most this many by-meaning links per context node
+  embed_batch: 32                  # texts per embedder call when graph nodes are (re-)embedded
+  claudemem_url: http://127.0.0.1:37707   # claude-mem worker, read-only; down -> the build skips it
+  claudemem_project: null          # claude-mem's project name; null = <owner>/<Repo> of `git remote get-url origin`
+  commit_tags: {".scratch/n8n-parity": '\(n8n parity (\d{2})\)$'}   # feature -> commit-subject regex, group 1 = ticket number
+graph_push:                        # m6 G6: prompt line + PreToolUse file note (src/ctc/graph/push.py)
+  floor: 0.3                       # cosine the best context match must reach; tuned on n8n tickets 01-08 by evaluation/graph_eval.py
+  max_pointers: 3                  # code pointers per prompt line
+  max_chars: 400                   # whole prompt line (~80 tokens)
+  note_max: 3                      # tasks/requirements per file note

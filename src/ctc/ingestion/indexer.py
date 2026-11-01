@@ -13,10 +13,29 @@ from ctc.storage.cache import Cache
 from ctc.storage.store import Store
 
 
-def texts(cap: dict) -> list[str]:
-    """What gets a vector: the doc text (name, description, summary once A1 enriched it) and each trigger."""
-    doc = f"{cap['name']}: {cap['description']}"[:1000] + (f" {cap['summary']}" if cap.get("summary") else "")
+def texts(cap: dict, mode: str | None = None) -> list[str]:
+    """What gets a vector. `current` (config embed.text): the doc text (name, description, summary once A1 enriched it)
+    and each trigger. `skillret`: the one string SkillRet's embedder was trained on, name | description | body, body cut
+    at embed.skillret_body_chars (no body, e.g. a catalog row, = name | description)."""
+    e = cfg()["embed"]
+    if (mode or e["text"]) == "skillret":
+        body = (cap.get("body") or "")[: e["skillret_body_chars"]]
+        head = f"{cap['name']} | {cap['description']}"[:4000]  # SkillRet's longest is 2,487; TEI answers 413 above 32k tokens and one bad input fails the whole index pass
+        return [f"{head} | {body}" if body else head]
+    doc =f"{cap['name']}: {cap['description']}"[:1000] + (f" {cap['summary']}" if cap.get("summary") else "")
     return [doc, *(t for t in cap.get("triggers") or [] if t.strip())]  # TEI rejects a whole batch with one empty input
+
+
+async def catalog_bodies(store: Store) -> dict[str, str]:
+    """{cap id: body cut at embed.skillret_body_chars} when embed.text is skillret, else {}. The catalog carries no body
+    (RAM on the hot path), so whoever rebuilds the stored vector text (build_index, enrich.dedup) fetches it for one pass,
+    200 ids per statement so a remote database stays under the 2 s statement timeout."""
+    if cfg()["embed"]["text"] != "skillret":
+        return {}
+    n, ids, out = cfg()["embed"]["skillret_body_chars"], list(store.catalog), {}
+    for i in range(0, len(ids), 200):
+        out.update({r["id"]: r["body"] for r in await store.fetch("select id, left(body, %s) as body from capabilities where id = any(%s)", (n, ids[i : i + 200]))})
+    return out
 
 
 async def build_index(store: Store, embedder: Embedder, progress=None) -> int:
@@ -26,7 +45,9 @@ async def build_index(store: Store, embedder: Embedder, progress=None) -> int:
     if not embedder.model_version:
         await embedder.embed(["warmup"], "doc")  # learns the model id for the hash
     model = embedder.model_version
-    want = {(c["id"], hashlib.sha256((model + t).encode()).hexdigest()): t for c in store.catalog.values() for t in texts(c)}
+    bodies = await catalog_bodies(store)
+    want = {(c["id"], hashlib.sha256((model + t).encode()).hexdigest()): t
+            for c in store.catalog.values() for t in texts({**c, "body": bodies.get(c["id"])})}
     have = await store.vector_keys()
     missing = [key for key in want if key not in have]
     for start in range(0, len(missing), 32):  # TEI max_client_batch_size = 32

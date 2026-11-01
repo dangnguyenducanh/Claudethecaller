@@ -24,16 +24,17 @@ SQL = {
     # the session row may still sit in the stream (or a dropped batch) when a decision arrives on the direct path
     "decision": "with s as (insert into sessions (id, user_id, project_id) values (%(session_id)s, %(user_id)s, %(project_id)s)"
                 " on conflict (id) do nothing) insert into decisions (user_id, session_id, project_id, ref, prompt, abstained, confidence, difficulty,"
-                " model_tier, latency_ms, bundle, stages) values (%(user_id)s, %(session_id)s, %(project_id)s, %(ref)s,"
+                " model_tier, latency_ms, bundle, stages, graph_line) values (%(user_id)s, %(session_id)s, %(project_id)s, %(ref)s,"
                 " %(prompt)s, %(abstained)s, %(confidence)s, %(difficulty)s, %(model_tier)s, %(latency_ms)s, %(bundle)s,"
-                " %(stages)s) on conflict (session_id, ref) do nothing",
+                " %(stages)s, %(graph_line)s) on conflict (session_id, ref) do nothing",
     "event": "insert into events (session_id, type, payload) values (%(session_id)s, %(type)s, %(payload)s)",
     "followed": "update decisions set followed = true where session_id = %(session_id)s and ref = %(ref)s",
     "session_end": "update sessions set ended_at = now(), model = %(model)s, tokens = %(tokens)s where id = %(id)s",
 }
 DEFAULTS = {
     "session": {"user_id": "local", "title": "", "turns": 1},
-    "decision": {"user_id": "local", "confidence": 0.0, "difficulty": "standard", "model_tier": "sonnet", "latency_ms": 0.0, "stages": []},
+    "decision": {"user_id": "local", "confidence": 0.0, "difficulty": "standard", "model_tier": "sonnet", "latency_ms": 0.0, "stages": [],
+                 "graph_line": None},
     "event": {"payload": {}},
     "session_end": {"model": "", "tokens": 0},
 }

@@ -1,0 +1,20 @@
+[Unit]
+Description=ctc web (hooks, API, dashboard)
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=%h/.claudethecaller/bin/ctc-web
+WorkingDirectory=%h/.claudethecaller
+EnvironmentFile=-%h/.claudethecaller/env
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=15
+MemoryHigh=600M
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

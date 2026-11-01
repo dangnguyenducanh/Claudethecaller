@@ -1,0 +1,21 @@
+{
+  "name": "@ctc/worker",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "bin": {
+    "ctc-worker": "./src/boot/main.ts"
+  },
+  "scripts": {
+    "lint": "eslint --max-warnings 0 .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ctc/core": "workspace:*",
+    "@ctc/shared": "workspace:*",
+    "bullmq": "5.81.5",
+    "ignore": "7.0.14",
+    "ioredis": "5.11.1"
+  }
+}

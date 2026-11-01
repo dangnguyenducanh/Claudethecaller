@@ -3,7 +3,7 @@ __pycache__/
 data/
 *.usearch
 *.db
-models/
+/models/
 *.gguf
 *.safetensors
 graphify-out/
@@ -13,3 +13,8 @@ dashboard/dist/
 .claude/settings.local.json
 dashboard/tsconfig.tsbuildinfo
 /graphify/
+fixtures/py-baseline/local/
+node_modules/
+*.tsbuildinfo
+agent/*/.baseline.json
+.ctc-dev/

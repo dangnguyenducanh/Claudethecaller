@@ -197,6 +197,7 @@ class Store:
             top = np.argpartition(-sims, min(k * 4, len(sims)) - 1)[: k * 4]
             for i in top[np.argsort(-sims[top])]:  # best vector per capability, like the old SQL's max(1 - d)
                 dense.setdefault(self._vids[i], float(sims[i]))
+        # (cap_id, cosine) and (cap_id, raw ts_rank_cd), best first; hybrid's score fusion normalises the keyword scores by their max
         return list(dense.items())[:k], [(r["cap_id"], float(r["score"])) for r in sparse]
 
     async def overrides(self, project_id: str, user_id: str = "local") -> dict[str, str]:

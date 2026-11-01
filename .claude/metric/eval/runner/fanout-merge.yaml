@@ -1,0 +1,17 @@
+name: fanout-merge
+description: Three children each write one file in their own worktree; the join merges the three branches; a shell lists the merged tree.
+nodes:
+  - { id: trigger, type: trigger }
+  - id: split
+    type: fanout
+    over: 3
+    child:
+      type: agent
+      agent: claude
+      prompt: "FAKE_WRITE=part-{{item}}.txt:child-{{item}} FAKE_SAY=child-{{item}} Write part {{item}}."
+  - { id: merge, type: join, strategy: merge }
+  - { id: list, type: shell, cwd: worktree, run: "ls" }
+edges:
+  - { from: trigger, to: split }
+  - { from: split, to: merge }
+  - { from: merge, to: list }

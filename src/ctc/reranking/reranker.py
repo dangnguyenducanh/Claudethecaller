@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 
 import httpx
+
+
+def sigmoid(x: float) -> float:
+    """1 / (1 + e^-x) without OverflowError for large |x| (exp of a positive argument is the only thing that can overflow)."""
+    if x >= 0:
+        return 1 / (1 + math.exp(-x))
+    e = math.exp(x)
+    return e / (1 + e)
 
 
 class Reranker:
@@ -22,12 +31,17 @@ class Reranker:
             self._client, self._loop = httpx.AsyncClient(timeout=self.timeout), loop
         return self._client
 
-    async def score(self, query: str, docs: list[str]) -> list[float]:
-        resp = await self.client().post(f"{self.base_url}/rerank", json={"query": query, "texts": docs})
+    async def score_with_logits(self, query: str, docs: list[str]) -> list[tuple[float, float]]:
+        """(sigmoid, logit) per doc, in `docs` order. TEI applies the sigmoid itself unless raw_scores is set; asking for
+        the raw logit and squashing here keeps the (0, 1) scale every consumer reads and keeps the logit's spacing."""
+        resp = await self.client().post(f"{self.base_url}/rerank", json={"query": query, "texts": docs, "raw_scores": True})
         resp.raise_for_status()
         ranked = resp.json()
         ranked.sort(key=lambda r: r["index"])
-        return [r["score"] for r in ranked]
+        return [(sigmoid(r["score"]), r["score"]) for r in ranked]
+
+    async def score(self, query: str, docs: list[str]) -> list[float]:
+        return [s for s, _ in await self.score_with_logits(query, docs)]
 
     async def aclose(self) -> None:
         if self._client is not None:

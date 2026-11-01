@@ -1,0 +1,302 @@
+{
+ "retry on fail": {
+  "lexical": [
+   {
+    "id": "code:tests_test_retry_on_fail",
+    "score": 1
+   },
+   {
+    "id": "ctx:.scratch/n8n-parity/issues/09-retry-on-fail:issue-09",
+    "score": 1
+   },
+   {
+    "id": "ctx:specs/001-n8n-parity/qc/RESULTS:T068",
+    "score": 1
+   }
+  ],
+  "dense": [
+   {
+    "id": "ctx:specs/001-n8n-parity/qc/RESULTS:T068",
+    "score": 0.723
+   },
+   {
+    "id": "ctx:.scratch/n8n-parity/issues/09-retry-on-fail:issue-09",
+    "score": 0.5973
+   },
+   {
+    "id": "code:src_ctc_runner_engine_exit_fails",
+    "score": 0.5921
+   },
+   {
+    "id": "doc:scratch_n8n_parity_issues_09_retry_on_fail_09_retry_on_fail",
+    "score": 0.59
+   },
+   {
+    "id": "doc:scratch_n8n_parity_issues_09_retry_on_fail",
+    "score": 0.5889
+   },
+   {
+    "id": "code:tests_test_retry_on_fail",
+    "score": 0.5772
+   },
+   {
+    "id": "doc:scratch_n8n_parity_issues_09_retry_on_fail_comments",
+    "score": 0.5653
+   },
+   {
+    "id": "ctx:specs/001-n8n-parity/tasks:T059",
+    "score": 0.5636
+   },
+   {
+    "id": "doc:scratch_n8n_parity_compare_errors_retry_and_recovery",
+    "score": 0.5613
+   },
+   {
+    "id": "doc:specs_001_n8n_parity_tasks_phase_9_user_story_7_retry_flaky_idempotent_shell_steps_automatically_priority_p2",
+    "score": 0.5258
+   }
+  ],
+  "walk": [
+   {
+    "id": "code:tests_test_retry_on_fail",
+    "label": "test_retry_on_fail.py",
+    "type": "file",
+    "file": "tests/test_retry_on_fail.py",
+    "line": 1,
+    "score": 1,
+    "hop": 0
+   },
+   {
+    "id": "ctx:.scratch/n8n-parity/issues/09-retry-on-fail:issue-09",
+    "label": "retry-on-fail",
+    "type": "task",
+    "file": ".scratch/n8n-parity/issues/09-retry-on-fail.md",
+    "line": 1,
+    "score": 1,
+    "hop": 0
+   },
+   {
+    "id": "ctx:specs/001-n8n-parity/qc/RESULTS:T068",
+    "label": "US7 retry-on-fail",
+    "type": "task",
+    "file": "specs/001-n8n-parity/qc/RESULTS.md",
+    "line": 10,
+    "score": 1,
+    "hop": 0
+   },
+   {
+    "id": "code:src_ctc_runner_engine_exit_fails",
+    "label": "_exit_fails()",
+    "type": "function",
+    "file": "src/ctc/runner/engine.py",
+    "line": 387,
+    "score": 0.5921,
+    "hop": 0
+   },
+   {
+    "id": "doc:scratch_n8n_parity_issues_09_retry_on_fail_09_retry_on_fail",
+    "label": "09 — retry-on-fail",
+    "type": "heading",
+    "file": ".scratch/n8n-parity/issues/09-retry-on-fail.md",
+    "line": 1,
+    "score": 0.59,
+    "hop": 0
+   },
+   {
+    "id": "doc:scratch_n8n_parity_issues_09_retry_on_fail",
+    "label": "09-retry-on-fail.md",
+    "type": "page",
+    "file": ".scratch/n8n-parity/issues/09-retry-on-fail.md",
+    "line": 1,
+    "score": 0.5889,
+    "hop": 0
+   },
+   {
+    "id": "doc:scratch_n8n_parity_issues_09_retry_on_fail_comments",
+    "label": "Comments",
+    "type": "heading",
+    "file": ".scratch/n8n-parity/issues/09-retry-on-fail.md",
+    "line": 23,
+    "score": 0.5653,
+    "hop": 0
+   },
+   {
+    "id": "ctx:specs/001-n8n-parity/tasks:T059",
+    "label": "Create tests/test_retry_on_fail.py (new; docstring: US7 / ticket 09, FR-003, FR-013). Pure graph cases (no DB fixture): validate rejects (1) `retry: {max_tries: 3}` on an agent node (message says agents never auto-retry), (2) `retry` on a shell without `id",
+    "type": "task",
+    "file": "specs/001-n8n-parity/tasks.md",
+    "line": 237,
+    "score": 0.5636,
+    "hop": 0
+   },
+   {
+    "id": "doc:scratch_n8n_parity_compare_errors_retry_and_recovery",
+    "label": "Errors, retry and recovery",
+    "type": "heading",
+    "file": ".scratch/n8n-parity/compare.md",
+    "line": 199,
+    "score": 0.5613,
+    "hop": 0
+   },
+   {
+    "id": "doc:specs_001_n8n_parity_tasks_phase_9_user_story_7_retry_flaky_idempotent_shell_steps_automatically_priority_p2",
+    "label": "Phase 9: User Story 7 - Retry flaky idempotent shell steps automatically (Priority: P2)",
+    "type": "heading",
+    "file": "specs/001-n8n-parity/tasks.md",
+    "line": 225,
+    "score": 0.5258,
+    "hop": 0
+   }
+  ]
+ },
+ "for each": {
+  "lexical": [
+   {
+    "id": "code:tests_test_for_each",
+    "score": 1
+   },
+   {
+    "id": "ctx:.scratch/n8n-parity/issues/13-for-each:issue-13",
+    "score": 1
+   },
+   {
+    "id": "ctx:specs/001-n8n-parity/qc/RESULTS:D2",
+    "score": 1
+   }
+  ],
+  "dense": [
+   {
+    "id": "ctx:specs/001-n8n-parity/spec:US14",
+    "score": 0.5294
+   },
+   {
+    "id": "code:tests_test_for_each",
+    "score": 0.4612
+   },
+   {
+    "id": "ctx:specs/001-n8n-parity/tasks:T132",
+    "score": 0.4521
+   },
+   {
+    "id": "doc:specs_001_n8n_parity_tasks_phase_16_user_story_14_for_each_over_a_list_priority_p3",
+    "score": 0.4403
+   },
+   {
+    "id": "ctx:specs/001-n8n-parity/qc/RESULTS:T133",
+    "score": 0.4401
+   },
+   {
+    "id": "code:src_ctc_runner_graph_foreach_step",
+    "score": 0.4355
+   },
+   {
+    "id": "code:tests_test_graph_if_switch_test_each_op",
+    "score": 0.4217
+   },
+   {
+    "id": "code:tests_test_for_each_wf",
+    "score": 0.4195
+   },
+   {
+    "id": "ctx:specs/001-n8n-parity/spec:FR-032",
+    "score": 0.4157
+   },
+   {
+    "id": "ctx:.scratch/n8n-parity/issues/13-for-each:issue-13",
+    "score": 0.4144
+   }
+  ],
+  "walk": [
+   {
+    "id": "code:tests_test_for_each",
+    "label": "test_for_each.py",
+    "type": "file",
+    "file": "tests/test_for_each.py",
+    "line": 1,
+    "score": 1,
+    "hop": 0
+   },
+   {
+    "id": "ctx:.scratch/n8n-parity/issues/13-for-each:issue-13",
+    "label": "for-each",
+    "type": "task",
+    "file": ".scratch/n8n-parity/issues/13-for-each.md",
+    "line": 1,
+    "score": 1,
+    "hop": 0
+   },
+   {
+    "id": "ctx:specs/001-n8n-parity/qc/RESULTS:D2",
+    "label": "(medium, Runs.tsx):** a node whose last visit is a trailing `skipped` shows \"skipped\" on the run canvas although earlier visits were `done`. Seen on a for-each body (greet ×3 done + a 4th skipped) and on a fixer loop.",
+    "type": "decision",
+    "file": "specs/001-n8n-parity/qc/RESULTS.md",
+    "line": 23,
+    "score": 1,
+    "hop": 0
+   },
+   {
+    "id": "ctx:specs/001-n8n-parity/spec:US14",
+    "label": "For-each over a list",
+    "type": "requirement",
+    "file": "specs/001-n8n-parity/spec.md",
+    "line": 257,
+    "score": 0.5294,
+    "hop": 0
+   },
+   {
+    "id": "ctx:specs/001-n8n-parity/tasks:T132",
+    "label": "Create .claude/ctc-workflows/foreach-demo.yaml, a shell-only example that must pass validate() with no warnings. Keys: name foreach-demo; description 'For-each demo: list three names, greet each, then report'. Nodes with pos: start (trigger); names (shell",
+    "type": "task",
+    "file": "specs/001-n8n-parity/tasks.md",
+    "line": 453,
+    "score": 0.4521,
+    "hop": 0
+   },
+   {
+    "id": "doc:specs_001_n8n_parity_tasks_phase_16_user_story_14_for_each_over_a_list_priority_p3",
+    "label": "Phase 16: User Story 14 - For-each over a list (Priority: P3)",
+    "type": "heading",
+    "file": "specs/001-n8n-parity/tasks.md",
+    "line": 430,
+    "score": 0.4403,
+    "hop": 0
+   },
+   {
+    "id": "ctx:specs/001-n8n-parity/qc/RESULTS:T133",
+    "label": "US14 for-each",
+    "type": "task",
+    "file": "specs/001-n8n-parity/qc/RESULTS.md",
+    "line": 15,
+    "score": 0.4401,
+    "hop": 0
+   },
+   {
+    "id": "code:src_ctc_runner_graph_foreach_step",
+    "label": "foreach_step()",
+    "type": "function",
+    "file": "src/ctc/runner/graph.py",
+    "line": 476,
+    "score": 0.4355,
+    "hop": 0
+   },
+   {
+    "id": "code:tests_test_graph_if_switch_test_each_op",
+    "label": "test_each_op()",
+    "type": "function",
+    "file": "tests/test_graph_if_switch.py",
+    "line": 47,
+    "score": 0.4217,
+    "hop": 0
+   },
+   {
+    "id": "code:tests_test_for_each_wf",
+    "label": "wf()",
+    "type": "function",
+    "file": "tests/test_for_each.py",
+    "line": 14,
+    "score": 0.4195,
+    "hop": 0
+   }
+  ]
+ }
+}

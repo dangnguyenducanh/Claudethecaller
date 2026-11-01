@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import re
 import time
 from pathlib import Path
 
@@ -18,10 +19,13 @@ import httpx
 import numpy as np
 import orjson
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
-from fastapi.responses import PlainTextResponse, Response
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel
 
+from ctc.config import cfg
 from ctc.decision.bundle import Bundle, decide, followed, stage_rows, suggestion_line
+from ctc.graph import core, push
+from ctc.graph.extract import SOURCE, prose
 from ctc.ingestion.scanner import project_id
 from ctc.memory.longterm import recall
 from ctc.memory.session import blend, project_vector, session_vector
@@ -55,7 +59,8 @@ def _scoped(st: State, user_id: str, key: str) -> str:
 async def _embed(st: State, texts: list[str]) -> list[np.ndarray]:
     """Query embeddings through emb:{model8}:{sha256(text)[:16]}; one TEI call for the misses."""
     m8 = hashlib.sha256((st.embedder.model_version or st.cfg["embed_model"]).encode()).hexdigest()[:8]
-    keys = [f"emb:{m8}:{hashlib.sha256(t.encode()).hexdigest()[:16]}" for t in texts]
+    ins = st.cfg["embed"]["instruction"]  # the query prefix changes the vector; `coding` keeps the old key shape
+    keys = [f"emb:{m8}{'' if ins == 'coding' else ':' + ins}:{hashlib.sha256(t.encode()).hexdigest()[:16]}" for t in texts]
     vecs = list(await asyncio.gather(*(st.cache.get_vec(k) for k in keys)))
     if miss := [i for i, v in enumerate(vecs) if v is None]:
         for i, v in zip(miss, await st.embedder.embed([texts[i] for i in miss], "query")):
@@ -79,7 +84,7 @@ def router_version(st: State) -> str:
     except OSError:
         gate = 0
     knobs = [st.cfg.get(k) for k in ("k", "depth", "rerank_top", "rrf_k", "abstain_below", "agent_min_rerank", "ranking",
-                                     "memory_in_query", "memory_weight", "blend")]
+                                     "memory_in_query", "memory_weight", "blend", "embed", "gate")]
     return hashlib.md5(f"{st.store.library_version}|{gate}|{knobs}".encode()).hexdigest()
 
 
@@ -123,8 +128,10 @@ async def route(st: State, prompt: str, session_id: str, cwd: str, user_id: str 
 
 
 def _in_run(body: dict) -> bool:
-    """A workflow run's own claude (engine.in_runs: any home's runs dir): no suggestion, rows, or extract jobs (PLAN.md m5)."""
-    return in_runs(str(body.get("cwd") or ""))
+    """A workflow run's own claude (engine.in_runs: any home's runs dir) or the graph extractor's (cwd under
+    graph_extract.dir): no suggestion, rows, or extract / graph jobs (PLAN.md m5, m6 FR-011)."""
+    cwd = str(body.get("cwd") or "")
+    return in_runs(cwd) or f"{cwd}/".startswith(f"{Path(cfg()['graph_extract']['dir']).expanduser()}/")
 
 
 async def _body(request: Request) -> dict:
@@ -148,12 +155,17 @@ async def _prompt(st: State, body: dict, user_id: str) -> str:
         await write(st, "session", {"id": sid, "user_id": user_id, "project_id": pid, "title": prompt[:200], "turns": 1})
         t = time.perf_counter()
         b = await route(st, prompt, sid, cwd, user_id)
+        ms, line = round((time.perf_counter() - t) * 1000, 1), None
+        try:  # m6 FR-022: the graph line; the prompt's vector is an emb: cache hit from route() (same first MAX_Q chars)
+            if g := await core.graph_for(st, cwd, user_id):
+                line = push.prompt_line(g, (await _embed(st, [prompt[:MAX_Q]]))[0], st.cfg) or None
+        except Exception:
+            log.exception("hook/prompt: graph line failed; suggestion only")
         await write(st, "decision", {
             "user_id": user_id, "session_id": sid, "project_id": pid, "ref": b.ref, "prompt": prompt[:MAX_Q],
             "abstained": b.abstained, "confidence": b.confidence, "difficulty": b.difficulty, "model_tier": b.model_tier,
-            "latency_ms": round((time.perf_counter() - t) * 1000, 1), "bundle": b.model_dump(),
-            "stages": [s.model_dump() for s in b.stages]})
-        return suggestion_line(b)
+            "latency_ms": ms, "bundle": b.model_dump(), "stages": [s.model_dump() for s in b.stages], "graph_line": line})
+        return "\n".join(s for s in (suggestion_line(b), line) if s)
     except Exception:
         log.exception("hook/prompt failed; empty suggestion")
         return ""
@@ -174,15 +186,88 @@ async def hook_prompt(request: Request) -> PlainTextResponse:
     return PlainTextResponse(line)
 
 
+PRE_BUDGET_S = 0.04  # curl -m 0.05 (contracts/hooks.md); RAM only, no DB, no embedder
+
+
+async def _note(st: State, body: dict, user_id: str) -> str:
+    tin, cwd = body.get("tool_input"), str(body.get("cwd") or "")
+    path = str((tin if isinstance(tin, dict) else {}).get("file_path") or "")
+    if not (path and cwd) or _in_run(body) or not (g := await core.graph_for(st, cwd, user_id)):
+        return ""
+    return push.file_note(g, Path(path).relative_to(cwd).as_posix() if Path(path).is_relative_to(cwd) else path, st.cfg)
+
+
+@router.post("/v1/hook/pre")
+async def hook_pre(request: Request) -> Response:
+    """PreToolUse on Read|Edit|Write|MultiEdit (m6 FR-024): the file's tasks/requirements/decision as additional context.
+    Never a permissionDecision; nothing to say or any error = empty 200."""
+    try:
+        if note := await asyncio.wait_for(_note(_st(request), await _body(request), _user(request)), PRE_BUDGET_S):
+            return JSONResponse({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": note}})
+    except TimeoutError:
+        log.info("hook/pre over its %.0f ms budget: no note", PRE_BUDGET_S * 1000)
+    except Exception:
+        log.exception("hook/pre failed; no note")
+    return Response(status_code=200)
+
+
+EDIT_TOOLS = ("Write", "Edit", "MultiEdit")
+TICK = re.compile(r"^\s*- \[([ xX])\] (T\d{3})\b", re.MULTILINE)
+# one queued job per kind and file is enough: it parses / extracts the file as it is when it runs
+QUEUED_SQL = ("select 1 from jobs where user_id = %s and kind = %s and status = 'queued' and payload->>'cwd' = %s"
+              " and payload->'files' ? %s limit 1")
+
+
+def _ticks(tool: str, tin: dict) -> list[str]:
+    """T### boxes an edit ticks: `- [x]` in a new_string where its old_string had `- [ ]` (a Write compares against nothing)."""
+    edits = tin.get("edits") if tool == "MultiEdit" else [tin] if tool == "Edit" else []
+    out: list[str] = []
+    for e in edits if isinstance(edits, list) else []:
+        e = e if isinstance(e, dict) else {}
+        was = {t for box, t in TICK.findall(str(e.get("old_string") or "")) if box == " "}
+        out += [t for box, t in TICK.findall(str(e.get("new_string") or "")) if box != " " and t in was and t not in out]
+    return out
+
+
+async def _graph_jobs(st: State, user_id: str, cwd: str, rel: str, tick: dict | None) -> None:
+    """After the 204 (m6 FR-012, FR-020): a saved context source queues graph_build + graph_extract for that file, unless
+    one is already queued; ticked tasks.md boxes queue a graph_build that confirms the session's edited files. Only in a
+    project that has a graph: the hook runs in every repo, and `ctc graph build` there is the opt-in (spec: this repo only)."""
+    try:
+        if not await st.store.fetchval(core.VERSION_SQL, (user_id, project_id(cwd))):
+            return
+        if SOURCE.fullmatch(rel):
+            # extract first: the worker runs jobs in order, so the build embeds and links the extractor's new nodes
+            for kind in ("graph_extract", "graph_build") if prose(rel) else ("graph_build",):
+                if await st.store.fetchval(QUEUED_SQL, (user_id, kind, cwd, rel)) is None:
+                    await submit(st, kind, {"cwd": cwd, "files": [rel]}, user_id)
+        if tick:
+            await submit(st, "graph_build", {"cwd": cwd, "tick": tick}, user_id)
+    except Exception:
+        log.exception("hook/tool: graph jobs failed")
+
+
 @router.post("/v1/hook/tool", status_code=204)
-async def hook_tool(request: Request) -> Response:
+async def hook_tool(request: Request, tasks: BackgroundTasks) -> Response:
     try:
         st, user_id, body = _st(request), _user(request), await _body(request)
         sid, tool, tin = str(body.get("session_id") or ""), str(body.get("tool_name") or ""), body.get("tool_input")
-        tin = tin if isinstance(tin, dict) else {}
+        tin, cwd = tin if isinstance(tin, dict) else {}, str(body.get("cwd") or "")
         if sid and tool and not _in_run(body):
             name = tin.get("skill") or tin.get("subagent_type")
-            await write(st, "event", {"session_id": sid, "type": "tool", "payload": {"tool": tool, **({"name": name} if name else {})}})
+            rel, inside = str(tin.get("file_path") or "") if tool in EDIT_TOOLS else "", False
+            if rel and cwd:  # resolved, not lexical: `specs/../../x.md` or a symlink out of the repo is not inside it
+                p, root = (Path(cwd) / rel).resolve(), Path(cwd).resolve()
+                if inside := p.is_relative_to(root):
+                    rel = p.relative_to(root).as_posix()
+            await write(st, "event", {"session_id": sid, "type": "tool", "payload": {
+                "tool": tool, **({"name": name} if name else {}), **({"file_path": rel} if rel else {})}})
+            # shared mode: cwd names a path on the client's disk, which the jobs cannot read
+            if inside and st.cfg["mode"] == "local":
+                ticks = _ticks(tool, tin) if rel.endswith("tasks.md") else []
+                if SOURCE.fullmatch(rel) or ticks:
+                    tasks.add_task(_graph_jobs, st, user_id, cwd, rel,
+                                   {"session_id": sid, "file": rel, "tasks": ticks} if ticks else None)
             last = await st.cache.get_json(f"sess:{_scoped(st, user_id, sid)}:last")
             if last and followed(last, tool, tin):
                 await write(st, "followed", {"session_id": sid, "ref": last["ref"]})

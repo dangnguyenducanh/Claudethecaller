@@ -1,0 +1,47 @@
+## 8. Tasks
+
+Phases run in order; `[P]` = can run in parallel within the phase. Each task ends with its named tests green.
+
+| Phase | Task | Done when |
+|---|---|---|
+| 0 Safety net (Python still serves) | T0.1 record fixtures: `/v1/search` top-5 for 200 prompts, 30 graph answers, `/api` reply shapes | fixtures saved |
+| | T0.2 latency + skillret baselines on the Python daemon | baseline saved |
+| | T0.3 archive `decisions` + `events` | jsonl.gz written |
+| 1 System | T1.1 pnpm workspace, TS strict, Vitest, ESLint SQL ban, Zod config | CI green on empty packages |
+| | T1.2 migrations + `ctc migrate --from-python` | row counts match on a copy |
+| | T1.3 `[P]` repositories with `ctx` | `tenancy` |
+| | T1.4 `[P]` cache, epochs, `ctc:inval`, 7 queues, `dlq-retry`, systemd units | unit tests |
+| 2 F1 graph | T2.1 ids + web-tree-sitter extract + markdown | `graph.ids` |
+| | T2.2 resolve, incremental rebuild, shrink guard, `graph` queue | `graph.resolve`, `graph.incremental` |
+| | T2.3 context parsers, doc extract, capability nodes | parser fixtures |
+| | T2.4 query, explain, path, affected, neighbors; MCP + `/api/graph` | `graph.query` |
+| 3 F2 library `[P]` with 4 | T3.1 scanner → versions, labels, manifest, blobs; `library` queue | `library.version` |
+| | T3.2 MCP pair, versions/labels/restore/override API, blob cleanup | `library.mcp`, `library.override` |
+| | T3.3 SKILLRET dense + rerank channel | `suggest.skills` |
+| 4 F3 memory `[P]` with 3 | T4.1 spool script + drain + nudge | `memory.spool` |
+| | T4.2 extract (bands), summarize, retry-once, content hash | `memory.idempotent`, `memory.bands` |
+| | T4.3 recall + `/v1/hook/start` + MCP memory tools + import + distill | `memory.context`, `memory.recall` |
+| 5 F1 hooks | T5.1 `/v1/hook/prompt` + `/v1/suggest` (three seed channels, walk, rank, render, `sug:` cache) | `suggest.latency`, `suggest.context` |
+| | T5.2 `/v1/hook/pre` note + hint with caps | `failopen` |
+| 6 F4 workflows | T6.1 transition table, attempts, stages, idempotency keys | `runner.lifecycle`, `runner.idempotent` |
+| | T6.2 worktree recipe, setup hook, agent registry, stream, report token | `runner.crash` |
+| | T6.3 gates with options, fanout + join, handoff, cleanup | `runner.fanout`, runner.md |
+| 7 Switch over | T7.1 point [`.claude/settings.json`](../../.claude/settings.json) hooks at the new routes and spool script; stop the Python daemon | all §7 gates |
+| | T7.2 delete the Python service code (keep [`evaluation`](../../evaluation/)); retire [adoption.md](../../.claude/metric/eval/adoption.md) | ci.md green |
+
+## 9. Decisions
+
+Defaults in bold are used everywhere above.
+
+| # | Decision | Default | Alternative |
+|---|---|---|---|
+| D1 | analytics store | **no ClickHouse** | bring it back only if raw tool-use capture is wanted |
+| D2 | SQL layer | **Kysely on `pg`** | Prisma 6 (codegen, own migration engine) |
+| D3 | memory extraction | **local llama-server** | Haiku observer per tool use (paid call each time) |
+| D4 | model output format | **llama.cpp JSON grammar** + retry once | claude-mem's XML parser |
+| D5 | prompt line content | **task → file:symbol · skill · decision**, ≤ 400 chars | add one memory |
+| D6 | workflow agents | **`claude` and `codex`** | more CLIs on demand |
+| D7 | fan-out | **3 at once, depth 1** | — |
+| D8 | worktree retention | **7 days, branch kept forever** | — |
+| D9 | local supervisor | **`systemd --user`** | pm2, docker |
+| D10 | skill library in 007 | **yes, as F2** (also versions workflows for F4) | defer, keep today's flat capabilities |

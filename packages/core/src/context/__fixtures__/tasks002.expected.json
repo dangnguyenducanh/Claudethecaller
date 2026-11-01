@@ -1,0 +1,74 @@
+{
+ "path": "specs/002-context-coding-graph/tasks.md",
+ "spec": {
+  "label": "Context + coding graph (m6)",
+  "line": 5,
+  "lines": [
+   1,
+   40
+  ]
+ },
+ "nodes": [
+  {
+   "id": "T001",
+   "type": "task",
+   "line": 29,
+   "done": false,
+   "parallel": false,
+   "labelStart": "Verify the scratch DB and embedder"
+  },
+  {
+   "id": "T002",
+   "type": "task",
+   "line": 30,
+   "done": false,
+   "parallel": false,
+   "labelStart": "Baseline on `m6-graph`"
+  },
+  {
+   "id": "T003",
+   "type": "task",
+   "line": 31,
+   "done": false,
+   "parallel": false,
+   "labelStart": "Refresh graphify for HEAD"
+  },
+  {
+   "id": "T004",
+   "type": "task",
+   "line": 40,
+   "done": false,
+   "parallel": true,
+   "labelStart": "Create `tests/conftest.py` (new)"
+  }
+ ],
+ "partOf": [
+  "T001",
+  "T002",
+  "T003",
+  "T004"
+ ],
+ "refs": [
+  [
+   "T002",
+   "implements",
+   "path",
+   "scripts/check.sh",
+   30
+  ],
+  [
+   "T003",
+   "implements",
+   "path",
+   "graphify-out/graph.json",
+   31
+  ],
+  [
+   "T004",
+   "implements",
+   "path",
+   "tests/conftest.py",
+   40
+  ]
+ ]
+}

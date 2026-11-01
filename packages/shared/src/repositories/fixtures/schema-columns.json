@@ -1,0 +1,1244 @@
+[
+ {
+  "table_name": "api_keys",
+  "column_name": "id",
+  "data_type": "bigint",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "api_keys",
+  "column_name": "key_hash",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "api_keys",
+  "column_name": "user_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "api_keys",
+  "column_name": "name",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "api_keys",
+  "column_name": "created_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "api_keys",
+  "column_name": "revoked_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "cap_blobs",
+  "column_name": "user_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "cap_blobs",
+  "column_name": "hash",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "cap_blobs",
+  "column_name": "content",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "cap_blobs",
+  "column_name": "size",
+  "data_type": "integer",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "cap_files",
+  "column_name": "version_id",
+  "data_type": "uuid",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "cap_files",
+  "column_name": "path",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "cap_files",
+  "column_name": "blob_hash",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "cap_vectors",
+  "column_name": "cap_id",
+  "data_type": "uuid",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "cap_vectors",
+  "column_name": "text_hash",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "cap_vectors",
+  "column_name": "embedding",
+  "data_type": "USER-DEFINED",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "cap_vectors",
+  "column_name": "model",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "capabilities",
+  "column_name": "id",
+  "data_type": "uuid",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "capabilities",
+  "column_name": "user_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "capabilities",
+  "column_name": "namespace",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "capabilities",
+  "column_name": "kind",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "capabilities",
+  "column_name": "name",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "capabilities",
+  "column_name": "root_path",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "capabilities",
+  "column_name": "served_version",
+  "data_type": "integer",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "capabilities",
+  "column_name": "removed_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "capabilities",
+  "column_name": "enrichment",
+  "data_type": "jsonb",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "capability_versions",
+  "column_name": "id",
+  "data_type": "uuid",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "capability_versions",
+  "column_name": "cap_id",
+  "data_type": "uuid",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "capability_versions",
+  "column_name": "version",
+  "data_type": "integer",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "capability_versions",
+  "column_name": "body_hash",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "capability_versions",
+  "column_name": "description",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "capability_versions",
+  "column_name": "frontmatter",
+  "data_type": "jsonb",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "capability_versions",
+  "column_name": "labels",
+  "data_type": "ARRAY",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "capability_versions",
+  "column_name": "commit_message",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "capability_versions",
+  "column_name": "created_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "dedup_review",
+  "column_name": "id",
+  "data_type": "bigint",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "dedup_review",
+  "column_name": "user_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "dedup_review",
+  "column_name": "a",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "dedup_review",
+  "column_name": "b",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "dedup_review",
+  "column_name": "similarity",
+  "data_type": "real",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "dedup_review",
+  "column_name": "status",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "dedup_review",
+  "column_name": "at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_edges",
+  "column_name": "user_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_edges",
+  "column_name": "project_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_edges",
+  "column_name": "src",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_edges",
+  "column_name": "dst",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_edges",
+  "column_name": "relation",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_edges",
+  "column_name": "confidence",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_edges",
+  "column_name": "score",
+  "data_type": "real",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_edges",
+  "column_name": "origin",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_edges",
+  "column_name": "source_location",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "graph_nodes",
+  "column_name": "user_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_nodes",
+  "column_name": "project_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_nodes",
+  "column_name": "id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_nodes",
+  "column_name": "kind",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_nodes",
+  "column_name": "type",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_nodes",
+  "column_name": "label",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_nodes",
+  "column_name": "source_file",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "graph_nodes",
+  "column_name": "source_location",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "graph_nodes",
+  "column_name": "origin",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_nodes",
+  "column_name": "content_hash",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_nodes",
+  "column_name": "embedding",
+  "data_type": "USER-DEFINED",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "graph_nodes",
+  "column_name": "meta",
+  "data_type": "jsonb",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_nodes",
+  "column_name": "text",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_nodes",
+  "column_name": "updated_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_sources",
+  "column_name": "user_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_sources",
+  "column_name": "project_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_sources",
+  "column_name": "file",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_sources",
+  "column_name": "content_hash",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_sources",
+  "column_name": "extractor_version",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "graph_sources",
+  "column_name": "built_at_commit",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "history_files",
+  "column_name": "user_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "history_files",
+  "column_name": "path",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "history_files",
+  "column_name": "size",
+  "data_type": "bigint",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "history_files",
+  "column_name": "mtime",
+  "data_type": "bigint",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "history_files",
+  "column_name": "status",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "history_files",
+  "column_name": "session_id",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "history_files",
+  "column_name": "rows",
+  "data_type": "integer",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "history_files",
+  "column_name": "error",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "history_files",
+  "column_name": "imported_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "idempotency_keys",
+  "column_name": "user_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "idempotency_keys",
+  "column_name": "key",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "idempotency_keys",
+  "column_name": "route",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "idempotency_keys",
+  "column_name": "payload_hash",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "idempotency_keys",
+  "column_name": "response",
+  "data_type": "jsonb",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "idempotency_keys",
+  "column_name": "created_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "jobs",
+  "column_name": "id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "jobs",
+  "column_name": "user_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "jobs",
+  "column_name": "queue",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "jobs",
+  "column_name": "kind",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "jobs",
+  "column_name": "status",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "jobs",
+  "column_name": "progress",
+  "data_type": "real",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "jobs",
+  "column_name": "result",
+  "data_type": "jsonb",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "jobs",
+  "column_name": "error",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "jobs",
+  "column_name": "created_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "jobs",
+  "column_name": "payload",
+  "data_type": "jsonb",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "jobs",
+  "column_name": "attempts",
+  "data_type": "integer",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "jobs",
+  "column_name": "updated_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "memories",
+  "column_name": "id",
+  "data_type": "uuid",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "memories",
+  "column_name": "user_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "memories",
+  "column_name": "scope",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "memories",
+  "column_name": "project_id",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "memories",
+  "column_name": "kind",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "memories",
+  "column_name": "text",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "memories",
+  "column_name": "hash",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "memories",
+  "column_name": "source",
+  "data_type": "jsonb",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "memories",
+  "column_name": "superseded_by",
+  "data_type": "uuid",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "memories",
+  "column_name": "confidence",
+  "data_type": "real",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "memories",
+  "column_name": "pinned",
+  "data_type": "boolean",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "memories",
+  "column_name": "reinforcement_dates",
+  "data_type": "ARRAY",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "memories",
+  "column_name": "created_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "memories",
+  "column_name": "updated_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "memories",
+  "column_name": "last_used_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "memories",
+  "column_name": "use_count",
+  "data_type": "integer",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "memories",
+  "column_name": "deleted_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "memories",
+  "column_name": "embedding",
+  "data_type": "USER-DEFINED",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "memories",
+  "column_name": "tsv",
+  "data_type": "tsvector",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "overrides",
+  "column_name": "user_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "overrides",
+  "column_name": "project_id",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "overrides",
+  "column_name": "cap_id",
+  "data_type": "uuid",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "overrides",
+  "column_name": "action",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "overrides",
+  "column_name": "label",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "overrides",
+  "column_name": "version",
+  "data_type": "integer",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "projects",
+  "column_name": "user_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "projects",
+  "column_name": "id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "projects",
+  "column_name": "root",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "projects",
+  "column_name": "profile_hash",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "projects",
+  "column_name": "name",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "projects",
+  "column_name": "embedding",
+  "data_type": "USER-DEFINED",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "projects",
+  "column_name": "created_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "projects",
+  "column_name": "last_active",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "projects",
+  "column_name": "graph_epoch",
+  "data_type": "bigint",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "projects",
+  "column_name": "mem_epoch",
+  "data_type": "bigint",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "session_summaries",
+  "column_name": "session_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "session_summaries",
+  "column_name": "user_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "session_summaries",
+  "column_name": "project_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "session_summaries",
+  "column_name": "request",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "session_summaries",
+  "column_name": "investigated",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "session_summaries",
+  "column_name": "learned",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "session_summaries",
+  "column_name": "completed",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "session_summaries",
+  "column_name": "next_steps",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "session_summaries",
+  "column_name": "notes",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "session_summaries",
+  "column_name": "content_hash",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "session_summaries",
+  "column_name": "created_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "sessions",
+  "column_name": "id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "sessions",
+  "column_name": "user_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "sessions",
+  "column_name": "project_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "sessions",
+  "column_name": "started_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "sessions",
+  "column_name": "ended_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "sessions",
+  "column_name": "model",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "sessions",
+  "column_name": "tokens",
+  "data_type": "bigint",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "sessions",
+  "column_name": "transcript_path",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "sessions",
+  "column_name": "title",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "sessions",
+  "column_name": "source",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "sessions",
+  "column_name": "status",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "sessions",
+  "column_name": "git_branch",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "sessions",
+  "column_name": "processed_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "sessions",
+  "column_name": "extracted_turns",
+  "data_type": "integer",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_runs",
+  "column_name": "id",
+  "data_type": "bigint",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_runs",
+  "column_name": "user_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_runs",
+  "column_name": "owner",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_runs",
+  "column_name": "workflow_cap_id",
+  "data_type": "uuid",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_runs",
+  "column_name": "workflow_version",
+  "data_type": "integer",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_runs",
+  "column_name": "status",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_runs",
+  "column_name": "state",
+  "data_type": "jsonb",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_runs",
+  "column_name": "trigger",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_runs",
+  "column_name": "inputs",
+  "data_type": "jsonb",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_runs",
+  "column_name": "repo",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_runs",
+  "column_name": "base_branch",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_runs",
+  "column_name": "created_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_runs",
+  "column_name": "started_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_runs",
+  "column_name": "ended_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_runs",
+  "column_name": "legacy",
+  "data_type": "jsonb",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_schedules",
+  "column_name": "user_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_schedules",
+  "column_name": "owner",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_schedules",
+  "column_name": "workflow",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_schedules",
+  "column_name": "cron",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_schedules",
+  "column_name": "input",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_schedules",
+  "column_name": "enabled",
+  "data_type": "boolean",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_schedules",
+  "column_name": "last_fired_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "id",
+  "data_type": "bigint",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "run_id",
+  "data_type": "bigint",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "node_id",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "visit",
+  "data_type": "integer",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "attempt",
+  "data_type": "integer",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "retry_of_step_id",
+  "data_type": "bigint",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "failure_count",
+  "data_type": "integer",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "parent_step_id",
+  "data_type": "bigint",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "status",
+  "data_type": "text",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "stage",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "liveness",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "pid",
+  "data_type": "integer",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "pid_started_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "token_hash",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "worktree",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "branch",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "options",
+  "data_type": "jsonb",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "resolution",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "prompt_outcome",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "output",
+  "data_type": "jsonb",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "usage",
+  "data_type": "jsonb",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "cost_usd",
+  "data_type": "real",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "error",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "log_path",
+  "data_type": "text",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "started_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "NO"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "ended_at",
+  "data_type": "timestamp with time zone",
+  "is_nullable": "YES"
+ },
+ {
+  "table_name": "wf_steps",
+  "column_name": "legacy",
+  "data_type": "jsonb",
+  "is_nullable": "NO"
+ }
+]

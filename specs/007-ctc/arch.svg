@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="880" viewBox="0 0 1180 880"><rect width="100%" height="100%" fill="#FFFFFF"/>
+<text x="16" y="26" font-size="16" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">007 ctc architecture (dashed = not built): TypeScript web + worker, Postgres + pgvector, Redis</text>
+<rect x="20" y="50" width="210" height="500" rx="10" fill="none" stroke="#5F5E5A" stroke-width="1"/>
+<text x="30" y="68" font-size="12" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Clients</text>
+<rect x="35" y="80" width="180" height="70" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text x="125.0" y="101.0" font-size="13" fill="#2C2C2A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Claude Code hooks</text>
+<text x="125.0" y="117.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">prompt, pre: curl (reply)</text>
+<text x="125.0" y="131.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">tool, start, stop</text>
+<rect x="35" y="175" width="180" height="50" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="125.0" y="193.0" font-size="13" fill="#2C2C2A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Hook spool</text>
+<text x="125.0" y="209.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">~/.claudethecaller/spool</text>
+<rect x="35" y="250" width="180" height="50" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text x="125.0" y="268.0" font-size="13" fill="#2C2C2A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">MCP client</text>
+<text x="125.0" y="284.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">graph_*, skills, memory, run</text>
+<rect x="35" y="325" width="180" height="50" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text x="125.0" y="343.0" font-size="13" fill="#2C2C2A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Dashboard</text>
+<text x="125.0" y="359.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">React + Vite</text>
+<rect x="35" y="400" width="180" height="50" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="125.0" y="418.0" font-size="13" fill="#2C2C2A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">ctc CLI</text>
+<text x="125.0" y="434.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">TS (commander)</text>
+<rect x="35" y="475" width="180" height="50" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text x="125.0" y="493.0" font-size="13" fill="#2C2C2A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">evaluation/ (Python)</text>
+<text x="125.0" y="509.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">offline evals only</text>
+<rect x="260" y="50" width="300" height="380" rx="10" fill="none" stroke="#0F6E56" stroke-width="1" stroke-dasharray="6 4"/>
+<text x="270" y="68" font-size="12" fill="#04342C" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">apps/web: Fastify (socket + :18310)</text>
+<rect x="275" y="80" width="270" height="60" rx="6" fill="#FBEAF0" stroke="#993556" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="410.0" y="103.0" font-size="13" fill="#4B1528" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">/v1/hook/prompt + pre</text>
+<text x="410.0" y="119.0" font-size="11" fill="#993556" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">graph suggest, file note (hot)</text>
+<rect x="275" y="155" width="270" height="50" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="410.0" y="173.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">/v1/hook/start</text>
+<text x="410.0" y="189.0" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">memory context, 10,000 chars</text>
+<rect x="275" y="220" width="270" height="50" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="410.0" y="238.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">spool drain</text>
+<text x="410.0" y="254.0" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">files -&gt; BullMQ add</text>
+<rect x="275" y="285" width="270" height="50" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="410.0" y="303.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">/api + /mcp</text>
+<text x="410.0" y="319.0" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Zod schemas shared</text>
+<rect x="275" y="350" width="270" height="60" rx="6" fill="#FBEAF0" stroke="#993556" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="410.0" y="373.0" font-size="13" fill="#4B1528" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">RAM graph + skill vectors</text>
+<text x="410.0" y="389.0" font-size="11" fill="#993556" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">reload on ctc:inval</text>
+<rect x="600" y="50" width="270" height="380" rx="10" fill="none" stroke="#0F6E56" stroke-width="1" stroke-dasharray="6 4"/>
+<text x="610" y="68" font-size="12" fill="#04342C" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">apps/worker: BullMQ queues</text>
+<rect x="615" y="80" width="240" height="48" rx="6" fill="#FBEAF0" stroke="#993556" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="735.0" y="97.0" font-size="13" fill="#4B1528" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">graph</text>
+<text x="735.0" y="113.0" font-size="11" fill="#993556" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">tree-sitter, md, resolve</text>
+<rect x="615" y="136" width="240" height="48" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="735.0" y="153.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">library</text>
+<text x="735.0" y="169.0" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">scan, version, embed, dedup</text>
+<rect x="615" y="192" width="240" height="48" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="735.0" y="209.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">llm (concurrency 1)</text>
+<text x="735.0" y="225.0" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">enrich, memory extract + summary</text>
+<rect x="615" y="248" width="240" height="48" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="735.0" y="265.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">memory</text>
+<text x="735.0" y="281.0" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">import files, distill history</text>
+<rect x="615" y="304" width="240" height="48" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="735.0" y="321.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">runner</text>
+<text x="735.0" y="337.0" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">attempts, worktrees, fanout</text>
+<rect x="615" y="360" width="240" height="48" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="735.0" y="377.0" font-size="13" fill="#2C2C2A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">cleanup + dlq-retry</text>
+<text x="735.0" y="393.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">worktree rm, re-run failed</text>
+<rect x="260" y="450" width="610" height="100" rx="10" fill="none" stroke="#534AB7" stroke-width="1" stroke-dasharray="6 4"/>
+<text x="270" y="468" font-size="12" fill="#26215C" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">packages/shared + packages/core</text>
+<rect x="275" y="478" width="185" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="367.5" y="494.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">repositories</text>
+<text x="367.5" y="510.0" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">only module with SQL;</text>
+<text x="367.5" y="524.0" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">ctx.userId required</text>
+<rect x="470" y="478" width="185" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="562.5" y="494.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">core (pure)</text>
+<text x="562.5" y="510.0" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">graph query, RRF,</text>
+<text x="562.5" y="524.0" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">fit-by-measuring</text>
+<rect x="665" y="478" width="190" height="60" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="760.0" y="494.0" font-size="13" fill="#26215C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">schemas + env</text>
+<text x="760.0" y="510.0" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Zod: routes, queues,</text>
+<text x="760.0" y="524.0" font-size="11" fill="#534AB7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">MCP tools</text>
+<rect x="910" y="50" width="250" height="500" rx="10" fill="none" stroke="#5F5E5A" stroke-width="1"/>
+<text x="920" y="68" font-size="12" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Stores</text>
+<rect x="925" y="80" width="220" height="70" rx="6" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+<text x="1035.0" y="101.0" font-size="13" fill="#042C53" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Redis 8</text>
+<text x="1035.0" y="117.0" font-size="11" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">BullMQ + DLQ, L2 cache,</text>
+<text x="1035.0" y="131.0" font-size="11" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">ctc:inval pub/sub</text>
+<rect x="925" y="170" width="220" height="150" rx="6" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+<text x="1035.0" y="210.0" font-size="13" fill="#042C53" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Postgres 17 + pgvector</text>
+<text x="1035.0" y="226.0" font-size="11" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">graph_nodes, graph_edges,</text>
+<text x="1035.0" y="240.0" font-size="11" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">capabilities, capability_versions,</text>
+<text x="1035.0" y="254.0" font-size="11" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">cap_files, cap_blobs, overrides,</text>
+<text x="1035.0" y="268.0" font-size="11" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">memories, session_summaries,</text>
+<text x="1035.0" y="282.0" font-size="11" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">wf_runs, wf_steps, idempotency_keys</text>
+<rect x="925" y="340" width="220" height="70" rx="6" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+<text x="1035.0" y="361.0" font-size="13" fill="#042C53" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Repo + git</text>
+<text x="1035.0" y="377.0" font-size="11" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">worktrees runs/&lt;id&gt;/wt,</text>
+<text x="1035.0" y="391.0" font-size="11" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">branches ctc/&lt;wf&gt;-&lt;id&gt;</text>
+<rect x="925" y="430" width="220" height="56" rx="6" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+<text x="1035.0" y="444.0" font-size="13" fill="#042C53" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Local files</text>
+<text x="1035.0" y="460.0" font-size="11" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">~/.claude skills, memory,</text>
+<text x="1035.0" y="474.0" font-size="11" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">transcripts</text>
+<rect x="260" y="590" width="900" height="90" rx="10" fill="none" stroke="#5F5E5A" stroke-width="1"/>
+<text x="270" y="608" font-size="12" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Model servers and agents (unchanged)</text>
+<rect x="275" y="615" width="200" height="50" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text x="375.0" y="633.0" font-size="13" fill="#2C2C2A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">TEI embedder</text>
+<text x="375.0" y="649.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">:18300</text>
+<rect x="495" y="615" width="200" height="50" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text x="595.0" y="633.0" font-size="13" fill="#2C2C2A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">TEI reranker</text>
+<text x="595.0" y="649.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">:18301</text>
+<rect x="715" y="615" width="200" height="50" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text x="815.0" y="633.0" font-size="13" fill="#2C2C2A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">llama-server</text>
+<text x="815.0" y="649.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">:18302</text>
+<rect x="935" y="615" width="210" height="50" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text x="1040.0" y="633.0" font-size="13" fill="#2C2C2A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">claude -p / codex</text>
+<text x="1040.0" y="649.0" font-size="11" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">user's own login</text>
+<path d="M215,100 L275,100" fill="none" stroke="#A32D2D" stroke-width="1.2"/>
+<polygon points="275.0,100.0 266.7,103.5 266.7,96.5" fill="#A32D2D"/>
+<circle cx="245.0" cy="100.0" r="9" fill="#FFFFFF" stroke="#A32D2D" stroke-width="1"/>
+<text x="245.0" y="104.0" font-size="10" fill="#A32D2D" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">1</text>
+<path d="M545,110 L572,110 L572,590" fill="none" stroke="#A32D2D" stroke-width="1.2"/>
+<polygon points="572.0,590.0 568.5,581.7 575.5,581.7" fill="#A32D2D"/>
+<circle cx="572" cy="440" r="9" fill="#FFFFFF" stroke="#A32D2D" stroke-width="1"/>
+<text x="572" y="444" font-size="10" fill="#A32D2D" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">2</text>
+<path d="M215,130 L245,130 L245,180 L275,180" fill="none" stroke="#A32D2D" stroke-width="1.2"/>
+<polygon points="275.0,180.0 266.7,183.5 266.7,176.5" fill="#A32D2D"/>
+<circle cx="245" cy="155" r="9" fill="#FFFFFF" stroke="#A32D2D" stroke-width="1"/>
+<text x="245" y="159" font-size="10" fill="#A32D2D" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">3</text>
+<path d="M125,150 L125,175" fill="none" stroke="#A32D2D" stroke-width="1.2"/>
+<polygon points="125.0,175.0 121.5,166.7 128.5,166.7" fill="#A32D2D"/>
+<circle cx="140" cy="162" r="9" fill="#FFFFFF" stroke="#A32D2D" stroke-width="1"/>
+<text x="140" y="166" font-size="10" fill="#A32D2D" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">4</text>
+<path d="M215,200 L250,200 L250,245 L275,245" fill="none" stroke="#185FA5" stroke-width="1.2"/>
+<polygon points="275.0,245.0 266.7,248.5 266.7,241.5" fill="#185FA5"/>
+<circle cx="250" cy="222" r="9" fill="#FFFFFF" stroke="#185FA5" stroke-width="1"/>
+<text x="250" y="226" font-size="10" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">5</text>
+<path d="M545,245 L590,245 L590,104 L615,104" fill="none" stroke="#185FA5" stroke-width="1.2"/>
+<polygon points="615.0,104.0 606.7,107.5 606.7,100.5" fill="#185FA5"/>
+<circle cx="590" cy="180" r="9" fill="#FFFFFF" stroke="#185FA5" stroke-width="1"/>
+<text x="590" y="184" font-size="10" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">6</text>
+<path d="M855,104 L890,104 L890,200 L925,200" fill="none" stroke="#185FA5" stroke-width="1.2"/>
+<polygon points="925.0,200.0 916.7,203.5 916.7,196.5" fill="#185FA5"/>
+<circle cx="890" cy="150" r="9" fill="#FFFFFF" stroke="#185FA5" stroke-width="1"/>
+<text x="890" y="154" font-size="10" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">7</text>
+<path d="M855,216 L880,216 L880,460 L925,460" fill="none" stroke="#185FA5" stroke-width="1.2"/>
+<polygon points="925.0,460.0 916.7,463.5 916.7,456.5" fill="#185FA5"/>
+<circle cx="880" cy="420" r="9" fill="#FFFFFF" stroke="#185FA5" stroke-width="1"/>
+<text x="880" y="424" font-size="10" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">8</text>
+<path d="M735,412 L735,440 L815,440 L815,615" fill="none" stroke="#185FA5" stroke-width="1.2"/>
+<polygon points="815.0,615.0 811.5,606.7 818.5,606.7" fill="#185FA5"/>
+<circle cx="815" cy="575" r="9" fill="#FFFFFF" stroke="#185FA5" stroke-width="1"/>
+<text x="815" y="579" font-size="10" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">9</text>
+<path d="M855,328 L900,328 L900,375 L925,375" fill="none" stroke="#185FA5" stroke-width="1.2"/>
+<polygon points="925.0,375.0 916.7,378.5 916.7,371.5" fill="#185FA5"/>
+<circle cx="900" cy="350" r="9" fill="#FFFFFF" stroke="#185FA5" stroke-width="1"/>
+<text x="900" y="354" font-size="10" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">10</text>
+<path d="M215,275 L245,275 L245,310 L275,310" fill="none" stroke="#185FA5" stroke-width="1.2"/>
+<polygon points="275.0,310.0 266.7,313.5 266.7,306.5" fill="#185FA5"/>
+<circle cx="245" cy="292" r="9" fill="#FFFFFF" stroke="#185FA5" stroke-width="1"/>
+<text x="245" y="296" font-size="10" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">11</text>
+<path d="M1035,80 L1035,42 L250,42 L250,380 L275,380" fill="none" stroke="#185FA5" stroke-width="1.2"/>
+<polygon points="275.0,380.0 266.7,383.5 266.7,376.5" fill="#185FA5"/>
+<circle cx="700" cy="42" r="9" fill="#FFFFFF" stroke="#185FA5" stroke-width="1"/>
+<text x="700" y="46" font-size="10" fill="#185FA5" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">12</text>
+<text x="25" y="710" font-size="11" fill="#A32D2D" text-anchor="start" font-family="Helvetica, Arial, sans-serif">1. UserPromptSubmit / PreToolUse: curl, reply within 140 ms / 40 ms or empty (hot)</text>
+<text x="25" y="726" font-size="11" fill="#A32D2D" text-anchor="start" font-family="Helvetica, Arial, sans-serif">2. prompt: embed + rerank skill seeds, then graph walk in RAM (hot)</text>
+<text x="25" y="742" font-size="11" fill="#A32D2D" text-anchor="start" font-family="Helvetica, Arial, sans-serif">3. SessionStart: memory context, RRF recall, 10,000-char cap (hot read)</text>
+<text x="25" y="758" font-size="11" fill="#A32D2D" text-anchor="start" font-family="Helvetica, Arial, sans-serif">4. tool, stop, session-end hooks write one spool file and exit (hot, no wait)</text>
+<text x="25" y="774" font-size="11" fill="#185FA5" text-anchor="start" font-family="Helvetica, Arial, sans-serif">5. web drains the spool: boot, file watch, 30 s sweep (cold)</text>
+<text x="25" y="790" font-size="11" fill="#185FA5" text-anchor="start" font-family="Helvetica, Arial, sans-serif">6. drain and /api enqueue BullMQ jobs; Postgres jobs row is the truth (cold)</text>
+<text x="605" y="710" font-size="11" fill="#185FA5" text-anchor="start" font-family="Helvetica, Arial, sans-serif">7. graph / library / memory jobs write Postgres through repositories (cold)</text>
+<text x="605" y="726" font-size="11" fill="#185FA5" text-anchor="start" font-family="Helvetica, Arial, sans-serif">8. library scans ~/.claude; memory imports memory files and transcripts (cold)</text>
+<text x="605" y="742" font-size="11" fill="#185FA5" text-anchor="start" font-family="Helvetica, Arial, sans-serif">9. llm queue calls llama-server one job at a time; library embeds via TEI (cold)</text>
+<text x="605" y="758" font-size="11" fill="#185FA5" text-anchor="start" font-family="Helvetica, Arial, sans-serif">10. runner: git worktree + setup hook + claude -p / codex per step attempt (cold)</text>
+<text x="605" y="774" font-size="11" fill="#185FA5" text-anchor="start" font-family="Helvetica, Arial, sans-serif">11. dashboard /api and MCP tools read through repositories (cold)</text>
+<text x="605" y="790" font-size="11" fill="#185FA5" text-anchor="start" font-family="Helvetica, Arial, sans-serif">12. ctc:inval: web reloads the RAM graph and skill vectors (cold)</text>
+</svg>

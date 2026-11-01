@@ -1,0 +1,8 @@
+{
+  "session_id": "5f0c1e0e-7a3b-4c1e-9d21-0a6f6c2f8b11",
+  "transcript_path": "/home/user/.claude/projects/-work-zeta/5f0c1e0e-7a3b-4c1e-9d21-0a6f6c2f8b11.jsonl",
+  "cwd": "/work/zeta",
+  "permission_mode": "default",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "retry on fail for flaky shell steps"
+}

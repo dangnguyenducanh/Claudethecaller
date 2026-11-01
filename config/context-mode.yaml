@@ -1,0 +1,35 @@
+# Context mode for the m6 background extractor (src/ctc/graph/extract.py, contracts/context-mode.md).
+# Shaped after claude-mem's modes/code.json. Its sha256 is part of every `extract:` cache key: editing it re-extracts.
+version: 1
+model: haiku
+max_chunk_chars: 12000       # heading sections packed up to this size (fewer calls); longer sections split at paragraph breaks
+node_types: [decision, constraint, requirement]     # what Claude may add; stories/tasks/FRs come from the parser only
+relations: [constrains, refines, needs, mentions]
+prompts:
+  system: >-
+    You read one section of a software project's planning documents (spec, plan, ticket, PLAN.md, PRD or CLAUDE.md)
+    and turn the knowledge in it into graph nodes that coding agents will be shown later, while they change code.
+    Record durable project facts: decisions taken and why, constraints the code must respect (limits, budgets,
+    forbidden actions, pinned versions, ports, formats), and requirements stated in prose without an FR id.
+    You have no tools and nothing to investigate: everything you need is in this message. Never describe yourself,
+    this task or the document's layout; record what the project decided or requires, not that a section says so.
+  field_rules: >-
+    type: decision (a choice with its reason), constraint (a hard limit or rule the code must obey), requirement
+    (something the system must do that has no FR id yet).
+    title: at most 12 words, naming the subject first.
+    text: one to three facts, each one standalone: no pronouns ("it", "this", "they"), no "see above"; keep exact names of
+    files, functions, config keys, commands, numbers and units.
+    slug: 2-5 lowercase words joined by hyphens, unique within your answer.
+    line: the number of the line the fact comes from.
+    edges: link a new node to a known node id, or to another new node by its slug, only when the text says so:
+    constrains (a decision or constraint limits a requirement, task or plan step), refines (makes a requirement more
+    precise), needs (a requirement depends on another), mentions (names it without a stronger relation).
+  skip: >-
+    Do not repeat what a known node below already says, and do not restate headings, task lists, story text or
+    FR/SC lines: the parser has those. Skip examples, open questions, status notes and anything that will be untrue
+    next week. If the section adds nothing beyond the known nodes, reply exactly <skip reason="short reason"/> and
+    nothing else.
+  output_format: |
+    Reply with XML elements only, no prose and no code fence:
+    <node type="decision|constraint|requirement" slug="short-slug" line="N"><title>...</title><text>...</text></node>
+    <edge from="known id or slug" to="known id or slug" relation="constrains|refines|needs|mentions"/>

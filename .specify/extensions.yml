@@ -1,0 +1,6 @@
+hooks:
+  after_specify:  [{extension: ctc, command: ctc.context, description: "Rebuild the context graph", prompt: "build", optional: false}]
+  after_plan:     [{extension: ctc, command: ctc.context, description: "Rebuild the context graph", prompt: "build", optional: false}]
+  after_tasks:    [{extension: ctc, command: ctc.context, description: "Rebuild the context graph", prompt: "build", optional: false}]
+  before_implement: [{extension: ctc, command: ctc.context, description: "Show task→code matches", prompt: "matches", optional: false}]
+  after_implement:  [{extension: ctc, command: ctc.context, description: "Review inferred links", prompt: "review", optional: false}]

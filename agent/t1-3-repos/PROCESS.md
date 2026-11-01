@@ -1,0 +1,11 @@
+# Process for packages/shared/src/repositories (T1.3, TypeScript)
+
+Every step ends with a check; the next step does not start before it passes. Language and file names adapted from the standard process: Python → TypeScript strict on Node 22, `pytest` → Vitest, `tests/test_*.py` → `packages/shared/src/repositories/*.test.ts`, `NotImplementedError` → `throw new Error('not implemented')`, docstring → TSDoc comment, `monkeypatch` → assign to the exported `limits` object and restore it in `afterEach`. Module path: `packages/shared/src/repositories/`.
+
+1. Read the callers and rules. Grep every call site. Done when you can say, per call site, what goes in, what is done with the result, and what the module must never do. Also run the real upstream producer on a sample and keep the output as a fixture.
+   (Here: no call site exists yet, because this module is built before its callers; the "call sites" are the spec sections named in DECISIONS.md D0 and D14. The real upstream producer is the T1.2 migrations: apply them to a scratch schema and save `information_schema.columns` for the schema as `packages/shared/src/repositories/fixtures/schema-columns.json`.)
+2. Write header, constants, signatures only (bodies `throw new Error('not implemented')`). Header: what the module is, called from, why it exists, deliberately NOT done. Each constant gets the real reason, or `chosen by judgment`: never an invented reason. Each function gets a TSDoc comment: trust, return, copies or modifies, bad input. Done when it imports and the header answers who calls it, why, and what it does not do.
+3. Write tests first, covering every decision id. One behaviour per test. For every limit: shrink by assigning to `limits` (restore it after), equal is valid, one more is an error, pin the default. Compare errors with `toEqual`/`toBe` on `code` and `message`. Must-NOT tests for every non-goal. Public names and scratch schema names only. Done when the tests collect and fail.
+4. Smallest code that passes. Reuse the repo's helpers. Add nothing the decisions do not list. Silence rule D8. Done when tests, checks, lint and scope pass.
+5. Run the self-check, fix every FAIL. Done at `SELFCHECK: DONE`.
+6. Report in at most 150 words: commands and results, every `judgment:` call, doubts.

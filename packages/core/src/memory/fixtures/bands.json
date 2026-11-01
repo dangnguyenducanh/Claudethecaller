@@ -1,0 +1,11 @@
+[
+  { "name": "noop-reworded", "existing": "Always use pnpm for installs in this repo", "candidate": "use pnpm for installs, always", "similarity": 0.97, "relation": null, "expect": "NOOP" },
+  { "name": "noop-near-identical", "existing": "Keep commits small", "candidate": "Keep commits small.", "similarity": 0.99, "relation": null, "expect": "NOOP" },
+  { "name": "update-more-precise", "existing": "Tests run with vitest", "candidate": "Tests run with vitest, one file per module", "similarity": 0.9, "relation": "same", "expect": "UPDATE" },
+  { "name": "update-low-edge", "existing": "Logs are in English", "candidate": "All log messages are written in English", "similarity": 0.86, "relation": "same", "expect": "UPDATE" },
+  { "name": "supersede-reversal", "existing": "Use tabs for indentation", "candidate": "Use two spaces for indentation", "similarity": 0.92, "relation": "contradicts", "expect": "SUPERSEDE" },
+  { "name": "supersede-replaced-tool", "existing": "The API runs on express", "candidate": "The API runs on fastify", "similarity": 0.88, "relation": "contradicts", "expect": "SUPERSEDE" },
+  { "name": "add-below-update-band", "existing": "Use pnpm for installs", "candidate": "Run lint before every commit", "similarity": 0.8, "relation": null, "expect": "ADD" },
+  { "name": "add-unrelated", "existing": "Logs are in English", "candidate": "The database is Postgres 16", "similarity": 0.6, "relation": null, "expect": "ADD" },
+  { "name": "add-judge-failed-in-mid-band", "existing": "Reviews happen on Fridays", "candidate": "Reviews need two approvals", "similarity": 0.9, "relation": null, "expect": "ADD" }
+]

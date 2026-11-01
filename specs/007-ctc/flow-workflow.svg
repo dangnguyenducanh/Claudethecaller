@@ -1,0 +1,218 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="622" viewBox="0 0 1180 622"><rect width="100%" height="100%" fill="#FFFFFF"/>
+<text x="16" y="26" font-size="16" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">F4 workflows: runs, attempts, worktrees, gates, fan-out (dashed = not built)</text>
+<text x="250" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Entry</text>
+<text x="440" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Logic</text>
+<text x="630" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Queue / process</text>
+<text x="820" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Side effects</text>
+<text x="1010" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Storage</text>
+<text x="20" y="100" font-size="13" fill="#412402" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Start a run</text>
+<text x="20" y="116" font-size="11" fill="#854F0B" text-anchor="start" font-family="Helvetica, Arial, sans-serif">/api, MCP, schedule</text>
+<rect x="165" y="70" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="104.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="96" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">POST .../runs +</text>
+<text x="250" y="112" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Idempotency-Key</text>
+<rect x="355" y="70" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="104.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="96" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Zod; load workflow</text>
+<text x="440" y="112" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">version (pinned)</text>
+<path d="M335,100 L355,100" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,100.0 346.7,103.5 346.7,96.5" fill="#444441"/>
+<rect x="545" y="70" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="104.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="96" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">wf_runs queued;</text>
+<text x="630" y="112" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">claim SKIP LOCKED</text>
+<path d="M525,100 L545,100" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,100.0 536.7,103.5 536.7,96.5" fill="#444441"/>
+<rect x="735" y="70" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="104.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="96" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">walker: ready</text>
+<text x="820" y="112" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">nodes batch</text>
+<path d="M715,100 L735,100" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,100.0 726.7,103.5 726.7,96.5" fill="#444441"/>
+<rect x="925" y="70" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="104.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="96" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">wf_runs,</text>
+<text x="1010" y="112" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">idempotency_keys</text>
+<path d="M905,100 L925,100" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,100.0 916.7,103.5 916.7,96.5" fill="#444441"/>
+<text x="20" y="176" font-size="13" fill="#412402" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Agent step attempt</text>
+<text x="20" y="192" font-size="11" fill="#854F0B" text-anchor="start" font-family="Helvetica, Arial, sans-serif">queue runner</text>
+<rect x="165" y="146" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="180.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="172" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">runner.step job</text>
+<text x="250" y="188" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">run:node:visit:attempt</text>
+<rect x="355" y="146" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="180.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="172" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">stage worktree:</text>
+<text x="440" y="188" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">git worktree add 180 s</text>
+<path d="M335,176 L355,176" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,176.0 346.7,179.5 346.7,172.5" fill="#444441"/>
+<rect x="545" y="146" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="180.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="172" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">stage setup:</text>
+<text x="630" y="188" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">ctc.yaml 120 s, 10 MB</text>
+<path d="M525,176 L545,176" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,176.0 536.7,179.5 536.7,172.5" fill="#444441"/>
+<rect x="735" y="146" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="180.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="172" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">stage spawn: claude -p</text>
+<text x="820" y="188" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">/ codex, step token</text>
+<path d="M715,176 L735,176" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,176.0 726.7,179.5 726.7,172.5" fill="#444441"/>
+<rect x="925" y="146" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="180.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="172" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">wf_steps (attempt,</text>
+<text x="1010" y="188" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">stage, pid), logs</text>
+<path d="M905,176 L925,176" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,176.0 916.7,179.5 916.7,172.5" fill="#444441"/>
+<text x="20" y="252" font-size="13" fill="#412402" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Finish a step</text>
+<text x="20" y="268" font-size="11" fill="#854F0B" text-anchor="start" font-family="Helvetica, Arial, sans-serif">report</text>
+<rect x="165" y="222" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="256.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="248" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">stream-json exit or</text>
+<text x="250" y="264" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">POST .../report</text>
+<rect x="355" y="222" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="256.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="248" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">check token +</text>
+<text x="440" y="264" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">current attempt</text>
+<path d="M335,252 L355,252" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,252.0 346.7,255.5 346.7,248.5" fill="#444441"/>
+<rect x="545" y="222" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="256.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="248" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">transition(running -&gt;</text>
+<text x="630" y="264" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">done | failed)</text>
+<path d="M525,252 L545,252" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,252.0 536.7,255.5 536.7,248.5" fill="#444441"/>
+<rect x="735" y="222" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="256.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="248" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">walker completes;</text>
+<text x="820" y="264" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">next nodes ready</text>
+<path d="M715,252 L735,252" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,252.0 726.7,255.5 726.7,248.5" fill="#444441"/>
+<rect x="925" y="222" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="256.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="248" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">wf_steps, run</text>
+<text x="1010" y="264" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">state, diff</text>
+<path d="M905,252 L925,252" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,252.0 916.7,255.5 916.7,248.5" fill="#444441"/>
+<text x="20" y="328" font-size="13" fill="#412402" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Gate</text>
+<text x="20" y="344" font-size="11" fill="#854F0B" text-anchor="start" font-family="Helvetica, Arial, sans-serif">approval node</text>
+<rect x="165" y="298" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="332.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="324" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">approval node with</text>
+<text x="250" y="340" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">options[]</text>
+<rect x="355" y="298" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="332.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="324" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">step waiting,</text>
+<text x="440" y="340" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">run waiting</text>
+<path d="M335,328 L355,328" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,328.0 346.7,331.5 346.7,324.5" fill="#444441"/>
+<rect x="545" y="298" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="332.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="324" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">user picks option</text>
+<text x="630" y="340" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">(/approve + key)</text>
+<path d="M525,328 L545,328" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,328.0 536.7,331.5 536.7,324.5" fill="#444441"/>
+<rect x="735" y="298" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="332.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="324" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">resolution injected</text>
+<text x="820" y="340" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">into next prompt</text>
+<path d="M715,328 L735,328" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,328.0 726.7,331.5 726.7,324.5" fill="#444441"/>
+<rect x="925" y="298" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="332.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="324" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">wf_steps.</text>
+<text x="1010" y="340" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">resolution</text>
+<path d="M905,328 L925,328" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,328.0 916.7,331.5 916.7,324.5" fill="#444441"/>
+<text x="20" y="404" font-size="13" fill="#412402" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Fan out</text>
+<text x="20" y="420" font-size="11" fill="#854F0B" text-anchor="start" font-family="Helvetica, Arial, sans-serif">fanout + join</text>
+<rect x="165" y="374" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="408.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="400" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">fanout node</text>
+<text x="250" y="416" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">(n children)</text>
+<rect x="355" y="374" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="408.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="400" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">depth 1, at most</text>
+<text x="440" y="416" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">3 running</text>
+<path d="M335,404 L355,404" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,404.0 346.7,407.5 346.7,400.5" fill="#444441"/>
+<rect x="545" y="374" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="408.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="400" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">BullMQ Flow:</text>
+<text x="630" y="416" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">child per worktree</text>
+<path d="M525,404 L545,404" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,404.0 536.7,407.5 536.7,400.5" fill="#444441"/>
+<rect x="735" y="374" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="408.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="400" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">join: git merge</text>
+<text x="820" y="416" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">child branches</text>
+<path d="M715,404 L735,404" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,404.0 726.7,407.5 726.7,400.5" fill="#444441"/>
+<rect x="925" y="374" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="408.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="400" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">wf_steps child</text>
+<text x="1010" y="416" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">rows, branches</text>
+<path d="M905,404 L925,404" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,404.0 916.7,407.5 916.7,400.5" fill="#444441"/>
+<text x="20" y="480" font-size="13" fill="#412402" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Recover</text>
+<text x="20" y="496" font-size="11" fill="#854F0B" text-anchor="start" font-family="Helvetica, Arial, sans-serif">worker restart</text>
+<rect x="165" y="450" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="484.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="476" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">worker boots</text>
+<text x="250" y="492" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">(systemd)</text>
+<rect x="355" y="450" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="484.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="476" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">steps in stage</text>
+<text x="440" y="492" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">spawned</text>
+<path d="M335,480 L355,480" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,480.0 346.7,483.5 346.7,476.5" fill="#444441"/>
+<rect x="545" y="450" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="484.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="476" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">pid alive -&gt; reattach</text>
+<text x="630" y="492" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">and tail log</text>
+<path d="M525,480 L545,480" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,480.0 536.7,483.5 536.7,476.5" fill="#444441"/>
+<rect x="735" y="450" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="484.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="476" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">dead, no exit -&gt;</text>
+<text x="820" y="492" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">start_unknown</text>
+<path d="M715,480 L735,480" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,480.0 726.7,483.5 726.7,476.5" fill="#444441"/>
+<rect x="925" y="450" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="484.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="476" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">run waiting;</text>
+<text x="1010" y="492" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Runs page asks</text>
+<path d="M905,480 L925,480" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,480.0 916.7,483.5 916.7,476.5" fill="#444441"/>
+<text x="20" y="556" font-size="13" fill="#412402" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Clean up</text>
+<text x="20" y="572" font-size="11" fill="#854F0B" text-anchor="start" font-family="Helvetica, Arial, sans-serif">queue cleanup</text>
+<rect x="165" y="526" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="560.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="552" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">run ended</text>
+<text x="250" y="568" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">+ 7 days</text>
+<rect x="355" y="526" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="560.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="552" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">archive logs</text>
+<text x="440" y="568" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">(jsonl.gz)</text>
+<path d="M335,556 L355,556" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,556.0 346.7,559.5 346.7,552.5" fill="#444441"/>
+<rect x="545" y="526" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="560.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="552" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">git worktree</text>
+<text x="630" y="568" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">remove</text>
+<path d="M525,556 L545,556" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,556.0 536.7,559.5 536.7,552.5" fill="#444441"/>
+<rect x="735" y="526" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="560.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="552" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">keep the</text>
+<text x="820" y="568" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">branch</text>
+<path d="M715,556 L735,556" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,556.0 726.7,559.5 726.7,552.5" fill="#444441"/>
+<rect x="925" y="526" width="170" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="560.0" font-size="13" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="552" font-size="11" fill="#412402" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">worktree rows</text>
+<text x="1010" y="568" font-size="11" fill="#854F0B" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">removed</text>
+<path d="M905,556 L925,556" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,556.0 916.7,559.5 916.7,552.5" fill="#444441"/>
+</svg>

@@ -19,7 +19,7 @@ import numpy as np
 from pydantic import BaseModel, Field, computed_field, model_validator
 
 from ctc.embedding.embedder import Embedder
-from ctc.ingestion.indexer import build_index, texts
+from ctc.ingestion.indexer import build_index, catalog_bodies, texts
 from ctc.llm.client import Llm
 
 log = logging.getLogger(__name__)
@@ -122,7 +122,8 @@ async def dedup(store, dry_run: bool = False) -> dict:
     are never merged automatically: a command and the agent it delegates to look alike (ecc:fastapi-review /
     ecc:fastapi-reviewer 0.92), and one cluster would make search drop the agent that decide attaches."""
     await store.refresh_catalog()
-    docs = {c["id"]: texts(c)[0] for c in store.catalog.values()}
+    bodies = await catalog_bodies(store)  # under embed.text: skillret the stored doc text has the body, the catalog row does not
+    docs = {c["id"]: texts({**c, "body": bodies.get(c["id"])})[0] for c in store.catalog.values()}
     pairs = await nearest(store, docs)
     decided = {(r["a"], r["b"]): r["status"] for r in await store.fetch("select a, b, status from dedup_review")}
     live = lambda a, b: a in docs and b in docs

@@ -24,6 +24,7 @@ class State:
     llm: Llm
     names: dict[tuple[str, str], str] = field(default_factory=dict)  # (user_id, project_id) -> project name
     tasks: list[asyncio.Task] = field(default_factory=list)  # writer, job worker, invalidation subscriber
+    graphs: dict = field(default_factory=dict)  # (user_id, project_id) -> ctc.graph.core.Graph (m6)
 
     def ctx(self, cwd: str, user_id: str = "local") -> Ctx:
         return Ctx(self.store, self.embedder, self.reranker, cwd, user_id)

@@ -489,6 +489,211 @@ def history_import(no_process: bool = typer.Option(False, "--no-process", help="
     if j["status"] != "done":
         err.print(f"[{BAD}]●[/] {j['error']}")
         raise typer.Exit(1)
+
+
+# ---- graph (PLAN.md m6) -------------------------------------------------------
+
+graph = typer.Typer(no_args_is_help=True, help="Context + coding graph (m6).")
+app.add_typer(graph, name="graph")
+CONFIDENCE = {"CONFIRMED": GREEN, "EXTRACTED": BLUE, "INFERRED": PURPLE, "DROPPED": FAINT}
+
+
+def _git_head(repo: Path) -> str:
+    return subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=False, capture_output=True, text=True).stdout.strip()
+
+
+def _ago(t: datetime) -> str:
+    s = (datetime.now(UTC) - t).total_seconds()
+    return next((f"{s // n:.0f}{u} ago" for u, n in (("d", 86400), ("h", 3600), ("m", 60)) if s >= n), "just now")
+
+
+@graph.command("import")
+def graph_import() -> None:
+    """Import graphify-out/graph.json (code + rationale nodes, their links) as the coding graph; skipped when its
+    built_at_commit is already imported."""
+    from ctc.graph import importer
+    from ctc.ingestion.scanner import project_id
+
+    repo = Path.cwd()
+
+    async def go() -> dict:
+        s = await Store.open(cfg()["database_url"], pool_max=1)
+        try:
+            return await importer.import_graphify(s, "local", project_id(repo), repo)
+        finally:
+            await s.close()
+    try:
+        r = _run(go())
+    except (FileNotFoundError, ValueError) as e:
+        err.print(f"[{BAD}]●[/] {e}")
+        raise typer.Exit(1) from None
+    head = _git_head(repo)
+    out.print(f"{dot(FAINT if r['skipped'] else GREEN)} coding: {r['nodes']} nodes, {r['edges']} edges · built_at {r['built_at'][:8]}"
+              f" · HEAD {head[:8]}" + (f"  {tag('skipped')}" if r["skipped"] else "") + (f"  {tag('stale', WARN)}" if head != r["built_at"] else ""))
+
+
+@graph.command("status")
+def graph_status() -> None:
+    """Node and edge counts, graphify built_at vs HEAD, each source's age, share of tasks linked to code."""
+    from ctc.graph import db as gdb
+    from ctc.ingestion.scanner import project_id
+
+    repo = Path.cwd()
+    pid = project_id(repo)
+
+    async def go() -> tuple[dict, list[dict]]:
+        s = await Store.open(cfg()["database_url"], pool_max=1)
+        try:
+            return await gdb.counts(s, "local", pid), await s.fetch(
+                "select source, version, updated_at from graph_sources where user_id = 'local' and project_id = %s order by source", (pid,))
+        finally:
+            await s.close()
+
+    c, sources = _run(go())
+    n = {k: sum(t.values()) for k, t in c["nodes"].items()}
+    tl = c["tasks_linked"]
+    out.print(header("Graph", "Context + coding graph", f"{repo} · project {pid}"))
+    out.print(Columns([
+        kpi("Coding", BLUE, f"{n.get('coding', 0)}", "nodes from graphify"),
+        kpi("Context", PURPLE, f"{n.get('context', 0)}", "nodes from specs + docs"),
+        kpi("Edges", GREEN, f"{sum(c['edges'].values())}", f"{c['edges'].get('DROPPED', 0)} dropped in review"),
+        kpi("Tasks linked", GREEN if tl else FAINT, "n/a" if tl is None else f"{tl:.0%}", "tasks with a code link"),
+    ]))
+    head = _git_head(repo)
+    built = next((r["version"] for r in sources if r["source"] == "graphify"), "")
+    out.print(f"{dot(GREEN if built == head else WARN)} graphify built_at {built[:8] or 'none'} · HEAD {head[:8]}  "
+              + (tag("current", GREEN) if built == head else tag("stale", WARN)) + f"  [{FAINT}]tasks linked: {'n/a' if tl is None else f'{tl:.0%}'}[/]")
+    nodes = grid(("kind", "l:9"), ("type", "l:*2"), ("nodes", "r:7"))
+    for kind, types in sorted(c["nodes"].items()):
+        for t, k in sorted(types.items(), key=lambda x: -x[1]):
+            nodes.add_row(f"{dot(BLUE if kind == 'coding' else PURPLE)} [{MUTED}]{kind}[/]", t, f"[{TEXT}]{k}[/]")
+    edges = grid(("confidence", "l:*2"), ("edges", "r:7"))
+    for conf, k in sorted(c["edges"].items(), key=lambda x: -x[1]):
+        edges.add_row(f"{dot(CONFIDENCE.get(conf, MUTED))} [{MUTED}]{conf.lower()}[/]", f"[{TEXT}]{k}[/]")
+    srcs = grid(("source", "l:*2"), ("rows", "r:5"), ("version", "l:10"), ("updated", "l:*2"))
+    groups: dict[str, list[dict]] = {}  # parse:<file> and extract:<file>#<chunk> rows grouped: one line per source kind
+    for r in sources:
+        groups.setdefault(r["source"].split(":")[0], []).append(r)
+    for name, rs in groups.items():
+        at = sorted(r["updated_at"] for r in rs)
+        srcs.add_row(name, f"{len(rs)}", f"[{FAINT}]{rs[0]['version'][:8] if len(rs) == 1 else ''}[/]",
+                     _ago(at[-1]) + (f" [{FAINT}]· oldest {_ago(at[0])}[/]" if len(rs) > 1 else ""))
+    row = Table.grid(expand=True, padding=(0, 1))
+    row.add_column(ratio=3)
+    row.add_column(ratio=2)
+    row.add_row(card(nodes, "Nodes"), card(edges, "Edges"))
+    out.print(row)
+    out.print(card(srcs, "Sources", "graph_sources"))
+
+
+@graph.command("build")
+def graph_build(no_commits: bool = typer.Option(False, "--no-commits", help="Leave out (and clear) commit-derived links."),
+                no_embed: bool = typer.Option(False, "--no-embed", help="No embedder: skip by-meaning links.")) -> None:
+    """Import graphify if stale, parse every context source, read claude-mem, then link context to code (named paths,
+    ticket commits, meaning)."""
+    from ctc.graph import build as gbuild
+
+    repo, c = Path.cwd(), cfg()
+
+    async def go() -> dict:
+        s, e = await Store.open(c["database_url"], pool_max=1), Embedder(c["embed_url"], c["batch_timeout_s"])
+        try:
+            return await gbuild.build(s, e, repo, commits=not no_commits, embed=not no_embed)
+        finally:
+            await s.close()
+            await e.aclose()
+
+    with out.status(f"[{MUTED}]building the context + coding graph…[/]", spinner_style=BLUE):
+        r = _run(go())
+    s, ln, tl = r["summary"], r["links"], r["tasks_linked"]
+    keys = ("stories", "requirements", "criteria", "tasks", "tickets", "decisions", "plan_steps", "prds")
+    out.print(f"{dot(PURPLE)} context: " + " · ".join(f"[bold]{s[k]}[/] {k.replace('_', ' ')}" for k in keys))
+    feats = grid(("feature", "l:*3"), *((k, "r:12") for k in keys[:5]))
+    for f, n in sorted(s["by_feature"].items()):
+        feats.add_row(f, *(f"[{TEXT}]{n[k]}[/]" if n.get(k) else f"[{FAINT}]·[/]" for k in keys[:5]))
+    out.print(card(feats, "Per feature"))
+    out.print(f"{dot(GREEN)} links: [bold]{ln['extracted']}[/] extracted, [bold]{ln['inferred']}[/] inferred, "
+              f"[bold]{ln['confirmed']}[/] confirmed  [{FAINT}]{ln['unresolved']} unresolved paths dropped[/]")
+    out.print(f"{dot(GREEN if tl else FAINT)} tasks linked: [bold]{'n/a' if tl is None else f'{tl:.0%}'}[/]  "
+              f"[{FAINT}]" + " · ".join(f"{k.replace('_', '-')} {v}" for k, v in r["info"].items()) + "[/]")
+
+
+@graph.command("confirm")
+def graph_confirm(src: str = typer.Argument(..., help="Context node id, e.g. ctx:specs/001-n8n-parity:T012."),
+                  dst: str = typer.Argument(..., help="Code node id, e.g. code:src_ctc_runner_engine_retry."),
+                  relation: str = typer.Argument(..., help="implemented_in | tested_by | mentions"),
+                  verdict: str = typer.Argument(..., help="keep | drop")) -> None:
+    """Review one link: keep makes it CONFIRMED, drop makes it DROPPED (left out of pushes and searches); rebuilds keep both."""
+    from ctc.graph import db as gdb
+    from ctc.ingestion.scanner import project_id
+
+    if verdict not in ("keep", "drop"):
+        err.print(f"[{BAD}]●[/] verdict must be keep or drop, not {verdict!r}")
+        raise typer.Exit(2)
+
+    async def go() -> bool:
+        s = await Store.open(cfg()["database_url"], pool_max=1)
+        try:
+            return await gdb.set_confidence(s, "local", project_id(Path.cwd()), src, dst, relation,
+                                            "CONFIRMED" if verdict == "keep" else "DROPPED", "review")
+        finally:
+            await s.close()
+
+    if not _run(go()):
+        err.print(f"[{BAD}]●[/] no {relation} link {src} → {dst} in this project")
+        raise typer.Exit(1)
+    out.print(f"{dot(GREEN if verdict == 'keep' else FAINT)} {'kept' if verdict == 'keep' else 'dropped'}")
+
+
+@graph.command("extract")
+def graph_extract(file: str | None = typer.Option(None, "--file", help="Only this repo-relative doc.")) -> None:
+    """The Claude pass (claude -p, haiku) over doc sections that changed since the last pass; unchanged ones cost nothing.
+    Run `ctc graph build` after it so the new nodes get embedded and linked."""
+    from types import SimpleNamespace
+
+    from ctc.graph import extract as gx
+
+    async def go() -> dict:
+        s = await Store.open(cfg()["database_url"], pool_max=1)
+        try:  # the job's state needs only store, cfg and the RAM cache it invalidates
+            return await gx.run_job(SimpleNamespace(store=s, cfg=cfg(), graphs={}), {"cwd": str(Path.cwd()), "files": [file] if file else None},
+                                    lambda _f: asyncio.sleep(0))
+        finally:
+            await s.close()
+
+    with out.status(f"[{MUTED}]extracting changed doc sections with claude -p…[/]", spinner_style=BLUE):
+        r = _run(go())
+    if r.get("error"):
+        err.print(f"[{BAD}]●[/] {r['error']}")
+        raise typer.Exit(1)
+    tok = " / ".join(f"{k.replace('_tokens', '')} {v}" for k, v in r["tokens"].items()) or "0"
+    out.print(f"{dot(GREEN)} chunks: [bold]{r['chunks'] - r['skipped']}[/] changed, [bold]{r['sent']}[/] sent, "
+              f"{r['skipped']} skipped, {r['remaining']} left for the next run, {r['failed']} failed  [{FAINT}]tokens {tok}[/]")
+    if r.get("quota_until"):
+        out.print(f"{dot(WARN)} quota until [bold]{r['quota_until']}[/]: the rest waits for the reset")
+
+
+@graph.command("export")
+def graph_export(kind: str = typer.Option("both", "--kind", help="context | coding | both"),
+                 out_path: str | None = typer.Option(None, "--out", help="Default graphify-out/ctc-<kind>.json (untracked).")) -> None:
+    """Write the graph in graphify's graph.json shape, for `graphify query --graph <file>` and graphify's viewer."""
+    from ctc.graph import export as gexport
+
+    if kind not in ("context", "coding", "both"):
+        err.print(f"[{BAD}]●[/] --kind must be context, coding or both, not {kind!r}")
+        raise typer.Exit(2)
+
+    async def go() -> tuple[Path, dict]:
+        s = await Store.open(cfg()["database_url"], pool_max=1)
+        try:
+            return await gexport.write(s, Path.cwd(), kind, Path(out_path) if out_path else None)
+        finally:
+            await s.close()
+
+    path, d = _run(go())
+    out.print(f"{dot(GREEN)} {path}  [{FAINT}]{len(d['nodes'])} nodes, {len(d['links'])} links ({kind})[/]")
+
+
 # ---- workflow runs (PLAN.md m5) -----------------------------------------------
 
 STATUS = {"done": GREEN, "skipped": FAINT, "cancelled": FAINT, "failed": BAD, "timeout": BAD, "quota": WARN,
@@ -611,8 +816,9 @@ def runner_upgrade() -> None:
 # ---- install ------------------------------------------------------------------
 
 # event -> (route, curl max seconds); ours are recognised by the socket name in the command
-HOOKS = {"UserPromptSubmit": ("prompt", "0.15"), "PostToolUse": ("tool", "0.05"), "Stop": ("stop", "0.05"),
-         "SessionEnd": ("stop", "0.05")}  # same endpoint: it reads hook_event_name
+HOOKS = {"UserPromptSubmit": ("prompt", "0.15"), "PreToolUse": ("pre", "0.05"), "PostToolUse": ("tool", "0.05"),
+         "Stop": ("stop", "0.05"), "SessionEnd": ("stop", "0.05")}  # same endpoint: it reads hook_event_name
+MATCHERS = {"PostToolUse": "*", "PreToolUse": "Read|Edit|Write|MultiEdit"}  # tool events only; the others take none
 MCP = "claudethecaller"
 
 
@@ -666,7 +872,7 @@ def install(dry_run: bool = typer.Option(False, "--dry-run", help="Print the set
     for event, (route, t) in HOOKS.items():
         groups = hooks.get(event, [])
         if not any(_ours(h) for g in groups for h in g.get("hooks", [])):
-            hooks[event] = [*groups, {**({"matcher": "*"} if event == "PostToolUse" else {}),
+            hooks[event] = [*groups, {**({"matcher": MATCHERS[event]} if event in MATCHERS else {}),
                                       "hooks": [{"type": "command", "command": _hook_cmd(route, t)}]}]
             added.append(event)
     out.print(header("Install", "Claude Code hooks", f"{p}" + ("  · dry run" if dry_run else "")))

@@ -1,0 +1,188 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="546" viewBox="0 0 1180 546"><rect width="100%" height="100%" fill="#FFFFFF"/>
+<text x="16" y="26" font-size="16" fill="#2C2C2A" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">F2 skill library: version, label, serve (dashed = not built)</text>
+<text x="250" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Entry</text>
+<text x="440" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Logic</text>
+<text x="630" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Queue / process</text>
+<text x="820" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Side effects</text>
+<text x="1010" y="58" font-size="12" fill="#5F5E5A" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Storage</text>
+<text x="20" y="100" font-size="13" fill="#04342C" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Scan and version</text>
+<text x="20" y="116" font-size="11" fill="#0F6E56" text-anchor="start" font-family="Helvetica, Arial, sans-serif">library.scan</text>
+<rect x="165" y="70" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="104.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="96" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">worker start, file</text>
+<text x="250" y="112" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">watch, /api/index</text>
+<rect x="355" y="70" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="104.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="96" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">hash every file of</text>
+<text x="440" y="112" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">each capability</text>
+<path d="M335,100 L355,100" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,100.0 346.7,103.5 346.7,96.5" fill="#444441"/>
+<rect x="545" y="70" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="104.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="96" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">advisory lock per name;</text>
+<text x="630" y="112" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">version = max + 1</text>
+<path d="M525,100 L545,100" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,100.0 536.7,103.5 536.7,96.5" fill="#444441"/>
+<rect x="735" y="70" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="104.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="96" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">label latest moves;</text>
+<text x="820" y="112" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">blobs deduped</text>
+<path d="M715,100 L735,100" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,100.0 726.7,103.5 726.7,96.5" fill="#444441"/>
+<rect x="925" y="70" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="104.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="96" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">capability_versions,</text>
+<text x="1010" y="112" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">cap_files, cap_blobs</text>
+<path d="M905,100 L925,100" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,100.0 916.7,103.5 916.7,96.5" fill="#444441"/>
+<text x="20" y="176" font-size="13" fill="#04342C" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">After a new version</text>
+<text x="20" y="192" font-size="11" fill="#0F6E56" text-anchor="start" font-family="Helvetica, Arial, sans-serif">library.changed</text>
+<rect x="165" y="146" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="180.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="172" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">post-commit job</text>
+<text x="250" y="188" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">(BullMQ)</text>
+<rect x="355" y="146" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="180.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="172" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">embed served version</text>
+<text x="440" y="188" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">(TEI SKILLRET)</text>
+<path d="M335,176 L355,176" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,176.0 346.7,179.5 346.7,172.5" fill="#444441"/>
+<rect x="545" y="146" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="180.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="172" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">llm.enrich, dedup</text>
+<text x="630" y="188" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">check vs neighbours</text>
+<path d="M525,176 L545,176" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,176.0 536.7,179.5 536.7,172.5" fill="#444441"/>
+<rect x="735" y="146" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="180.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="172" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">upsert skill node +</text>
+<text x="820" y="188" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">edges in the graph</text>
+<path d="M715,176 L735,176" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,176.0 726.7,179.5 726.7,172.5" fill="#444441"/>
+<rect x="925" y="146" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="180.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="172" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">cap_vectors,</text>
+<text x="1010" y="188" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">dedup_review</text>
+<path d="M905,176 L925,176" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,176.0 916.7,179.5 916.7,172.5" fill="#444441"/>
+<text x="20" y="252" font-size="13" fill="#04342C" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Move a label</text>
+<text x="20" y="268" font-size="11" fill="#0F6E56" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Library page</text>
+<rect x="165" y="222" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="256.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="248" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">PATCH .../versions/</text>
+<text x="250" y="264" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">:v/labels</text>
+<rect x="355" y="222" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="256.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="248" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Zod: label regex,</text>
+<text x="440" y="264" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">latest refused</text>
+<path d="M335,252 L355,252" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,252.0 346.7,255.5 346.7,248.5" fill="#444441"/>
+<rect x="545" y="222" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="256.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="248" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">SELECT FOR UPDATE;</text>
+<text x="630" y="264" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">label off old version</text>
+<path d="M525,252 L545,252" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,252.0 536.7,255.5 536.7,248.5" fill="#444441"/>
+<rect x="735" y="222" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="256.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="248" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">served_version moves;</text>
+<text x="820" y="264" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">ctc:inval</text>
+<path d="M715,252 L735,252" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,252.0 726.7,255.5 726.7,248.5" fill="#444441"/>
+<rect x="925" y="222" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="256.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="248" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">labels[] on</text>
+<text x="1010" y="264" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">version rows</text>
+<path d="M905,252 L925,252" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,252.0 916.7,255.5 916.7,248.5" fill="#444441"/>
+<text x="20" y="328" font-size="13" fill="#04342C" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Pin per project</text>
+<text x="20" y="344" font-size="11" fill="#0F6E56" text-anchor="start" font-family="Helvetica, Arial, sans-serif">override</text>
+<rect x="165" y="298" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="332.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="324" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">PUT .../override</text>
+<text x="250" y="340" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">{label | version}</text>
+<rect x="355" y="298" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="332.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="324" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">check version</text>
+<text x="440" y="340" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">exists</text>
+<path d="M335,328 L355,328" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,328.0 346.7,331.5 346.7,324.5" fill="#444441"/>
+<rect x="545" y="298" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="332.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="324" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">upsert overrides</text>
+<text x="630" y="340" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">row</text>
+<path d="M525,328 L545,328" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,328.0 536.7,331.5 536.7,324.5" fill="#444441"/>
+<rect x="735" y="298" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="332.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="324" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">rotate ovr: cache</text>
+<text x="820" y="340" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">key</text>
+<path d="M715,328 L735,328" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,328.0 726.7,331.5 726.7,324.5" fill="#444441"/>
+<rect x="925" y="298" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="332.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="324" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">overrides</text>
+<text x="1010" y="340" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">table</text>
+<path d="M905,328 L925,328" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,328.0 916.7,331.5 916.7,324.5" fill="#444441"/>
+<text x="20" y="404" font-size="13" fill="#04342C" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Load a skill</text>
+<text x="20" y="420" font-size="11" fill="#0F6E56" text-anchor="start" font-family="Helvetica, Arial, sans-serif">MCP</text>
+<rect x="165" y="374" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="408.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="400" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">get_capability</text>
+<text x="250" y="416" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">(name, label?)</text>
+<rect x="355" y="374" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="408.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="400" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">override &gt; label &gt;</text>
+<text x="440" y="416" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">production &gt; latest</text>
+<path d="M335,404 L355,404" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,404.0 346.7,407.5 346.7,400.5" fill="#444441"/>
+<rect x="545" y="374" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="408.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="400" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">manifest +</text>
+<text x="630" y="416" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">version id</text>
+<path d="M525,404 L545,404" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,404.0 536.7,407.5 536.7,400.5" fill="#444441"/>
+<rect x="735" y="374" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="408.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="400" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">load_capability_</text>
+<text x="820" y="416" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">resource(version, path)</text>
+<path d="M715,404 L735,404" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,404.0 726.7,407.5 726.7,400.5" fill="#444441"/>
+<rect x="925" y="374" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="408.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="400" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">cap_files -&gt;</text>
+<text x="1010" y="416" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">cap_blobs</text>
+<path d="M905,404 L925,404" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,404.0 916.7,407.5 916.7,400.5" fill="#444441"/>
+<text x="20" y="480" font-size="13" fill="#04342C" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-weight="bold">Restore</text>
+<text x="20" y="496" font-size="11" fill="#0F6E56" text-anchor="start" font-family="Helvetica, Arial, sans-serif">/api restore</text>
+<rect x="165" y="450" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="250.0" y="484.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="250" y="476" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">POST .../restore</text>
+<text x="250" y="492" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">{version}</text>
+<rect x="355" y="450" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="440.0" y="484.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="440" y="476" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">read that version's</text>
+<text x="440" y="492" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">files from blobs</text>
+<path d="M335,480 L355,480" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="355.0,480.0 346.7,483.5 346.7,476.5" fill="#444441"/>
+<rect x="545" y="450" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="630.0" y="484.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="630" y="476" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">write files back to</text>
+<text x="630" y="492" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">~/.claude (atomic)</text>
+<path d="M525,480 L545,480" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="545.0,480.0 536.7,483.5 536.7,476.5" fill="#444441"/>
+<rect x="735" y="450" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="820.0" y="484.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="820" y="476" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">next scan makes</text>
+<text x="820" y="492" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">version n+1</text>
+<path d="M715,480 L735,480" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="735.0,480.0 726.7,483.5 726.7,476.5" fill="#444441"/>
+<rect x="925" y="450" width="170" height="60" rx="6" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1010.0" y="484.0" font-size="13" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold"></text>
+<text x="1010" y="476" font-size="11" fill="#04342C" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold">file system</text>
+<text x="1010" y="492" font-size="11" fill="#0F6E56" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">+ versions</text>
+<path d="M905,480 L925,480" fill="none" stroke="#444441" stroke-width="1.2"/>
+<polygon points="925.0,480.0 916.7,483.5 916.7,476.5" fill="#444441"/>
+</svg>
