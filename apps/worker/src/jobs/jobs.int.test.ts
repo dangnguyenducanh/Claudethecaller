@@ -91,6 +91,28 @@ describe('workers, dlq-retry and close (D6, D21, D23)', () => {
     expect(last.skipped).toContain(b);
     for (const list of [last.retried, last.gaveUp, last.skipped]) expect(list).not.toContain(r);
   });
+  it('dlq-retry pages past dropped failures so a newer real failure is still retried', async () => {
+    const n = ns(); const f = fakePort(); const q = createQueues({ url, namespace: n }); closers.push(() => q.close());
+    const handlers: Record<string, Handler> = {
+      'llm.enrich': (async () => { throw new UnrecoverableError('real failure'); }) as Handler,
+      'llm.extract': (async () => { throw new JobDropped('root_missing'); }) as Handler,
+    };
+    const w = await startWorkers({ url, namespace: n, port: f.port, handlers, poll: false, dlq: false }); closers.push(() => w.close());
+    const deps = { queues: q, create: async (row: { id: string; queue: string; kind: string; payload: unknown }) => { f.add(row.id, row.queue, row.kind, row.payload); return { id: row.id, created: true }; } };
+    const sub = async (kind: string, payload: unknown) => (await submitJob(deps, { queue: 'llm', kind, payload })).id;
+    for (let i = 0; i < 3; i++) {
+      await sub('extract', { userId: 'u1', sessionId: `s${i}` });
+      expect(await waitFor(async () => (await q.get('llm').getFailedCount()) === i + 1)).toBe(true);
+    }
+    const real = await sub('enrich', llm);
+    expect(await waitFor(async () => (await q.get('llm').getFailedCount()) === 4)).toBe(true);
+    const keep = queueLimits.dlqScan; queueLimits.dlqScan = 2;
+    try {
+      const r = await dlqRetryOnce({ queues: q, redis: raw, port: f.port, namespace: n });
+      expect(r.skipped).toHaveLength(3);
+      expect(r.retried).toEqual([real]);
+    } finally { queueLimits.dlqScan = keep; }
+  });
   it('close resolves within the grace period with a stuck job and twice; only handler queues get workers', async () => {
     const n = ns(); const f = fakePort(); const q = createQueues({ url, namespace: n }); closers.push(() => q.close());
     expect((await startWorkers({ url, namespace: n, port: f.port, handlers: {}, poll: false, dlq: false })).queues).toEqual([]);

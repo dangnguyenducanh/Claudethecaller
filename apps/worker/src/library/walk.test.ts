@@ -93,6 +93,23 @@ describe('walkRoot safety (D1, D6)', () => {
     const [f] = await all(h);
     expect([f?.skip?.code, f?.warnings.map((w) => w.code)]).toEqual(['unreadable', ['symlink_outside']]);
   });
+  it('an agent file that links outside the root is skipped as symlink_outside, one that links inside is read', async () => {
+    const h = tree.home();
+    const secret = tree.put(path.join(tree.dir, 'host-secret.txt'), 'TOPSECRET');
+    tree.put(path.join(h, 'agents/real.md'), skillMd('real', 'r'));
+    fs.symlinkSync(secret, path.join(h, 'agents/leak.md'));
+    fs.symlinkSync(path.join(h, 'agents/real.md'), path.join(h, 'agents/alias.md'));
+    const found = await all(h);
+    expect(found.map((f) => [f.defaultName, f.skip?.code ?? null, f.files.length])).toEqual([['alias', null, 1], ['leak', 'symlink_outside', 0], ['real', null, 1]]);
+  });
+  it('reads the agents of a symlinked agents directory', async () => {
+    const h = tree.home();
+    const elsewhere = path.join(tree.dir, 'dot/agents');
+    tree.put(path.join(elsewhere, 'x.md'), skillMd('x', 'x'));
+    fs.symlinkSync(elsewhere, path.join(h, 'agents'));
+    const found = await all(h);
+    expect(found.map((f) => [f.defaultName, f.skip?.code ?? null, f.files.length])).toEqual([['x', null, 1]]);
+  });
   it('a subdirectory that cannot be listed makes the skill unreadable instead of losing its files', async () => {
     const h = tree.home();
     tree.put(path.join(h, 'skills/s1/SKILL.md'), skillMd('s1', 's'));

@@ -6,7 +6,7 @@
  * every failure is an empty `204` (spec:164).
  */
 import { fitStartBlock, rankRecall, recallLimits } from '@ctc/core/memory';
-import { keys, ttl } from '@ctc/shared/cache';
+import { GLOBAL_MEM_EPOCH, keys, ttl } from '@ctc/shared/cache';
 import type { Ctx } from '@ctc/shared/repositories';
 import { HookStartBody, memoryApiLimits } from '@ctc/shared/schemas/memory';
 import type { Route } from '../library/http.ts';
@@ -30,7 +30,9 @@ async function buildBlock(deps: MemoryApiDeps, req: unknown): Promise<string> {
   const cacheKey = (e: string): string => keys.ctx(ctx.userId, project?.id ?? '', e);
   if (project && cache) {
     try {
-      epoch = await cache.epoch.get('mem', ctx.userId, project.id);
+      // the block holds global memories too: a change to one rotates the user-level epoch, which is part of the key
+      const [own, global] = await Promise.all([cache.epoch.get('mem', ctx.userId, project.id), cache.epoch.get('mem', ctx.userId, GLOBAL_MEM_EPOCH)]);
+      epoch = typeof own === 'string' && typeof global === 'string' ? `${own}-${global}` : null;
       if (typeof epoch === 'string') {
         const hit = await cache.get<unknown>(cacheKey(epoch));
         if (typeof hit === 'string') return hit;
@@ -44,10 +46,9 @@ async function buildBlock(deps: MemoryApiDeps, req: unknown): Promise<string> {
   // judgment: the query is cut to the search query limit; a long next-steps text must not slow the embedder
   const query = `${label} ${summaries[0]?.nextSteps ?? ''}`.trim().slice(0, memoryApiLimits.queryMax);
   const queryVector = await embedQuery(deps, query);
-  const legs = await repos.memory.recallLegs(ctxP, { queryText: query, queryVector, perLeg: cfg.rrf.per_leg });
-  const memories = rankRecall(legs, { k: cfg.rrf.k, halfLifeDays: cfg.half_life_days, now: nowOf(deps) })
-    .filter((m) => project !== null || m.scope === 'global') // judgment: no known project means the user's global memories only
-    .slice(0, cfg.start.memories);
+  // judgment: no known project (the first session of every project) means the user's global memories only, chosen in the query so other projects' rows cannot crowd them out
+  const legs = await repos.memory.recallLegs(ctxP, { queryText: query, queryVector, perLeg: cfg.rrf.per_leg, anyWord: true, ...(project ? {} : { globalOnly: true }) });
+  const memories = rankRecall(legs, { k: cfg.rrf.k, halfLifeDays: cfg.half_life_days, now: nowOf(deps) }).slice(0, cfg.start.memories);
   const { text } = fitStartBlock({ project: label, summaries, memories }, cfg.context_chars);
 
   if (project && cache && typeof epoch === 'string') {

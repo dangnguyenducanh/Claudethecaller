@@ -81,13 +81,20 @@ describe('worktreeRecipe (D12a)', () => {
   const o = { repo: '/r', dir: '.ctc/wt', workflow: 'wf', runId: 7, nodeId: 'impl', stepId: 42, visit: 1, attempt: 1, base: 'main' };
   it('is exact and adds visit and attempt suffixes', () => {
     expect(worktreeRecipe(o)).toEqual({
-      branch: 'ctc/wf-7-impl', path: '/r/.ctc/wt/7/42', add: ['worktree', 'add', '--no-track', '-b', 'ctc/wf-7-impl', '/r/.ctc/wt/7/42', 'main'],
-      config: ['config', 'branch.ctc/wf-7-impl.base', 'main'],
+      branch: 'ctc/wf-7-impl-s42', path: '/r/.ctc/wt/7/42', add: ['worktree', 'add', '--no-track', '-b', 'ctc/wf-7-impl-s42', '/r/.ctc/wt/7/42', 'main'],
+      config: ['config', 'branch.ctc/wf-7-impl-s42.base', 'main'],
     });
-    expect(worktreeRecipe({ ...o, visit: 2, attempt: 3, child: 'a b' }).branch).toBe('ctc/wf-7-impl-a-b-v2-a3');
-    expect(worktreeRecipe({ ...o, nodeId: '' }).branch).toBe('ctc/wf-7-x');
-    expect(worktreeRecipe({ ...o, nodeId: 'a'.repeat(61) }).branch).toBe(`ctc/wf-7-${'a'.repeat(60)}`);
+    expect(worktreeRecipe({ ...o, visit: 2, attempt: 3, child: 'a b' }).branch).toBe('ctc/wf-7-impl-a-b-v2-a3-s42');
+    expect(worktreeRecipe({ ...o, nodeId: '' }).branch).toBe('ctc/wf-7-x-s42');
+    expect(worktreeRecipe({ ...o, nodeId: 'a'.repeat(61) }).branch).toBe(`ctc/wf-7-${'a'.repeat(60)}-s42`);
     expect(worktreeRecipe({ ...o, repo: '/r/', dir: '.ctc//wt/' }).path).toBe('/r/.ctc/wt/7/42');
+  });
+
+  it('never gives two steps the same branch', () => {
+    const b = (x: object) => worktreeRecipe({ ...o, ...x }).branch;
+    expect(b({ nodeId: 'fan', child: 0 })).not.toBe(b({ nodeId: 'fan-0', stepId: 43 }));
+    expect(b({ nodeId: 'build', attempt: 2 })).not.toBe(b({ nodeId: 'build-a2', stepId: 43 }));
+    expect(b({ nodeId: `${'a'.repeat(60)}x` })).not.toBe(b({ nodeId: `${'a'.repeat(60)}y`, stepId: 43 }));
   });
 
   it('refuses a relative repo, an absolute or escaping dir and a bad base', () => {

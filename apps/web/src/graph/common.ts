@@ -24,7 +24,8 @@ export type GraphApiDeps = {
   ctxOf?(req: unknown): Ctx;
   log?(message: string, fields?: Record<string, unknown>): void;
   readText?(root: string, rel: string): Promise<string | null>;
-  guardTrips?(ctx: Ctx): Promise<number>;
+  /** Rebuilds of the project that ended on the shrink guard after `since` (the last node write), i.e. the ones a force rebuild has not answered yet. */
+  guardTrips?(ctx: Ctx, since: Date | null): Promise<number>;
   onToolCall?(info: { userId: string; projectId: string | null; tool: string }): void;
   now?(): number;
 };
@@ -120,4 +121,12 @@ export async function doNeighbors(deps: GraphApiDeps, ctx: ProjectCtx, a: { name
     direction: a.direction,
     ...(a.limit !== undefined ? { limit: a.limit } : {}),
   });
+}
+
+/** `GraphApiDeps.guardTrips` over the jobs rows: dead `graph` jobs of the project whose error names the shrink guard, newest 100 looked at. */
+export async function countGuardTrips(repos: Repositories, ctx: Ctx, since: Date | null): Promise<number> {
+  const page = await repos.jobs.list(ctx, { queue: 'graph', status: 'dead', limit: 100 });
+  return page.rows.filter(
+    (j) => (j.payload as { projectId?: unknown } | null)?.projectId === ctx.projectId && (j.error ?? '').includes('shrink_guard') && (since === null || j.updatedAt > since),
+  ).length;
 }

@@ -80,22 +80,27 @@ async function main(): Promise<void> {
 
   try {
     // before the workers: a step that was running when the last worker died is settled first (apps/worker/src/runner/index.ts sweepRunner)
-    const swept = await sweepRunner(execDepsOf(engine)).catch((e: unknown) => {
-      log('runner sweep failed', { error: errClass(e) });
-      return null;
-    });
+    // a dev run leaves the runs of its schema (imported ones included) alone: no sweep, no loop, no cleanup
+    const swept = dev
+      ? null
+      : await sweepRunner(execDepsOf(engine)).catch((e: unknown) => {
+          log('runner sweep failed', { error: errClass(e) });
+          return null;
+        });
     if (swept !== null) log('runner swept', { steps: swept.actions.length });
 
     const workers = await startWorkers({ url: config.redis_url, namespace: namespaceOf(env), port: worker.port, handlers: worker.handlers, log });
     closers.push(() => workers.close({ graceMs: queueLimits.closeGraceMs }));
 
-    const loop = startRunnerLoop(engine);
-    closers.push(() => loop.stop());
-    const cleanup = (): void => void scheduleCleanup(engine).catch((e: unknown) => log('cleanup schedule failed', { error: errClass(e) }));
-    cleanup();
-    const cleanupTimer = setInterval(cleanup, CLEANUP_EVERY_MS);
-    cleanupTimer.unref();
-    closers.push(() => clearInterval(cleanupTimer));
+    if (!dev) {
+      const loop = startRunnerLoop(engine);
+      closers.push(() => loop.stop());
+      const cleanup = (): void => void scheduleCleanup(engine).catch((e: unknown) => log('cleanup schedule failed', { error: errClass(e) }));
+      cleanup();
+      const cleanupTimer = setInterval(cleanup, CLEANUP_EVERY_MS);
+      cleanupTimer.unref();
+      closers.push(() => clearInterval(cleanupTimer));
+    }
     const blobs = startBlobCleanup({ submit, log });
     closers.push(() => blobs.close());
 

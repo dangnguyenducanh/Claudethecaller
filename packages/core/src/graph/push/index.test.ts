@@ -37,6 +37,13 @@ describe('rankSlots (D13, D14)', () => {
     expect(new Set(all).size).toBe(all.length);
   });
 
+  it('never offers a blocked skill, whether it is reached by the walk or comes from the skill channel', () => {
+    const withSkill = buildIndex({ nodes: [...fns, n('skill:tdd', 'capability', 'skill', 'tdd'), n('skill:ok', 'capability', 'skill', 'ok')], edges: [] });
+    const blockedSkills = new Set(['skill:tdd', 'agent:zed']);
+    const r = rankSlots(withSkill, { seeds: [seed('skill:tdd', 1), seed('skill:ok', 0.5)], skills: [{ kind: 'agent', name: 'zed', score: 0.7 }], depth: 1, perSlot: 3, blockedSkills });
+    expect(r.skill.map((c) => c.id)).toEqual(['skill:ok']);
+  });
+
   it('perSlot 4 keeps four file candidates; perSlot 3 keeps three', () => {
     expect(rankSlots(index, { seeds, skills: [], depth: 1, perSlot: 4 }).file).toHaveLength(4);
     expect(rankSlots(index, { seeds, skills: [], depth: 1, perSlot: 3 }).file).toHaveLength(3);

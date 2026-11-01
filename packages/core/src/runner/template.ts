@@ -5,7 +5,7 @@
  * quoting rule cannot be forgotten at a call site. Deliberately NOT done: any I/O, expression evaluation, escaping for anything but `sh`.
  * Untrusted: every argument. No function throws on odd input and none edits an argument.
  */
-import { workflowLimits, type WorkflowNode } from './workflow.ts';
+import { workflowLimits, type Workflow, type WorkflowNode } from './workflow.ts';
 
 const VAR = /\{\{\s*([\w.-]+)\s*\}\}/g;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -120,4 +120,11 @@ export const childId = (fanoutId: string, index: number): string => `${fanoutId}
 export function parseChildId(id: unknown): { fanoutId: string; index: number } | null {
   const m = typeof id === 'string' ? /^([A-Za-z0-9][A-Za-z0-9_-]*)\[(\d{1,6})\]$/.exec(id) : null;
   return m === null ? null : { fanoutId: m[1] as string, index: Number(m[2]) };
+}
+
+/** Job timeout in seconds of a step's node: an agent or shell node's own, a fan-out child's from its fan-out node, else the agent default. */
+export function timeoutOf(wf: Pick<Workflow, 'nodes'>, nodeId: string): number {
+  const cid = parseChildId(nodeId);
+  const node = wf.nodes.find((n) => n.id === (cid === null ? nodeId : cid.fanoutId));
+  return (cid === null ? node?.timeoutS : node?.child?.timeoutS) ?? (node?.type === 'shell' ? workflowLimits.shellTimeoutS : 1800);
 }

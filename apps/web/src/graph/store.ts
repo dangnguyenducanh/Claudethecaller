@@ -1,6 +1,6 @@
 /**
- * `createGraphStore`: the RAM graph of the projects this process serves, one built `GraphIndex` per (user, project), reloaded when it is
- * invalidated, when its Redis epoch changes or when it is older than `maxAgeMs`. Called from: tools.ts and routes.ts (one store per bootstrap),
+ * `createGraphStore`: the RAM graph of the projects this process serves, one built `GraphIndex` per (user, project), reloaded in the background
+ * (the old index keeps being served) when it is invalidated, when its Redis epoch changes or when it is older than `maxAgeMs` with an unknown epoch. Called from: tools.ts and routes.ts (one store per bootstrap),
  * and later T5.1 and T5.2 (their hot paths read the same index). Why: spec:80 keeps the graph in RAM so a query never waits on Postgres.
  * Deliberately NOT done: the `ctc:inval` subscription itself and the Postgres `graph_epoch` poll (the web bootstrap calls `onInval`), writing rows.
  * Untrusted: every row of the graph and every inval message.
@@ -16,7 +16,7 @@ export type GraphStore = {
   onInval(msg: unknown): void;
 };
 
-type Entry = { loaded: LoadedGraph; checkedAt: number };
+type Entry = { loaded: LoadedGraph; checkedAt: number; dirty: boolean };
 
 const errClass = (e: unknown): string => (e instanceof Error ? e.constructor.name : typeof e);
 const keyOf = (userId: string, projectId: string): string => `${userId}\u0000${projectId}`;
@@ -55,9 +55,42 @@ export function createGraphStore(o: {
     return { index, loadedAt: now(), epoch };
   }
 
+  /** The one load of `key` at a time; a failed reload keeps the stale entry. */
+  function reload(ctx: Ctx & { projectId: string }, key: string): Promise<LoadedGraph> {
+    const running = loading.get(key);
+    if (running) return running;
+    const p: Promise<LoadedGraph> = load(ctx)
+      .then(
+        (loaded) => {
+          if (loading.get(key) === p) {
+            entries.delete(key);
+            entries.set(key, { loaded, checkedAt: now(), dirty: false });
+            while (entries.size > maxProjects) entries.delete(entries.keys().next().value as string);
+          }
+          return loaded;
+        },
+        (e: unknown) => {
+          const stale = entries.get(key);
+          if (!stale) throw e;
+          // judgment: a failed reload keeps serving the stale index and tries again after `maxAgeMs`
+          o.log?.('graph reload failed, serving the stale index', { error: errClass(e) });
+          stale.checkedAt = now();
+          stale.dirty = false;
+          return stale.loaded;
+        },
+      )
+      .finally(() => {
+        if (loading.get(key) === p) loading.delete(key);
+      });
+    loading.set(key, p);
+    return p;
+  }
+
+  /** The loaded index stays and keeps being served until the next load replaces it (a hook must not wait 1.5 s for a reload at 20k nodes). */
   function invalidate(userId: string, projectId?: string): void {
     const drop = (k: string): void => {
-      entries.delete(k);
+      const entry = entries.get(k);
+      if (entry) entry.dirty = true;
       loading.delete(k);
     };
     if (projectId !== undefined) return drop(keyOf(userId, projectId));
@@ -68,44 +101,22 @@ export function createGraphStore(o: {
     async get(ctx) {
       const key = keyOf(ctx.userId, ctx.projectId);
       const entry = entries.get(key);
-      if (entry) {
-        const fresh = now() - entry.checkedAt <= maxAgeMs;
+      if (!entry) return reload(ctx, key);
+      entries.delete(key);
+      entries.set(key, entry);
+      let stale = entry.dirty;
+      if (!stale) {
         const stored = entry.loaded.epoch;
-        const current = fresh && stored !== null ? await epochOf(ctx.userId, ctx.projectId) : null;
-        if (fresh && (current === null || current === stored)) {
-          entries.delete(key);
-          entries.set(key, entry);
-          return entry.loaded;
+        const current = stored !== null ? await epochOf(ctx.userId, ctx.projectId) : null;
+        if (current !== null && current !== stored) stale = true;
+        else if (now() - entry.checkedAt > maxAgeMs) {
+          // an unchanged epoch only renews the entry; an unknown one (no Redis, no epoch) can only be healed by loading
+          if (current !== null) entry.checkedAt = now();
+          else stale = true;
         }
       }
-      let pending = loading.get(key);
-      if (!pending) {
-        const p: Promise<LoadedGraph> = load(ctx)
-          .then(
-            (loaded) => {
-              if (loading.get(key) === p) {
-                entries.delete(key);
-                entries.set(key, { loaded, checkedAt: now() });
-                while (entries.size > maxProjects) entries.delete(entries.keys().next().value as string);
-              }
-              return loaded;
-            },
-            (e: unknown) => {
-              const stale = entries.get(key);
-              if (!stale) throw e;
-              // judgment: a failed reload keeps serving the stale index and tries again after `maxAgeMs`
-              o.log?.('graph reload failed, serving the stale index', { error: errClass(e) });
-              stale.checkedAt = now();
-              return stale.loaded;
-            },
-          )
-          .finally(() => {
-            if (loading.get(key) === p) loading.delete(key);
-          });
-        loading.set(key, p);
-        pending = p;
-      }
-      return pending;
+      if (stale) void reload(ctx, key).catch(() => undefined);
+      return entry.loaded;
     },
     invalidate,
     onInval(msg) {

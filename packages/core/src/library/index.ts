@@ -39,12 +39,22 @@ export type FrontmatterResult = { ok: true; frontmatter: Mapping; body: string }
 const isMapping = (v: unknown): v is Mapping => typeof v === 'object' && v !== null && !Array.isArray(v);
 const BOM = '﻿';
 
+/** Postgres text and jsonb reject U+0000, and jsonb also an unpaired surrogate; YAML escapes (`"\0"`, `"\ud800"`) can produce both. */
+const UNSTORABLE = /\u0000|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+function hasUnstorable(v: unknown): boolean {
+  if (typeof v === 'string') return UNSTORABLE.test(v);
+  if (Array.isArray(v)) return v.some(hasUnstorable);
+  if (typeof v === 'object' && v !== null) return Object.entries(v).some(([k, x]) => hasUnstorable(k) || hasUnstorable(x));
+  return false;
+}
+
 /** Parses one YAML document with no alias expansion and no duplicate keys. The message never contains file content. */
 function parseMapping(text: string, lineOffset: number): { ok: true; value: Mapping } | { ok: false; code: 'bad_yaml'; message: string } {
   try {
     const value: unknown = parseYaml(text, { maxAliasCount: 0, uniqueKeys: true, logLevel: 'error' });
     if (value === null || value === undefined) return { ok: true, value: {} };
     if (!isMapping(value)) return { ok: false, code: 'bad_yaml', message: 'YAML is not a mapping' };
+    if (hasUnstorable(value)) return { ok: false, code: 'bad_yaml', message: 'YAML holds a NUL or an unpaired surrogate' };
     return { ok: true, value };
   } catch (e) {
     const err = e as { code?: unknown; linePos?: { line?: number }[]; name?: unknown };

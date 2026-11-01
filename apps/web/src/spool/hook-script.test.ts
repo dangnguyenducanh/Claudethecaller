@@ -188,12 +188,20 @@ describe('hooks/spool', () => {
     expect(fs.readFileSync(path.join(dir, files(dir)[0]!), 'utf8')).not.toContain('SECRET');
   });
 
-  it('D11 an unclosed opening tag removes everything to the end, so the file is not valid JSON', async () => {
+  it('D11 an unclosed opening tag removes the text to the end of its JSON string; the file stays valid JSON and the event survives', async () => {
     const dir = mk();
-    await run({ stdin: JSON.stringify({ session_id: 'st3', note: 'a <private>SECRET-UNCLOSED' }), args: ['Stop'], dir, nudge: await closedUrl() });
+    const input = { session_id: 'st3', tool_name: 'Write', tool_input: { file_path: '/a/doc.md', content: 'explains the <private> tag SECRET-UNCLOSED \\" more' }, tool_response: 'ok' };
+    await run({ stdin: JSON.stringify(input), args: ['PostToolUse'], dir, nudge: await closedUrl() });
     const text = fs.readFileSync(path.join(dir, files(dir)[0]!), 'utf8');
     expect(text).not.toContain('SECRET-UNCLOSED');
-    expect(() => JSON.parse(text)).toThrow();
+    const payload = body(dir, files(dir)[0]!).payload as { tool_input: { file_path: string; content: string }; tool_response: string };
+    expect([payload.tool_input.file_path, payload.tool_input.content, payload.tool_response]).toEqual(['/a/doc.md', 'explains the ', 'ok']);
+  });
+
+  it('D11 an unclosed opening tag outside any string removes everything to the end', async () => {
+    const dir = mk();
+    await run({ stdin: '{"session_id":"st4"} <private>SECRET-TAIL', args: ['Stop'], dir, nudge: await closedUrl() });
+    expect(fs.readFileSync(path.join(dir, files(dir)[0]!), 'utf8')).not.toContain('SECRET-TAIL');
   });
 
   it('D11 stripped text never reaches the event or session lookups', async () => {

@@ -35,6 +35,19 @@ const MAX_NEIGHBOURS = 10;
 /** 0..10, anything else is 0. */
 const neighbours = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) ? Math.min(Math.max(Math.trunc(n), 0), MAX_NEIGHBOURS) : 0);
 
+/** Words that match nearly every memory; the `simple` config keeps them. */
+const STOP_WORDS = new Set(
+  'a an and are as at be been but by can could did do does for from had has have how i if in is it its me my no not of on or our should so that the their them then there these they this to us was we were what when where which who why will with would you your'.split(' '),
+);
+
+/**
+ * Full-text query of free text: its words joined by OR (the `simple` config does no stemming). `plainto_tsquery` ANDs every word, so a whole sentence matches almost nothing. At most 24 distinct words of 2..40 characters; `''` when none.
+ */
+function tsQueryOf(text: string): string {
+  const words = (text.toLowerCase().match(/[\p{L}\p{N}]{2,40}/gu) ?? []).filter((w) => !STOP_WORDS.has(w));
+  return [...new Set(words)].slice(0, 24).join(' | ');
+}
+
 /** Scope filter for reads without an explicit scope: the user's global memories plus the ctx project's, or everything of the user without a project. */
 const visible = (ctx: Ctx) =>
   ctx.projectId === undefined ? sql`` : sql`and (m.scope = 'global' or m.project_id = ${ctx.projectId})`;
@@ -55,6 +68,7 @@ export const memoryRepo = (db: Db) => {
                  coalesce(${memory.confidence ?? null}::real, 0.5), ${embedding}
           where ${projectId}::text is null or exists (select 1 from projects p where p.user_id = ${ctx.userId} and p.id = ${projectId})
           on conflict (user_id, scope, project_id, hash) do update set
+            deleted_at = null, superseded_by = null,
             reinforcement_dates = case when current_date = any(memories.reinforcement_dates) then memories.reinforcement_dates else memories.reinforcement_dates || current_date end,
             updated_at = now()
           returning ${RET}`,
@@ -79,7 +93,7 @@ export const memoryRepo = (db: Db) => {
       );
       return got.map(({ similarity, ...memory }) => ({ memory: memory as Memory, similarity }));
     },
-    /** Same text (after normalisation) in the same scope reinforces: today is appended once to `reinforcementDates`. */
+    /** Same text (after normalisation) in the same scope reinforces: today is appended once to `reinforcementDates`. A deleted or superseded row of that text comes back to life: the text was asserted again. */
     add: (ctx: Ctx, memory: MemoryInput) => insert(k, ctx, memory),
     /** Appends `date` (YYYY-MM-DD) only when it is not in the array yet. */
     async reinforce(ctx: Ctx, id: string, date: string): Promise<number> {
@@ -142,11 +156,14 @@ export const memoryRepo = (db: Db) => {
         o,
       );
     },
-    /** A new `text` recomputes the hash and clears the embedding (the embed job refills it). An empty patch returns the current row. */
-    async patch(ctx: Ctx, id: string, p: { text?: string; pinned?: boolean; kind?: string }): Promise<Memory | null> {
+    /** A new `text` recomputes the hash; the embedding of the new text comes with it (`embedding`), else the old vector stays rather than leaving the row out of every vector search. An empty patch returns the current row. */
+    async patch(ctx: Ctx, id: string, p: { text?: string; embedding?: number[]; pinned?: boolean; kind?: string }): Promise<Memory | null> {
       if (!isUuid(id)) return null;
       const parts = [];
-      if (typeof p?.text === 'string') parts.push(sql`text = ${p.text}`, sql`hash = ${memoryHash(p.text)}`, sql`embedding = null`);
+      if (typeof p?.text === 'string') {
+        parts.push(sql`text = ${p.text}`, sql`hash = ${memoryHash(p.text)}`);
+        if (p.embedding !== undefined) parts.push(sql`embedding = ${vec(p.embedding)}`);
+      }
       if (typeof p?.pinned === 'boolean') parts.push(sql`pinned = ${p.pinned}`);
       if (p?.kind !== undefined) {
         if (!KINDS.includes(p.kind)) throw new RepoError('invalid', 'bad kind');
@@ -169,23 +186,25 @@ export const memoryRepo = (db: Db) => {
       return changed(k, sql`update memories set deleted_at = now() where user_id = ${ctx.userId} and id = ${id} and deleted_at is null`);
     },
     /** The two candidate lists for hybrid recall (full-text and vector), `perLeg` clamped to 1..100. A `null` vector skips the vector leg (embedder down). */
-    async recallLegs(ctx: Ctx, o: { queryText: string; queryVector: number[] | null; perLeg: number }): Promise<{ fts: Memory[]; vec: Memory[] }> {
+    async recallLegs(ctx: Ctx, o: { queryText: string; queryVector: number[] | null; perLeg: number; globalOnly?: boolean; anyWord?: boolean }): Promise<{ fts: Memory[]; vec: Memory[] }> {
       const embedding = o?.queryVector === null ? null : vec(o?.queryVector);
       const perLeg = clampLimit(o.perLeg, MAX_LEG, MAX_LEG);
+      const scope = o.globalOnly === true ? sql`and m.scope = 'global'` : visible(ctx);
       const text = typeof o.queryText === 'string' ? o.queryText.trim() : '';
-      const fts = text === ''
-        ? []
-        : await rows<Memory>(
-            k,
-            sql`select ${COLS} from memories m where m.user_id = ${ctx.userId} and ${LIVE} ${visible(ctx)}
-                and m.tsv @@ plainto_tsquery('simple', ${text})
-                order by ts_rank(m.tsv, plainto_tsquery('simple', ${text})) desc, m.id limit ${perLeg}`,
-          );
+      const ftsOf = (tsquery: RawBuilder<unknown>) =>
+        rows<Memory>(
+          k,
+          sql`select ${COLS} from memories m where m.user_id = ${ctx.userId} and ${LIVE} ${scope} and m.tsv @@ ${tsquery}
+              order by ts_rank(m.tsv, ${tsquery}) desc, m.id limit ${perLeg}`,
+        );
+      // a search query must match all its words; `anyWord` is for a sentence that is not a search (the start-of-session query), where AND matches almost nothing
+      const anyWords = o.anyWord === true ? tsQueryOf(text) : '';
+      const fts = text === '' || (o.anyWord === true && anyWords === '') ? [] : await ftsOf(o.anyWord === true ? sql`to_tsquery('simple', ${anyWords})` : sql`plainto_tsquery('simple', ${text})`);
       const near = embedding === null
         ? []
         : await rows<Memory>(
             k,
-            sql`select ${COLS} from memories m where m.user_id = ${ctx.userId} and ${LIVE} ${visible(ctx)} and m.embedding is not null
+            sql`select ${COLS} from memories m where m.user_id = ${ctx.userId} and ${LIVE} ${scope} and m.embedding is not null
                 order by m.embedding <=> ${embedding}, m.id limit ${perLeg}`,
           );
       return { fts, vec: near };
@@ -194,7 +213,7 @@ export const memoryRepo = (db: Db) => {
     async timeline(ctx: Ctx, o: { anchorId: string; before: number; after: number }): Promise<{ memories: Memory[]; summaries: Summary[] }> {
       const empty = { memories: [], summaries: [] };
       if (!isUuid(o?.anchorId)) return empty;
-      const anchor = await first<{ at: Date }>(k, sql`select m.created_at as at from memories m where m.user_id = ${ctx.userId} and m.id = ${o.anchorId} and m.deleted_at is null`);
+      const anchor = await first<{ at: string }>(k, sql`select m.created_at::text as at from memories m where m.user_id = ${ctx.userId} and m.id = ${o.anchorId} and m.deleted_at is null`);
       if (!anchor) return empty;
       const before = neighbours(o.before);
       const after = neighbours(o.after);
@@ -226,7 +245,7 @@ export const memoryRepo = (db: Db) => {
       if (valid.length === 0) return 0;
       return changed(k, sql`update memories set last_used_at = now(), use_count = use_count + 1 where user_id = ${ctx.userId} and id = any(${valid}::uuid[])`);
     },
-    /** `true` when inserted; `false` when the same content already exists or the session is not the user's. */
+    /** `true` when inserted; `false` when the same content already exists or the session is not the user's. A session may have several summaries, one per distinct content. */
     async insertSummary(ctx: Ctx, s: SummaryInput): Promise<boolean> {
       const r = await first(
         k,
@@ -237,16 +256,18 @@ export const memoryRepo = (db: Db) => {
       );
       return r !== null;
     },
-    /** Newest first, for the project of ctx. */
+    /** Newest first, for the project of ctx; a session that was summarized again shows its newest summary only. */
     async lastSummaries(ctx: Ctx, n: number): Promise<Summary[]> {
       const projectId = needProject(ctx);
       return rows<Summary>(
         k,
-        sql`select ${SUMMARY_COLS} from session_summaries where user_id = ${ctx.userId} and project_id = ${projectId} order by created_at desc, session_id desc limit ${clampLimit(n)}`,
+        sql`select ${SUMMARY_COLS} from (
+              select distinct on (session_id) * from session_summaries where user_id = ${ctx.userId} and project_id = ${projectId} order by session_id, created_at desc
+            ) s order by created_at desc, session_id desc limit ${clampLimit(n)}`,
       );
     },
     async getSummary(ctx: Ctx, sessionId: string): Promise<Summary | null> {
-      return first<Summary>(k, sql`select ${SUMMARY_COLS} from session_summaries where user_id = ${ctx.userId} and session_id = ${String(sessionId)}`);
+      return first<Summary>(k, sql`select ${SUMMARY_COLS} from session_summaries where user_id = ${ctx.userId} and session_id = ${String(sessionId)} order by created_at desc limit 1`);
     },
   };
 };

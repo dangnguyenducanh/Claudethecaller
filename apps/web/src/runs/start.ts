@@ -5,7 +5,7 @@
  * Deliberately NOT done: walking the run (the worker tick does; `deps.advance` only hurries it), queueing a second run of an owner (it is a
  * `409`), `the schedules table`. Untrusted: `inputs`, `repo`, `base`, the workflow file.
  */
-import { isRef, parseWorkflow, type ParseResult, type Workflow } from '@ctc/core/runner';
+import { isRef, parseWorkflow, timeoutOf, type ParseResult, type Workflow } from '@ctc/core/runner';
 import type { Ctx, Repositories } from '@ctc/shared/repositories';
 import { ApiError, notFound, type Capability, type LibraryApiDeps } from '../library/http.ts';
 import { manifestAndBody } from '../library/read.ts';
@@ -64,6 +64,9 @@ export async function startRun(
   const { version, parsed } = await readWorkflow(deps, ctx, o.cap);
   const args = checkRunArgs(o);
   if (!parsed.ok) throw new ApiError('invalid', parsed.errors[0] ?? 'invalid workflow', { path: [], errors: parsed.errors });
+  if (args.repo === null && parsed.workflow.nodes.some((n) => (n.type === 'agent' && n.worktree === 'new') || n.type === 'fanout')) {
+    throw bad('repo', 'repo is required: an agent node of this workflow needs a git worktree');
+  }
   // judgment: `startedAt` is set by the engine on the first `advanceRun` (a status write outside the core is not allowed here).
   const run = await deps.repos.runner.createRun(ctx, {
     owner: (await deps.ownerOf?.(ctx)) ?? ctx.userId, workflowCapId: o.cap.id, workflowVersion: version, status: 'running', trigger: o.trigger,
@@ -75,4 +78,19 @@ export async function startRun(
     deps.log?.('advance after start failed', { error: e instanceof Error ? e.constructor.name : typeof e });
   }
   return { run, workflow: parsed.workflow };
+}
+
+/** Job timeout of a step that is queued again (retry, resume): its node's `timeout_s` in the run's pinned workflow version, as the engine submits it; else the agent default. */
+export async function stepTimeoutS(deps: WorkflowApiDeps, ctx: Ctx, step: { runId: number; nodeId: string }): Promise<number> {
+  try {
+    const run = await deps.repos.runner.getRun(ctx, step.runId);
+    const row = run?.workflowCapId ? await deps.library.repos.library.getVersion(ctx, run.workflowCapId, run.workflowVersion) : null;
+    if (row) {
+      const parsed = parseWorkflow((await manifestAndBody(deps.library, ctx, 'workflow', row.id)).body);
+      if (parsed.ok) return timeoutOf(parsed.workflow, step.nodeId);
+    }
+  } catch (e) {
+    deps.log?.('step timeout lookup failed', { error: e instanceof Error ? e.constructor.name : typeof e });
+  }
+  return 1800;
 }

@@ -2,7 +2,7 @@
  * `dlq-retry`: every `dlqEveryMs` re-runs each failed BullMQ job up to `dlqMaxRetries` times (spec:194).
  * Called from: the `dlq-retry` worker started by startWorkers. Why: a job that exhausted its attempts gets a second,
  * slower chance. Never touches `runner` (explicit F4 attempts, spec:192) or a `dropped:` failure.
- * Deliberately NOT done: SQL (JobsPort), more than `dlqScan` jobs per queue per pass, whole-database wipes or key scans (only INCR on its own counter).
+ * Deliberately NOT done: SQL (JobsPort), whole-database wipes or key scans (only INCR on its own counter).
  */
 import type { Redis } from 'ioredis';
 import { QUEUES, queueLimits, type JobsPort, type Queues } from '@ctc/shared/queues';
@@ -26,26 +26,32 @@ export async function dlqRetryOnce(opts: {
   try {
     for (const name of Object.keys(QUEUES)) {
       if (name === 'runner' || name === 'dlq-retry') continue;
-      const failed = await queues.get(name).getJobs(['failed'], 0, queueLimits.dlqScan - 1, true);
-      for (const job of failed) {
-        const rowId = (job.data as { id?: unknown } | null)?.id;
-        if (typeof rowId !== 'string' || !job.id) continue;
-        const reason = job.failedReason ?? '';
-        if (reason.startsWith('dropped:')) {
-          out.skipped.push(rowId);
-          continue;
+      // pages of `dlqScan`: `dropped:` and given-up jobs stay in the failed set (so `start` moves past them), a retried job leaves it
+      for (let start = 0; ; ) {
+        const failed = await queues.get(name).getJobs(['failed'], start, start + queueLimits.dlqScan - 1, true);
+        const retriedBefore = out.retried.length;
+        for (const job of failed) {
+          const rowId = (job.data as { id?: unknown } | null)?.id;
+          if (typeof rowId !== 'string' || !job.id) continue;
+          const reason = job.failedReason ?? '';
+          if (reason.startsWith('dropped:')) {
+            out.skipped.push(rowId);
+            continue;
+          }
+          const key = `${ns}dlq:${name}:${job.id}`;
+          const res = await redis.multi().incr(key).expire(key, COUNTER_TTL_S, 'NX').exec();
+          const n = Number(res?.[0]?.[1]);
+          if (n <= maxRetries) {
+            await port.markQueued(rowId); // a `dead` row cannot be claimed, so first
+            await job.retry('failed');
+            out.retried.push(rowId);
+          } else if (n === maxRetries + 1) {
+            await port.markDead(rowId, `dlq_gave_up: ${reason}`);
+            out.gaveUp.push(rowId);
+          }
         }
-        const key = `${ns}dlq:${name}:${job.id}`;
-        const res = await redis.multi().incr(key).expire(key, COUNTER_TTL_S, 'NX').exec();
-        const n = Number(res?.[0]?.[1]);
-        if (n <= maxRetries) {
-          await port.markQueued(rowId); // a `dead` row cannot be claimed, so first
-          await job.retry('failed');
-          out.retried.push(rowId);
-        } else if (n === maxRetries + 1) {
-          await port.markDead(rowId, `dlq_gave_up: ${reason}`);
-          out.gaveUp.push(rowId);
-        }
+        if (failed.length < queueLimits.dlqScan) break;
+        start += failed.length - (out.retried.length - retriedBefore);
       }
     }
   } catch (e) {

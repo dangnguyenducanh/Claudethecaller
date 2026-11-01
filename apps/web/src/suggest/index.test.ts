@@ -275,6 +275,13 @@ describe('suggest cache, degradation, budget (D16 to D20)', () => {
     expect((await run(fakeDeps({ graphFails: true, embedFails: true, skillDegraded: ['rerank'] }).deps)).degraded).toEqual(['store', 'embed', 'rerank']);
   });
 
+  it('a blocked skill is not offered through a serves edge of the graph', async () => {
+    const open = await run(fakeDeps({ hits: [], noCache: true }).deps);
+    expect(open.candidates.skill.map((c) => c.id)).toEqual(['skill:tdd']);
+    const blocked = await run(fakeDeps({ hits: [], noCache: true, blockedSkills: ['skill:tdd'] }).deps);
+    expect([blocked.candidates.skill, blocked.line.includes('skill:')]).toEqual([[], false]);
+  });
+
   it('D18 at the budget the hook answers 204 and the late work still fills sug:', async () => {
     await withLimits({ hookBudgetMs: 60, embedDeadlineMs: 5000 }, async () => {
       const slow = fakeDeps({ hits: [HIT], embedDelay: 400, embedIgnoreSignal: true });

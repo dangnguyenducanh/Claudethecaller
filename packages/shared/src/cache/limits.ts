@@ -18,4 +18,22 @@ export const cacheLimits = {
 };
 
 /** Per-key-family TTL in seconds (spec:172-180). */
-export const ttl = { emb: 604_800, sug: 3600, proj: 86_400, ovr: 300, ctx: 600, key: 300, keyMiss: 60, rl: 60 } as const;
+export const ttl = { emb: 604_800, sug: 3600, proj: 86_400, ovr: 300, ctx: 600, key: 300, keyMiss: 60, rl: 60 };
+
+type CacheConfig = {
+  rate_limit_per_min: number;
+  cache: { l1_size: number; redis_timeout_s: number; down_for_s: number; ttl: Record<string, unknown> };
+};
+
+/** Boot-time patch from the validated config (`cache.*`, `rate_limit_per_min`); call before `createCache`. */
+export function applyCacheConfig(config: CacheConfig): void {
+  cacheLimits.l1Max = config.cache.l1_size;
+  cacheLimits.redisTimeoutMs = Math.round(config.cache.redis_timeout_s * 1000);
+  cacheLimits.downForMs = config.cache.down_for_s * 1000;
+  cacheLimits.rateLimitPerMin = config.rate_limit_per_min;
+  for (const k of Object.keys(ttl) as (keyof typeof ttl)[]) {
+    const v = config.cache.ttl[k];
+    if (typeof v === 'number') ttl[k] = v;
+  }
+  cacheLimits.rateWindowS = ttl.rl;
+}

@@ -5,6 +5,7 @@
  * parallel scans safe, D15), writing under a root, hard deletes, embedding, graph nodes, `llm.enrich` (D7).
  * Untrusted: every file under a root. `ctx` and `roots` are chosen by the caller (the handler enforces the local-only rule, D1a).
  */
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { buildVersion, libraryLimits, peekName, sameManifest, type Limits, type Skip } from '@ctc/core/library';
@@ -55,7 +56,7 @@ export async function scanLibrary(deps: ScanDeps): Promise<ScanResult> {
   const claimed = new Set<string>(); // identities versioned or unchanged in this scan (duplicate_name check)
   const protectedIds = new Set<string>(); // identities that must not be removed: claimed plus skipped ones
   const protectedSkillDirs = new Set<string>(); // namespace + rootPath of skipped skills
-  const toSubmit: { capId: string; version: number }[] = [];
+  const toSubmit: { capId: string; version: number; revived: boolean }[] = [];
 
   const skip = (f: Found, s: Skip, mainBytes: Uint8Array | undefined, namespace: string): void => {
     result.skipped.push(s);
@@ -105,11 +106,20 @@ export async function scanLibrary(deps: ScanDeps): Promise<ScanResult> {
           continue;
         }
       }
-      const { version, created } = await repos.library.createVersion(ctx, { ...input, commitMessage: 'scan' });
+      let outcome: Awaited<ReturnType<typeof repos.library.createVersion>>;
+      try {
+        outcome = await repos.library.createVersion(ctx, { ...input, commitMessage: 'scan' });
+      } catch (e) {
+        if (signal?.aborted) throw e;
+        log?.('library createVersion failed', { error: errName(e) });
+        skip(found, { path: path.join(found.rootPath, found.mainPath), code: 'unreadable', message: 'the capability could not be stored' }, undefined, root.namespace);
+        continue;
+      }
+      const { version, created } = outcome;
       if (created) result.created.push({ capId: version.capId, namespace: input.namespace, kind: input.kind, name: input.name, version: version.version });
       else result.unchanged++;
       // a capability that came back without a new version is submitted too: its served version and vector must be recomputed
-      if (created || existing?.removedAt) toSubmit.push({ capId: version.capId, version: version.version });
+      if (created || existing?.removedAt) toSubmit.push({ capId: version.capId, version: version.version, revived: !created });
     }
     if (incomplete.length > 0) {
       rootEntry.walked = false; // an unlistable capability directory is not "nothing here": nothing of this namespace is removed (D8)
@@ -136,7 +146,9 @@ export async function scanLibrary(deps: ScanDeps): Promise<ScanResult> {
   if (submit) {
     for (const t of toSubmit) {
       try {
-        await submit({ queue: 'library', kind: 'changed', payload: { userId: ctx.userId, capId: t.capId, version: t.version }, id: `library.changed:${t.capId}:${t.version}` });
+        // a revival keeps its version, so a fixed id would collide with the finished job of that version and never run
+        const id = `library.changed:${t.capId}:${t.version}${t.revived ? `:r${randomUUID()}` : ''}`;
+        await submit({ queue: 'library', kind: 'changed', payload: { userId: ctx.userId, capId: t.capId, version: t.version }, id });
       } catch (e) {
         log?.('library.changed submit failed', { capId: t.capId, error: errName(e) });
       }

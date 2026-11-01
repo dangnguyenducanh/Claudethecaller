@@ -2,12 +2,15 @@
  * File watch on the library roots: one debounced `onChange` per burst of events (spec:410 trigger).
  * Called from: apps/worker main, which binds `onChange` to submitting `library.scan` for `local`.
  * Deliberately NOT done: scanning itself, polling fallback, watching roots that do not exist yet.
- * Untrusted: file names in events (only used to ignore dot, node_modules and __pycache__ paths).
+ * Untrusted: file names in events (only used to ignore dot, node_modules, __pycache__ and non-library paths).
  */
 import fs from 'node:fs';
 import type { Log } from './scan.ts';
 
 const IGNORED = new Set(['node_modules', '__pycache__']);
+/** The only top-level entries the scanner reads; a Claude session constantly writes projects/, todos/, shell-snapshots/ ... under the same root. */
+const WATCHED = new Set(['skills', 'agents', 'commands', 'ctc-workflows', 'workflows']);
+const PLUGIN_INDEX = 'plugins/installed_plugins.json';
 const errName = (e: unknown): string => (e instanceof Error ? e.constructor.name : typeof e);
 
 export function watchLibrary(opts: { roots: readonly string[]; onChange: () => void | Promise<void>; debounceMs?: number; log?: Log }): { close(): void } {
@@ -28,7 +31,11 @@ export function watchLibrary(opts: { roots: readonly string[]; onChange: () => v
   };
   const onEvent = (_event: string, name: string | Buffer | null): void => {
     if (closed) return;
-    if (name !== null && String(name).split(/[\\/]/).some((seg) => seg.startsWith('.') || IGNORED.has(seg))) return;
+    if (name !== null) {
+      const segs = String(name).split(/[\\/]/);
+      if (segs.some((seg) => seg.startsWith('.') || IGNORED.has(seg))) return;
+      if (!WATCHED.has(segs[0] ?? '') && segs.join('/') !== PLUGIN_INDEX) return;
+    }
     clearTimeout(timer);
     timer = setTimeout(fire, debounceMs);
   };

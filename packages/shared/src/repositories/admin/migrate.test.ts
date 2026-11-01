@@ -29,7 +29,7 @@ const failure = async (p: Promise<unknown>): Promise<MigrationError> => {
 describe('loadMigrations (D2, D4, D12)', () => {
   it('loads the six shipped files in order with sha256 checksums of the raw bytes', () => {
     const migrations = loadMigrations();
-    expect(migrations.map((m) => m.file)).toEqual(['0001_base.sql', '0002_graph.sql', '0003_library.sql', '0004_memory.sql', '0005_runner.sql', '0006_epochs.sql']);
+    expect(migrations.map((m) => m.file)).toEqual(['0001_base.sql', '0002_graph.sql', '0003_library.sql', '0004_memory.sql', '0005_runner.sql', '0006_epochs.sql', '0007_memory_fixes.sql']);
     const first = migrations[0];
     expect(first).toMatchObject({ version: 1, name: 'base', checksum: createHash('sha256').update(readFileSync(join(import.meta.dirname, '../../../migrations/0001_base.sql'))).digest('hex') });
   });
@@ -84,22 +84,22 @@ describe('bad input that needs no database', () => {
 });
 
 describe.skipIf(!ADMIN_URL)('migrate against the scratch Postgres', () => {
-  it('builds 22 tables and stamps version 6; a second run does nothing (D5, D12)', () =>
+  it('builds 22 tables and stamps version 7; a second run does nothing (D5, D12)', () =>
     withDb(async (url) => {
       const first = await migrate({ url });
-      expect(first).toMatchObject({ schema: 'ctc', before: 0, after: 6, pending: [] });
-      expect(first.applied.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(first).toMatchObject({ schema: 'ctc', before: 0, after: 7, pending: [] });
+      expect(first.applied.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
       expect(await scalar(url, "select count(*)::int from information_schema.tables where table_schema='ctc' and table_type='BASE TABLE'")).toEqual(22);
       expect(await scalar(url, "select count(*)::int from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='ctc' and relkind='r' and not relrowsecurity")).toEqual(0);
-      expect(await migrate({ url })).toMatchObject({ before: 6, after: 6, applied: [] });
-      expect(await schemaVersion({ url })).toEqual(6);
+      expect(await migrate({ url })).toMatchObject({ before: 7, after: 7, applied: [] });
+      expect(await schemaVersion({ url })).toEqual(7);
     }));
 
   it('serializes two runners; both succeed and six stamps exist (D12)', () =>
     withDb(async (url) => {
       const [a, b] = await Promise.all([migrate({ url }), migrate({ url })]);
-      expect(a.applied.length + b.applied.length).toEqual(6);
-      expect(await scalar(url, 'select count(*)::int from ctc.schema_migrations')).toEqual(6);
+      expect(a.applied.length + b.applied.length).toEqual(7);
+      expect(await scalar(url, 'select count(*)::int from ctc.schema_migrations')).toEqual(7);
     }));
 
   it('records name and checksum of each file (D12)', () =>
@@ -112,7 +112,7 @@ describe.skipIf(!ADMIN_URL)('migrate against the scratch Postgres', () => {
   it('dry run on a missing schema reports everything pending and creates nothing (D5)', () =>
     withDb(async (url) => {
       const result = await migrate({ url, dryRun: true });
-      expect(result.pending.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(result.pending.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
       expect(result).toMatchObject({ before: 0, after: 0, applied: [] });
       expect(await sql(url, "select nspname from pg_namespace where nspname = 'ctc'")).toEqual([]);
     }));
@@ -120,7 +120,7 @@ describe.skipIf(!ADMIN_URL)('migrate against the scratch Postgres', () => {
   it('another schema name works and stays separate (D2)', () =>
     withDb(async (url) => {
       await migrate({ url, schema: 'ctc_other' });
-      expect(await schemaVersion({ url, schema: 'ctc_other' })).toEqual(6);
+      expect(await schemaVersion({ url, schema: 'ctc_other' })).toEqual(7);
       expect(await schemaVersion({ url })).toEqual(0);
     }));
 

@@ -15,6 +15,9 @@ export function keyPart(name: string, value: unknown): string {
 
 const sha1 = (text: string): string => createHash('sha1').update(text, 'utf8').digest('hex');
 
+/** Pseudo project id of the memory epoch that guards the user's global memories (a change to one reaches every project's cached start block). */
+export const GLOBAL_MEM_EPOCH = '*';
+
 /** `cwd` and `text` are free-form (hashed or last part); everything else goes through `keyPart`. */
 export const keys = {
   emb: (text: string): string => `emb:${sha1(text)}`,

@@ -115,6 +115,17 @@ describe('failure policy (D11)', () => {
     }
   });
 
+  it('does not apply the hook watchdog or the 204 policy to /v1/suggest, which answers JSON', async () => {
+    serverLimits.hookWatchdogMs = 20;
+    const slow: Route = {
+      method: 'POST', url: '/v1/suggest',
+      handler: (_req, reply) => new Promise((resolve) => setTimeout(() => resolve(reply.code(200).send({ line: 'x' })), 80)),
+    };
+    const { app } = await make([slow]);
+    const res = await app.inject({ method: 'POST', url: '/v1/suggest', payload: '{}', headers: { 'content-type': 'application/json' } });
+    expect([res.statusCode, res.json()]).toEqual([200, { line: 'x' }]);
+  });
+
   it('shapes a throw on /api as 500 internal with the class name only', async () => {
     const { app } = await make([apiThrow, apiSilent]);
     const res = await app.inject({ method: 'GET', url: '/api/throw' });
@@ -174,6 +185,20 @@ describe('/mcp (D14)', () => {
     const boom = (await rpc(app, 'tools/call', { name: 'boom_tool', arguments: {} })).json().result;
     expect([boom.isError, boom.content[0].text]).toEqual([true, 'RangeError']);
     expect((await rpc(app, 'tools/call', { name: 'nope', arguments: {} })).json().error.code).toBe(-32602);
+  });
+
+  it('passes the project of the x-ctc-cwd header to the tool, so project pins and blocks reach get_capability', async () => {
+    const seen: unknown[] = [];
+    const spy: McpTool = { name: 'spy', description: 'ctx', inputSchema: { safeParse: (v: unknown) => v }, call: async (ctx) => (seen.push(ctx), { content: [{ type: 'text', text: 'x' }] }) };
+    const { app } = await make([], { tools: [spy], mcpProject: async (root) => (root === '/work/p' ? 'p1' : undefined) });
+    const call = (cwd?: string) => app.inject({
+      method: 'POST', url: '/mcp', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...(cwd === undefined ? {} : { 'x-ctc-cwd': cwd }) },
+      payload: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'spy', arguments: {} } }),
+    });
+    await call('/work/p/');
+    await call('/work/other');
+    await call();
+    expect(seen).toEqual([{ userId: 'local', projectId: 'p1' }, { userId: 'local' }, { userId: 'local' }]);
   });
 
   it('answers GET and DELETE with 405 and a bad body with a JSON-RPC parse error', async () => {

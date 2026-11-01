@@ -137,7 +137,7 @@ const segments = (p: string): string[] => p.split('/').filter((s) => s !== '' &&
 /**
  * The worktree of one attempt (spec:646-649). Pure. Throws `TypeError` when `repo` is not absolute, `dir` is absolute or has a `..` segment,
  * or `base` is empty, not a string or starts with `-`. The branch carries `-v<visit>` / `-a<attempt>` so a retry or a loop never collides with a
- * kept branch (the spec name alone would).
+ * kept branch (the spec name alone would); `-s<stepId>` makes the name unique even when cleaned node ids, fan-out indexes or 60-character prefixes coincide.
  */
 export function worktreeRecipe(o: {
   repo: string; dir: string; workflow: string; runId: number | string; nodeId: string; stepId: number | string; visit: number; attempt: number;
@@ -147,7 +147,7 @@ export function worktreeRecipe(o: {
   if (typeof o.dir !== 'string' || o.dir.startsWith('/') || o.dir.split('/').includes('..')) throw new TypeError('dir must be relative without ..');
   if (typeof o.base !== 'string' || o.base === '' || o.base.startsWith('-')) throw new TypeError('invalid base');
   const parts = [o.workflow, o.runId, o.nodeId, ...(o.child === undefined || o.child === null ? [] : [o.child])].map(clean);
-  const branch = `ctc/${parts.join('-')}${o.visit > 1 ? `-v${o.visit}` : ''}${o.attempt > 1 ? `-a${o.attempt}` : ''}`;
+  const branch = `ctc/${parts.join('-')}${o.visit > 1 ? `-v${o.visit}` : ''}${o.attempt > 1 ? `-a${o.attempt}` : ''}-s${o.stepId}`;
   const path = `/${[...segments(o.repo), ...segments(o.dir), String(o.runId), String(o.stepId)].join('/')}`;
   return { branch, path, add: ['worktree', 'add', '--no-track', '-b', branch, path, o.base], config: ['config', `branch.${branch}.base`, o.base] };
 }

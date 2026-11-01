@@ -23,6 +23,8 @@ export type AppDeps = {
   tools: readonly McpTool[];
   probes: { db(): Promise<boolean>; redis(): Promise<boolean> };
   startedAt?: number;
+  /** Project id of an absolute root, for the `x-ctc-cwd` header of `/mcp`. */
+  mcpProject?(root: string): Promise<string | undefined>;
   log?: (message: string, fields?: Record<string, unknown>) => void;
 };
 
@@ -39,8 +41,8 @@ class BodyError extends Error {
 }
 
 const pathOf = (url: string): string => url.split('?', 1)[0] ?? url;
-/** Hook-style routes: `/v1/*` except the health probe. They answer an empty `204` to anything that goes wrong (spec:164). */
-const isHookPath = (url: string): boolean => pathOf(url).startsWith('/v1/') && pathOf(url) !== '/v1/health';
+/** Hook-style routes: `/v1/*` except the health probe and `/v1/suggest` (a debug and eval endpoint that answers JSON). They answer an empty `204` to anything that goes wrong (spec:164). */
+const isHookPath = (url: string): boolean => pathOf(url).startsWith('/v1/') && pathOf(url) !== '/v1/health' && pathOf(url) !== '/v1/suggest';
 const isMcpPath = (url: string): boolean => pathOf(url) === '/mcp';
 const isJsonType = (type: string): boolean => {
   const t = type.split(';', 1)[0]?.trim().toLowerCase() ?? '';
@@ -170,7 +172,7 @@ export async function buildApp(deps: AppDeps): Promise<{ app: FastifyInstance; r
     });
   }
 
-  const handleMcp = createMcpHandler(deps.tools, log);
+  const handleMcp = createMcpHandler(deps.tools, log, deps.mcpProject);
   app.route({
     method: 'POST',
     url: '/mcp',

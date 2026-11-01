@@ -33,15 +33,32 @@ function schemaOf(tool: McpTool): Record<string, unknown> {
 const errClass = (e: unknown): string => (e instanceof Error ? e.constructor.name : typeof e);
 
 /** Returns the request handler for `POST /mcp`; `listed` is computed once. `body` is the parsed JSON (or undefined when the bytes were not JSON). */
-export function createMcpHandler(tools: readonly McpTool[], log?: (message: string, fields?: Record<string, unknown>) => void) {
+export function createMcpHandler(
+  tools: readonly McpTool[],
+  log?: (message: string, fields?: Record<string, unknown>) => void,
+  projectOf?: (root: string) => Promise<string | undefined>,
+) {
   const byName = new Map(tools.map((t) => [t.name, t]));
   const listed = tools.map((t) => ({ name: t.name, description: t.description, inputSchema: schemaOf(t) }));
 
-  const call = async (name: string, args: unknown): Promise<McpResult> => {
+  /** The project of the caller: `x-ctc-cwd` (an absolute path the client sends) resolved through `projectOf`, so pins and blocks of that project apply. */
+  const ctxOf = async (req: IncomingMessage): Promise<{ userId: string; projectId?: string }> => {
+    const header = req.headers['x-ctc-cwd'];
+    const root = typeof header === 'string' && header.startsWith('/') ? header.replace(/\/+$/, '') || '/' : undefined;
+    try {
+      const projectId = root === undefined ? undefined : await projectOf?.(root);
+      return projectId === undefined ? { userId: 'local' } : { userId: 'local', projectId };
+    } catch (e) {
+      log?.('mcp project lookup failed', { error: errClass(e) });
+      return { userId: 'local' };
+    }
+  };
+
+  const call = async (name: string, args: unknown, ctx: { userId: string; projectId?: string }): Promise<McpResult> => {
     const tool = byName.get(name);
     if (tool === undefined) throw new McpError(ErrorCode.InvalidParams, `unknown tool: ${name.slice(0, 80)}`);
     try {
-      return await tool.call({ userId: 'local' }, args ?? {});
+      return await tool.call(ctx, args ?? {});
     } catch (e) {
       log?.('mcp tool failed', { tool: name, error: errClass(e) });
       return { content: [{ type: 'text', text: errClass(e) }], isError: true };
@@ -51,7 +68,7 @@ export function createMcpHandler(tools: readonly McpTool[], log?: (message: stri
   return async function handle(req: IncomingMessage, res: ServerResponse, body: unknown): Promise<void> {
     const server = new Server({ name: MCP_SERVER_NAME, version: '0.0.0' }, { capabilities: { tools: {} } });
     server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: listed }));
-    server.setRequestHandler(CallToolRequestSchema, async (r) => call(r.params.name, r.params.arguments));
+    server.setRequestHandler(CallToolRequestSchema, async (r) => call(r.params.name, r.params.arguments, await ctxOf(req)));
     const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
     res.on('close', () => {
       void transport.close().catch(() => undefined);

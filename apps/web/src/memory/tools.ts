@@ -6,6 +6,7 @@
  */
 import { applyBands, bandPorts, cleanLine, dayOf, indexRow, rankRecall, recallLimits, type Kind, type Scope } from '@ctc/core/memory';
 import { cut, sanitize } from '@ctc/core/sanitize';
+import { GLOBAL_MEM_EPOCH } from '@ctc/shared/cache';
 import { ModelError } from '@ctc/shared/models';
 import type { Ctx } from '@ctc/shared/repositories';
 import { MemGetArgs, MemSearchArgs, MemTimelineArgs, SaveMemoryArgs, memoryApiLimits } from '@ctc/shared/schemas/memory';
@@ -73,6 +74,7 @@ async function save(deps: MemoryApiDeps, ctx: Ctx, rawArgs: unknown): Promise<Mc
   const fact = { kind: args.kind as Kind, scope: args.scope as Scope, text: clean, confidence: 1 };
   const { id, action } = await applyBands(ports, fact, deps.config.memory.bands);
   await rotateMem(deps, ctx, ctxP.projectId);
+  if (args.scope === 'global') await rotateMem(deps, ctx, GLOBAL_MEM_EPOCH);
   return text(JSON.stringify({ id, action }));
 }
 

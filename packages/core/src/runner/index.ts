@@ -246,7 +246,7 @@ export {
 export type { AgentNode, StreamState, SweepProbe } from './exec.ts';
 export { NODE_TYPES, REF_RE, backEdgesOf, isRef, parseWorkflow, workflowLimits } from './workflow.ts';
 export type { FanoutChild, ParseResult, Workflow, WorkflowEdge, WorkflowNode } from './workflow.ts';
-export { childId, evalCondition, outText, parseChildId, planFanout, renderTemplate, scopeOf } from './template.ts';
+export { childId, evalCondition, outText, parseChildId, planFanout, renderTemplate, scopeOf, timeoutOf } from './template.ts';
 export type { FanoutPlan } from './template.ts';
 export { deriveRunStatus, isReadonlyNode, walkerComplete, walkerNext, walkerStart, walkerStatus } from './walker.ts';
 export type { CurrentStep, Todo, WalkerState } from './walker.ts';

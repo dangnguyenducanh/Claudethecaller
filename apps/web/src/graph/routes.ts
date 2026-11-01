@@ -62,7 +62,7 @@ export function graphRoutes(deps: GraphApiDeps): Route[] {
         nodesByType: s.nodesByType,
         edgesByRelation: s.edgesByRelation,
         lastBuild: s.lastBuild ? iso(s.lastBuild) : null,
-        guardTrips: (await deps.guardTrips?.(c)) ?? 0,
+        guardTrips: (await deps.guardTrips?.(c, s.lastBuild)) ?? 0,
       });
     }),
     route('POST', '/api/graph/build', 'body', GraphBuildBody, async (a, c) => {

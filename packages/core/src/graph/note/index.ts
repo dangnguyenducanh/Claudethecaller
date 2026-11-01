@@ -57,7 +57,7 @@ function isOutside(root: string, loc: string): boolean {
 
 type Segment = string[];
 
-/** Splits a shell command into segments of words at unquoted `||`, `&&`, `|`, `;`, `&` and newlines. Quotes group; an unmatched quote runs to the end; no expansion, no escapes. */
+/** Splits a shell command into segments of words at unquoted `||`, `&&`, `|`, `;`, `&` and newlines. Quotes group; an unmatched quote runs to the end; no expansion; a backslash only protects a following space or operator. */
 function segmentsOf(command: string): Segment[] {
   const out: Segment[] = [];
   let words: string[] = [];
@@ -74,13 +74,20 @@ function segmentsOf(command: string): Segment[] {
     if (words.length > 0) out.push(words);
     words = [];
   };
-  for (const ch of command) {
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i] as string;
     if (quote !== '') {
       if (ch === quote) quote = '';
       else cur += ch;
       continue;
     }
-    if (ch === '"' || ch === "'") {
+    const next = command[i + 1];
+    if (ch === '\\' && next !== undefined && /[\s;|&]/.test(next)) {
+      // a backslash before a space or an operator keeps it in the word (`grep spool\ drain`, `grep a\|b`); other escapes stay for tokensOf
+      cur += /\s/.test(next) ? ' ' : `\\${next}`;
+      has = true;
+      i++;
+    } else if (ch === '"' || ch === "'") {
       quote = ch;
       has = true;
     } else if (ch === '\n' || ch === ';' || ch === '|' || ch === '&') endSegment();
@@ -125,10 +132,14 @@ function searchOf(seg: Segment): Found | null {
   for (let k = 0; k < rest.length; k++) {
     const w = rest[k] as string;
     if (!dashes && w === '--') dashes = true;
-    else if (!dashes && w.startsWith('-')) {
-      if (VALUE_OPTIONS.has(w)) {
+    else if (!dashes && (w.startsWith('--regexp=') || /^-[A-Za-z]*e./.test(w))) {
+      // `--regexp=PAT` and `-ePAT` carry their pattern in the same word
+      seenE = true;
+      words.push(w.startsWith('--regexp=') ? w.slice('--regexp='.length) : w.slice(w.indexOf('e', 1) + 1));
+    } else if (!dashes && w.startsWith('-')) {
+      if (VALUE_OPTIONS.has(w) || (/^-[A-Za-z]+e$/.test(w) && !w.startsWith('--'))) {
         const value = rest[++k];
-        if ((w === '-e' || w === '--regexp') && value !== undefined) {
+        if ((w === '--regexp' || /^-[A-Za-z]*e$/.test(w)) && value !== undefined) {
           seenE = true;
           words.push(value);
         }
@@ -171,6 +182,8 @@ export function searchTerms(tool: string, input: unknown, o: { root: string }): 
       const command = input['command'];
       if (typeof command !== 'string') return none;
       for (const seg of segmentsOf(command.slice(0, max))) {
+        // `cd /tmp && grep ...` searches outside the root: the target of a `cd` counts as a location
+        if (seg[0] === 'cd' && seg[1] !== undefined) locations.push(seg[1]);
         const found = searchOf(seg);
         if (found) {
           words.push(...found.words);

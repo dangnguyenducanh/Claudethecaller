@@ -128,13 +128,15 @@ describe('D14 memory', () => {
     expect(rest.rows).toHaveLength(1);
     expect(rest.next).toBeNull();
   });
-  it('patch: empty patch returns the row, pinned/kind change in place, new text recomputes the hash and clears the embedding', async () => {
+  it('patch: empty patch returns the row, pinned/kind change in place, new text recomputes the hash and replaces the embedding only when one is given', async () => {
     const m = await s.repos.memory.add(A, mem('patch me', 30));
     expect((await s.repos.memory.patch(A, m.id, {}))?.id).toBe(m.id);
     expect((await s.repos.memory.patch(A, m.id, { pinned: true, kind: 'convention' }))).toMatchObject({ pinned: true, kind: 'convention' });
     const t = await s.repos.memory.patch(A, m.id, { text: 'patched text', userId: 'user-b' } as never);
     expect([t?.text, t?.hash, t?.userId]).toEqual(['patched text', memoryHash('patched text'), 'user-a']);
-    expect((await s.repos.memory.nearest(A, { scope: 'global', embedding: unit(30), limit: 3 })).map((g) => g.memory.id)).not.toContain(m.id);
+    expect((await s.repos.memory.nearest(A, { scope: 'global', embedding: unit(30), limit: 3 })).map((g) => g.memory.id)).toContain(m.id);
+    await s.repos.memory.patch(A, m.id, { text: 'patched again', embedding: unit(33) });
+    expect((await s.repos.memory.nearest(A, { scope: 'global', embedding: unit(33), limit: 1 })).map((g) => g.memory.id)).toEqual([m.id]);
     expect((await caught(s.repos.memory.patch(A, m.id, { kind: 'rumour' }))).code).toBe('invalid');
     expect(await s.repos.memory.patch(A, 'nope', { pinned: true })).toBeNull();
   });
@@ -183,15 +185,64 @@ describe('D14 memory', () => {
     expect(await s.repos.memory.touch(B, [m.id])).toBe(0);
     expect(await s.repos.memory.touch(A, [])).toBe(0);
   });
+  it('a session that ended again with more content gets a second summary; the newest is the one shown', async () => {
+    await s.repos.sessions.upsert(AP, { id: 'sum-again', projectId: AP.projectId });
+    expect(await s.repos.memory.insertSummary(AP, { sessionId: 'sum-again', contentHash: 'again-1', nextSteps: 'old steps' })).toBe(true);
+    expect(await s.repos.memory.insertSummary(AP, { sessionId: 'sum-again', contentHash: 'again-2', nextSteps: 'new steps' })).toBe(true);
+    expect((await s.repos.memory.getSummary(AP, 'sum-again'))?.nextSteps).toBe('new steps');
+    expect((await s.repos.memory.lastSummaries(AP, 50)).filter((x) => x.sessionId === 'sum-again').map((x) => x.nextSteps)).toEqual(['new steps']);
+  });
+  it('the extract cursor of a session is stored and read back', async () => {
+    await s.repos.sessions.upsert(AP, { id: 'cursor-s', projectId: AP.projectId });
+    expect((await s.repos.sessions.get(AP, 'cursor-s'))?.extractedTurns).toBe(0);
+    await s.repos.sessions.setExtractedTurns(AP, 'cursor-s', 7);
+    expect((await s.repos.sessions.get(AP, 'cursor-s'))?.extractedTurns).toBe(7);
+  });
+  it('supersede back to an older text revives it instead of leaving no live memory', async () => {
+    const user = { userId: 'user-cycle' };
+    const npm = await s.repos.memory.add(user, mem('use npm', 70));
+    const pnpm = await s.repos.memory.supersede(user, npm.id, mem('use pnpm', 71));
+    const back = await s.repos.memory.supersede(user, pnpm?.id as string, mem('use npm', 70));
+    expect(back?.id).toBe(npm.id);
+    expect((await s.repos.memory.list(user)).rows.map((m) => m.text)).toEqual(['use npm']);
+    expect((await s.repos.memory.get(user, pnpm?.id as string))?.supersededBy).toBe(npm.id);
+  });
+  it('adding a text that was deleted brings it back as a live memory', async () => {
+    const user = { userId: 'user-readd' };
+    const first = await s.repos.memory.add(user, mem('spool drain retries', 72));
+    await s.repos.memory.softDelete(user, first.id);
+    const again = await s.repos.memory.add(user, mem('spool drain retries', 72));
+    expect([again.id, again.deletedAt]).toEqual([first.id, null]);
+    expect((await s.repos.memory.list(user)).rows.map((m) => m.id)).toEqual([first.id]);
+  });
+  it('recallLegs: with anyWord a sentence finds a memory by any of its words (without it all words must match), and globalOnly leaves project rows out', async () => {
+    const user = { userId: 'user-fts' };
+    const proj = { ...user, projectId: (await s.repos.projects.upsert(user, { root: '/fts/p' })).id };
+    const g = await s.repos.memory.add(user, mem('spool drain retries failed deliveries every 30 seconds', 73));
+    const p = await s.repos.memory.add(proj, mem('spool project note', 74, { scope: 'project' }));
+    const ids = async (q: string, globalOnly = false) => (await s.repos.memory.recallLegs(proj, { queryText: q, queryVector: null, perLeg: 10, anyWord: true, ...(globalOnly ? { globalOnly } : {}) })).fts.map((m) => m.id);
+    expect(await ids('myproj finish the spool retry work and update the docs then deploy')).toEqual(expect.arrayContaining([g.id, p.id]));
+    expect(await ids('spool retry')).toEqual(expect.arrayContaining([g.id]));
+    expect(await ids('spool', true)).toEqual([g.id]);
+    expect((await s.repos.memory.recallLegs(proj, { queryText: 'spool retry work', queryVector: null, perLeg: 10 })).fts).toEqual([]);
+  });
+  it('timeline gives as many following memories as asked even when they are created within a millisecond', async () => {
+    const user = { userId: 'user-tl-us' };
+    const made: string[] = [];
+    for (let i = 0; i < 4; i++) made.push((await s.repos.memory.add(user, mem(`us item ${i}`, 80 + i))).id);
+    await exec(s.url, `update "${s.schema}".memories set created_at = '2026-02-01 00:00:00.000100+00'::timestamptz + (substring(text from 9)::int * 100 || ' microseconds')::interval where user_id = 'user-tl-us'`);
+    const t = await s.repos.memory.timeline(user, { anchorId: made[0] as string, before: 0, after: 2 });
+    expect(t.memories.map((m) => m.text)).toEqual(['us item 0', 'us item 1', 'us item 2']);
+  });
   it('summaries: insert once per content, only for own sessions; newest first for the ctx project', async () => {
     await s.repos.sessions.upsert(AP, { id: 'sum-s1', projectId: AP.projectId });
     await s.repos.sessions.upsert(AP, { id: 'sum-s2', projectId: AP.projectId });
     expect(await s.repos.memory.insertSummary(AP, { sessionId: 'sum-s1', contentHash: 'c1', request: 'first' })).toBe(true);
-    expect(await s.repos.memory.insertSummary(AP, { sessionId: 'sum-s1', contentHash: 'c-other' })).toBe(false);
+    expect(await s.repos.memory.insertSummary(AP, { sessionId: 'sum-s1', contentHash: 'c1' })).toBe(false);
     expect(await s.repos.memory.insertSummary(AP, { sessionId: 'sum-s2', contentHash: 'c1' })).toBe(false);
     expect(await s.repos.memory.insertSummary(AP, { sessionId: 'sum-s2', contentHash: 'c2', request: 'second' })).toBe(true);
     expect(await s.repos.memory.insertSummary(B, { sessionId: 'sum-s1', contentHash: 'c9' })).toBe(false);
-    expect((await s.repos.memory.lastSummaries(AP, 5)).map((x) => x.request)).toEqual(['second', 'first']);
+    expect((await s.repos.memory.lastSummaries(AP, 5)).filter((x) => x.sessionId.startsWith('sum-s')).map((x) => x.request)).toEqual(['second', 'first']);
     expect((await s.repos.memory.lastSummaries(AP, 1))).toHaveLength(1);
     expect((await s.repos.memory.getSummary(AP, 'sum-s1'))?.request).toBe('first');
     expect(await s.repos.memory.getSummary(B, 'sum-s1')).toBeNull();

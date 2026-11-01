@@ -4,9 +4,9 @@
  * Memories page calls them. Why: the user reviews, corrects and removes what ctc remembers. Deliberately NOT done: Fastify, auth,
  * `Idempotency-Key`. Untrusted: params, query and body; a handler never throws.
  */
-import { memoryHash } from '@ctc/shared/memory-hash';
+import { GLOBAL_MEM_EPOCH } from '@ctc/shared/cache';
 import { sanitize } from '@ctc/core/sanitize';
-import { ConflictError, RepoError, type Ctx } from '@ctc/shared/repositories';
+import { RepoError, type Ctx } from '@ctc/shared/repositories';
 import { HistoryImportBody, HistoryListQuery, MemoryIdParams, MemoryListQuery, MemoryPatchBody, SummaryParams, memoryApiLimits } from '@ctc/shared/schemas/memory';
 import { ApiError, errorBody, iso, notFound, parse, statusOf, toApiError, type Route } from '../library/http.ts';
 import { ctxOf, errClass, memoryView, rotateMem, type MemoryApiDeps } from './common.ts';
@@ -60,18 +60,17 @@ export function memoryRoutes(deps: MemoryApiDeps): Route[] {
       const text = body.text === undefined ? undefined : sanitize(body.text).trim();
       if (text === '') throw new ApiError('invalid', 'text is empty', { path: ['body', 'text'] });
       const patch = { ...(text === undefined ? {} : { text }), ...(body.pinned === undefined ? {} : { pinned: body.pinned }), ...(body.kind === undefined ? {} : { kind: body.kind }) };
-      let m = await repos.memory.patch(ctx, id, patch);
-      if (!m) throw notFound('memory not found');
+      let embedding: number[] | undefined;
       if (text !== undefined) {
         try {
-          const [embedding] = await deps.embed([text]);
-          if (embedding) m = (await repos.memory.rewrite(ctx, id, { text, embedding, hash: memoryHash(text) })) ?? m;
+          embedding = (await deps.embed([text]))[0];
         } catch (e) {
-          if (e instanceof ConflictError) throw e;
-          deps.log?.('memory patch left without vector', { error: errClass(e) }); // judgment: the text change stands without a vector
+          deps.log?.('memory patch keeps its old vector', { error: errClass(e) }); // judgment: the text change stands; the old vector stays until the next edit
         }
       }
-      if (m.scope === 'project') await rotateMem(deps, ctx, m.projectId);
+      const m = await repos.memory.patch(ctx, id, { ...patch, ...(embedding === undefined ? {} : { embedding }) });
+      if (!m) throw notFound('memory not found');
+      await rotateMem(deps, ctx, m.scope === 'project' ? m.projectId : GLOBAL_MEM_EPOCH);
       return { status: 200, body: memoryView(m) };
     }),
 
@@ -79,7 +78,7 @@ export function memoryRoutes(deps: MemoryApiDeps): Route[] {
       const { id } = parse(MemoryIdParams, 'params', req.params);
       const m = await repos.memory.get(ctx, id);
       if ((await repos.memory.softDelete(ctx, id)) === 0) throw notFound('memory not found');
-      if (m?.scope === 'project') await rotateMem(deps, ctx, m.projectId);
+      if (m) await rotateMem(deps, ctx, m.scope === 'project' ? m.projectId : GLOBAL_MEM_EPOCH);
       return { status: 204 };
     }),
 

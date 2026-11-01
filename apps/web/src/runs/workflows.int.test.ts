@@ -6,7 +6,7 @@ import { advanceRun } from '../../../worker/src/runner/index.ts';
 import type { Ctx } from '@ctc/shared/repositories';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Route } from '../library/http.ts';
-import { handoffLimits, startLimits, workflowRoutes, workflowTools, type WorkflowApiDeps } from './index.ts';
+import { handoffLimits, startLimits, startRun, stepTimeoutS, workflowRoutes, workflowTools, type WorkflowApiDeps } from './index.ts';
 
 let s: Scratch;
 let h: Harness;
@@ -72,6 +72,20 @@ describe('workflow routes (D3, D4, D19, D23)', () => {
     expect(JSON.stringify((await h.stepsOf(row!.id))[0]?.output)).toContain('v1');
   });
 
+  it('a queued-again step gets the timeout_s of its node, not a fixed default', async () => {
+    const cap = await mkCap(h.ctx, `to-${rnd()}`, wf([{ id: 'a', type: 'agent', agent: 'claude', prompt: 'x', timeout_s: 7200 }, ...[]]));
+    const { run } = await startRun(depsOf(), h.ctx, { cap, repo: h.mkRepo(), trigger: 'api' });
+    expect(await stepTimeoutS(depsOf(), h.ctx, { runId: run.id, nodeId: 'a' })).toBe(7200);
+    expect(await stepTimeoutS(depsOf(), h.ctx, { runId: run.id, nodeId: 'missing' })).toBe(1800);
+  });
+  it('refuses a run without a repo when an agent node needs a worktree, and accepts it for shell-only workflows', async () => {
+    const routes = workflowRoutes(depsOf());
+    const post = (id: string) => call(routes, 'POST', '/api/workflows/:id/runs', { params: { id }, body: {} });
+    const agent = await mkCap(h.ctx, `ag-${rnd()}`, wf([{ id: 'a', type: 'agent', agent: 'claude', prompt: 'x', worktree: 'new' }]));
+    const r = await post(agent.id);
+    expect([r.status, r.body.error.code]).toEqual([422, 'invalid']);
+    expect((await post((await mkCap(h.ctx, `sh-${rnd()}`, wf([sh('a', 'true')]))).id)).status).toBe(202);
+  });
   it('answers 422 for bad arguments, 404 for a foreign or wrong-kind capability and lists runs with a page size', async () => {
     const routes = workflowRoutes(depsOf());
     const cap = await mkCap(h.ctx, `wf-${rnd()}`, wf([sh('a', 'true')]));
