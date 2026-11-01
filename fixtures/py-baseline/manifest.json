@@ -1,0 +1,37 @@
+{
+ "api": {
+  "recorded": 21,
+  "skipped": 38
+ },
+ "daemon_url": "http://127.0.0.1:18310",
+ "git_sha": "8128219",
+ "graph": {
+  "errors": 3,
+  "questions_sha256": "d742b2c81973bd35cc02b98b50317b46a0d0105e9ccad56b12828bbf385d33cf",
+  "rows": 30
+ },
+ "health": {
+  "db": "ok",
+  "embedder": "ok",
+  "library_version": "196c3ab517449e5d48919fa8d0fbe29a",
+  "llm": "ok",
+  "mode": "local",
+  "redis": "ok",
+  "reranker": "ok"
+ },
+ "library_version": "196c3ab517449e5d48919fa8d0fbe29a",
+ "limited": null,
+ "local": {
+  "file": "local/search.own.jsonl",
+  "rows": 71,
+  "sha256": "27c1a618f97c364df2ecdf6243f4494c5904ea6f05b817b02174cd6e34d3b5cf"
+ },
+ "prompts": {
+  "own": 71,
+  "skillret": 129,
+  "total": 200,
+  "unstable_own": 0,
+  "unstable_skillret": []
+ },
+ "recorded_at": "2026-11-01T00:24:20+00:00"
+}

@@ -6,7 +6,7 @@
  * builds it; a submitted `llm.enrich` job stays queued and shows its age on the Jobs page, spec:202), `runnerHandlers` on its own (the engine wraps it).
  * Untrusted: nothing read here; the handlers re-validate their payloads.
  */
-import { createCache } from '@ctc/shared/cache';
+import { applyCacheConfig, createCache } from '@ctc/shared/cache';
 import type { Config } from '@ctc/shared/env';
 import { createChat, createEmbedder } from '@ctc/shared/models';
 import { createQueues, submitJob, type JobRow, type JobsPort } from '@ctc/shared/queues';
@@ -55,6 +55,7 @@ export type Worker = {
 export function composeWorker(o: { config: Config; db: Db; namespace: string; runsDir: string; dev: boolean; log: Log }): Worker {
   const { config, db, log } = o;
   const repos = createRepositories(db);
+  applyCacheConfig(config);
   const cache = createCache({ url: config.redis_url, namespace: o.namespace, log });
   const queues = createQueues({ url: config.redis_url, namespace: o.namespace });
   const embed = createEmbedder({ url: config.embed_url });
@@ -85,7 +86,7 @@ export function composeWorker(o: { config: Config; db: Db; namespace: string; ru
     setProgress: (id, progress) => jobs.setProgress(sctx, id, progress),
   };
 
-  const engine: EngineDeps = { repos, config, runsDir: o.runsDir, reportBase: `http://127.0.0.1:${config.port}`, submit, log };
+  const engine: EngineDeps = { repos, config, runsDir: o.runsDir, reportBase: `http://127.0.0.1:${config.port}`, dev: o.dev, submit, log };
   const library = libraryHandlers({ repos, config, submit, cache, embed, log });
   const graph = graphHandlers({ repos, config, cache, embed, log });
   const handlers = mergeHandlers(

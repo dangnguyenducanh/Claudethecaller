@@ -91,6 +91,9 @@ function expandHome(path: string, home: string): string {
   return path.startsWith('~/') ? join(home, path.slice(2)) : path;
 }
 
+const MAX_YAML_CHARS = 262144;
+const QUOTED_OR_COMMENT = /"(?:[^"\\\n]|\\.)*"|'[^'\n]*'|(?<=^|\s)#.*/gm;
+
 /** Reads and parses one YAML file. Returns the mapping, or pushes one issue and returns undefined. */
 function readYaml(dir: string, name: string, required: boolean, issues: ConfigIssue[]): Raw | undefined {
   const file = `config/${name}.yaml`;
@@ -106,8 +109,10 @@ function readYaml(dir: string, name: string, required: boolean, issues: ConfigIs
     if (code === 'ENOENT') return required ? fail('not found') : undefined;
     return fail(`cannot read: ${code ?? 'unknown error'}`);
   }
-  // judgment: a tab right after `:` or `-`, or as indentation, is refused (editors mix tabs and spaces; the Python reader sees a different file).
-  if (/^[ ]*\t|[:-]\t/m.test(text)) return fail('yaml: tab characters are not allowed as indentation or after ":" / "-"');
+  // judgment: the parser's own memory use is unbounded on pathological input (5 MB of `[` aborts V8), so a config file is capped well above any real one.
+  if (text.length > MAX_YAML_CHARS) return fail(`yaml: file is larger than ${MAX_YAML_CHARS} characters`);
+  // judgment: a tab right after `:` or `-`, or as indentation, is refused (editors mix tabs and spaces; the Python reader sees a different file); quoted scalars and comments are not checked.
+  if (/^[ ]*\t|[:-]\t/m.test(text.replace(QUOTED_OR_COMMENT, ''))) return fail('yaml: tab characters are not allowed as indentation or after ":" / "-"');
   const doc = parseDocument(text, { schema: 'core', version: '1.2', logLevel: 'error' });
   const problem = doc.errors[0] ?? doc.warnings[0];
   if (problem) return fail(`yaml: ${(problem.message.split('\n')[0] ?? '').replace(/:$/, '')}`);

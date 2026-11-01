@@ -28,6 +28,20 @@ describe('watchLibrary (D20)', () => {
     await sleep(900);
     expect(calls).toBe(1);
   });
+  it('ignores writes outside the library directories such as session transcripts', async () => {
+    const d = tree.home();
+    let calls = 0;
+    const w = watchLibrary({ roots: [d], onChange: () => void calls++, debounceMs: 200 });
+    await sleep(150);
+    tree.put(path.join(d, 'projects/-x/s.jsonl'), '{}\n');
+    tree.put(path.join(d, 'todos/t.json'), '[]');
+    await sleep(800);
+    expect(calls).toBe(0);
+    tree.put(path.join(d, 'plugins/installed_plugins.json'), '{}');
+    await sleep(800);
+    expect(calls).toBe(1);
+    w.close();
+  });
   it('contains a throwing or rejecting onChange', async () => {
     const d = tree.home();
     const seen: unknown[] = [];

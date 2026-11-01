@@ -135,6 +135,28 @@ describe('scanLibrary changes and removal (D6, D7, D14)', () => {
     const back = await scan(ctx, h, deps);
     expect([back.created, (await s.repos.library.get(ctx, id))?.removedAt, (await versions(ctx, id)).length, calls.length]).toEqual([[], null, 1, 2]);
   });
+  it('submits a revived capability under a new job id so the finished job of its version does not swallow it', async () => {
+    const h = tree.home();
+    tree.put(path.join(h, 'agents/a.md'), skillMd('a', 'agent'));
+    const ctx = newUser();
+    const calls: string[] = [];
+    const deps = { submit: async (x: { id?: string }) => void calls.push(x.id ?? '') };
+    await scan(ctx, h, deps);
+    const text = fs.readFileSync(path.join(h, 'agents/a.md'), 'utf8');
+    fs.rmSync(path.join(h, 'agents/a.md'));
+    await scan(ctx, h, deps);
+    tree.put(path.join(h, 'agents/a.md'), text);
+    await scan(ctx, h, deps);
+    expect(calls).toHaveLength(2);
+    expect(new Set(calls).size).toBe(2);
+  });
+  it('a capability with an escaped NUL is skipped and the others after it are still versioned', async () => {
+    const h = tree.home();
+    tree.put(path.join(h, 'skills/a-nul/SKILL.md'), '---\nname: a-nul\ndescription: "a\\0b"\n---\n');
+    tree.put(path.join(h, 'skills/b-ok/SKILL.md'), skillMd('b-ok', 'fine'));
+    const r = await scan(newUser(), h);
+    expect([r.created.map((c) => c.name), r.skipped.map((x) => x.code)]).toEqual([['b-ok'], ['bad_yaml']]);
+  });
   it('never removes a capability of an unwalked root or one that was found but skipped; versions are kept', async () => {
     const h = tree.home();
     tree.put(path.join(h, 'agents/keep.md'), skillMd('keep', 'agent'));

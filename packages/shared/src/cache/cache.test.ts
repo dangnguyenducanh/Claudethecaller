@@ -121,3 +121,18 @@ describe('fail-open (D6, D8, D11)', () => {
     expect(await c.epoch.get('graph', 'u', 'p')).toBeNull();
   });
 });
+
+describe('applyCacheConfig', () => {
+  it('writes cache.* and rate_limit_per_min into the live limits and ttl constants', async () => {
+    const { applyCacheConfig, cacheLimits, ttl } = await import('./limits.ts');
+    const before = { limits: { ...cacheLimits }, ttl: { ...ttl } };
+    try {
+      applyCacheConfig({ rate_limit_per_min: 7, cache: { l1_size: 3, redis_timeout_s: 0.05, down_for_s: 2, ttl: { sug: 11, ctx: 22, unknown: 5 } } });
+      expect(cacheLimits).toMatchObject({ l1Max: 3, redisTimeoutMs: 50, downForMs: 2000, rateLimitPerMin: 7 });
+      expect(ttl).toMatchObject({ sug: 11, ctx: 22, emb: before.ttl.emb });
+    } finally {
+      Object.assign(cacheLimits, before.limits);
+      Object.assign(ttl, before.ttl);
+    }
+  });
+});

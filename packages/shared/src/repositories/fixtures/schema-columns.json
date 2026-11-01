@@ -942,6 +942,12 @@
   "is_nullable": "YES"
  },
  {
+  "table_name": "sessions",
+  "column_name": "extracted_turns",
+  "data_type": "integer",
+  "is_nullable": "NO"
+ },
+ {
   "table_name": "wf_runs",
   "column_name": "id",
   "data_type": "bigint",

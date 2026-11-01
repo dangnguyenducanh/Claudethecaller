@@ -56,7 +56,7 @@ export const graphOf = (vectors: { id: string; embedding: number[] }[] = [], nod
 export type FakeOptions = {
   index?: GraphIndex; vectors?: { id: string; embedding: number[] }[]; epoch?: { v: string | null }; seedCache?: [string, string][];
   byRootFails?: boolean; noProject?: boolean; embedDelay?: number; embedIgnoreSignal?: boolean; embedFails?: boolean; embedVec?: number[]; graphFails?: boolean;
-  skillsFail?: boolean; hits?: unknown[]; skillDegraded?: string[]; noCache?: boolean; cacheGetFails?: boolean; cacheSetFails?: boolean; cacheSetHangs?: boolean;
+  skillsFail?: boolean; blockedSkills?: string[]; hits?: unknown[]; skillDegraded?: string[]; noCache?: boolean; cacheGetFails?: boolean; cacheSetFails?: boolean; cacheSetHangs?: boolean;
   epochFails?: boolean; query?: Record<string, number>; push?: Record<string, number>; ctxOf?: (req: unknown) => unknown;
 };
 
@@ -110,6 +110,7 @@ export function fakeDeps(o: FakeOptions = {}) {
       if (o.skillsFail) throw new Error('boom');
       return { hits: o.hits ?? [], degraded: o.skillDegraded ?? [], ms: { load: 0, embed: 0, rank: 0, rerank: 0, total: 0 } };
     },
+    blocked: async () => new Set(o.blockedSkills ?? []),
   };
   const cache = o.noCache ? undefined : {
     get: async (k: string) => { st.ev.push(`cacheGet:${pre(k)}`); st.gets.push(k); if (o.cacheGetFails) throw new Error('redis'); return store.has(k) ? JSON.parse(store.get(k) as string) : undefined; },

@@ -5,11 +5,11 @@ import { first, type Db } from './db.ts';
 import { ConflictError, RepoError } from './errors.ts';
 import { keyset, type Page } from './page.ts';
 
-export type Session = { id: string; userId: string; projectId: string; startedAt: Date; endedAt: Date | null; model: string; tokens: number; transcriptPath: string | null };
+export type Session = { id: string; userId: string; projectId: string; startedAt: Date; endedAt: Date | null; model: string; tokens: number; transcriptPath: string | null; extractedTurns: number };
 export type SessionInput = { id: string; projectId: string; startedAt?: Date | string; endedAt?: Date | string | null; model?: string; tokens?: number; transcriptPath?: string | null };
 
-const RET = sql.raw('id, user_id, project_id, started_at, ended_at, model, tokens, transcript_path');
-const COLS = sql.raw('s.id, s.user_id, s.project_id, s.started_at, s.ended_at, s.model, s.tokens, s.transcript_path');
+const RET = sql.raw('id, user_id, project_id, started_at, ended_at, model, tokens, transcript_path, extracted_turns');
+const COLS = sql.raw('s.id, s.user_id, s.project_id, s.started_at, s.ended_at, s.model, s.tokens, s.transcript_path, s.extracted_turns');
 
 export const sessionsRepo = (db: Db) => {
   const k = db.kysely;
@@ -38,6 +38,10 @@ export const sessionsRepo = (db: Db) => {
       const project = await first(k, sql`select 1 as ok from projects where user_id = ${ctx.userId} and id = ${input.projectId}`);
       if (!project) throw new RepoError('not_found', 'project not found');
       throw new ConflictError('session id already in use');
+    },
+    /** Records how many user turns of the transcript the memory extract has read, so the next extract starts after them. */
+    async setExtractedTurns(ctx: Ctx, id: string, turns: number): Promise<void> {
+      await first(k, sql`update sessions set extracted_turns = ${Math.max(0, Math.trunc(turns))} where user_id = ${ctx.userId} and id = ${String(id)} returning id`);
     },
     async get(ctx: Ctx, id: string): Promise<Session | null> {
       return first<Session>(k, sql`select ${COLS} from sessions s where s.user_id = ${ctx.userId} and s.id = ${String(id)}`);

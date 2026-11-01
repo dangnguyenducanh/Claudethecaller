@@ -71,6 +71,7 @@ async function main(stdin) {
   if (mode === 'fail') { process.stderr.write('boom\\nbad thing\\n'); process.exit(3); }
   if (mode === 'hang') { setInterval(() => {}, 1000); return; }
   if (mode === 'quota') { line({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: 1893456000 } }); setInterval(() => {}, 1000); return; }
+  if (mode === 'quota_exit') { line({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: 1893456000 } }); line({ type: 'result', is_error: true, result: 'limit' }); process.exit(1); }
   if (mode === 'suicide') { process.kill(-Number(fs.readFileSync('/proc/self/stat', 'utf8').replace(/^.*\\) /, '').split(' ')[2]), 'SIGKILL'); await wait(5000); return; }
   if (ms) await wait(ms);
   if (/FAKE_EDIT=1/.test(stdin)) fs.appendFileSync('README.md', 'edited\\n');

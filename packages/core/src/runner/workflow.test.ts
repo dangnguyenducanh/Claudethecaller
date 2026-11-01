@@ -92,6 +92,15 @@ describe('parseWorkflow (D3, D4, D5, D10)', () => {
     expect(errors(doc([{ id: 'j', type: 'join' }], [{ from: 't', to: 'j' }]))).toContain('join j: needs exactly one incoming edge, from a fanout node');
   });
 
+  it.each(['echo "{{input.m}}"', "echo '{{input.m}}'", 'echo \\{{input.m}}', 'echo "a $(echo {{input.m}})"'])('a shell line with %s is refused', (run) => {
+    expect(errors(doc([sh('p', run)], chain('t', 'p'))).join('\n')).toContain('node p: a {{placeholder}} in run must not sit inside quotes');
+  });
+  it('a bare placeholder, and one after a closed quote, is fine in a shell line', () => {
+    expect(parseWorkflow(doc([sh('p', 'echo "a" {{input.m}} \'b\' {{p.out}}')], chain('t', 'p'))).ok).toBe(true);
+  });
+  it.each(['git -C . push origin main', 'git -c core.x=1 push', 'git --no-pager push', 'gh api -X PUT repos/o/r/pulls/1/merge', 'gh -R o/r pr merge 1'])('%s needs an approval node', (run) => {
+    expect(errors(doc([sh('p', run)], chain('t', 'p')))).toContain('node p: git push or gh pr needs an approval node on every path before it');
+  });
   it('a git push or gh pr needs an approval on every path before it', () => {
     const msg = (id: string) => `node ${id}: git push or gh pr needs an approval node on every path before it`;
     expect(errors(doc([sh('p', 'git push origin main')], chain('t', 'p')))).toContain(msg('p'));

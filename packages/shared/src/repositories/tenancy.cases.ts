@@ -103,6 +103,7 @@ export const cases: Cases = {
       { expect: 'as-caller', run: async ({ r, ctx, b }) => (await r.sessions.upsert({ userId: ctx.userId }, { id: 'sess-new-b', projectId: b.projectId, ...hostile })).userId === ctx.userId },
     ],
     get: { expect: 'zero', run: ({ r, ctx, a }) => r.sessions.get(ctx, a.sessionId) },
+    setExtractedTurns: { expect: 'zero', run: async ({ r, ctx, a }) => (await r.sessions.setExtractedTurns(ctx, a.sessionId, 5), 0) },
     list: [
       { expect: 'no-a', run: ({ r, ctx }) => r.sessions.list(ctx, {}) },
       { expect: 'zero', run: ({ r, ctx, a }) => r.sessions.list(ctx, { projectId: a.projectId }) },

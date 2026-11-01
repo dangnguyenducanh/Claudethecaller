@@ -151,6 +151,12 @@ async function foundSingle(kind: Kind, dir: string, file: string, defaultName: s
   const abs = path.join(dir, file);
   const base = { kind, defaultName, rootPath: dir, mainPath: file, files: [] as FileInput[], warnings: [] as Skip[] };
   try {
+    // a link may be followed only inside its capability directory (the directory itself may be a link): a plugin must not publish `agents/x.md -> ~/.ssh/id_rsa`
+    const realRoot = await fs.realpath(dir);
+    const real = await fs.realpath(abs);
+    if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
+      return { ...base, skip: { path: abs, code: 'symlink_outside', message: 'symlink points outside the root' } };
+    }
     const st = await fs.stat(abs);
     if (!st.isFile()) return { ...base, skip: unreadable(abs, 'not a regular file') };
     if (st.size > limits.maxBytes) return { ...base, skip: { path: abs, code: 'too_large', message: `more than ${limits.maxBytes} bytes` } };

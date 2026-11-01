@@ -14,6 +14,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { applyBands, bandPorts, memoryLimits, parseMemoryFile, projectDirName, recallLimits, type Action } from '@ctc/core/memory';
+import { GLOBAL_MEM_EPOCH } from '@ctc/shared/cache';
 import type { Chat, Embed } from '@ctc/shared/models';
 import type { Ctx, Repositories } from '@ctc/shared/repositories';
 import type { Handler } from '../jobs/index.ts';
@@ -151,6 +152,7 @@ export function memoryJobHandlers(deps: MemoryJobDeps): { 'memory.import': Handl
       const { action } = await applyBands(ports, { kind: parsed.kind, scope, text: parsed.text, confidence: 1 }, deps.config.memory.bands);
       counts[action.toLowerCase() as Lowercase<Action>]++;
       if (action !== 'NOOP' && projectId !== undefined && scope === 'project') rotated.add(projectId);
+      if (action !== 'NOOP' && scope === 'global') rotated.add(GLOBAL_MEM_EPOCH);
     }
     for (const projectId of rotated) await rotate(userId, projectId, job.jobId);
     log?.('import done', { jobId: job.jobId, ...counts });

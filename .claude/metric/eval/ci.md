@@ -7,7 +7,7 @@ and build, and the secret scan when `gitleaks` is installed.
 ## Run
 
 ```
-CTC_DATABASE_URL=postgres://postgres:...@127.0.0.1:18304/postgres CTC_REDIS_URL=redis://127.0.0.1:18395/0 bash scripts/check.sh
+PG=postgres://postgres:...@127.0.0.1:18304/postgres CTC_SCRATCH_PG_URL=$PG CTC_TEST_DATABASE_URL=$PG CTC_TEST_ADMIN_URL=$PG CTC_SCRATCH_REDIS_URL=redis://127.0.0.1:18395 CTC_DATABASE_URL=$PG CTC_REDIS_URL=redis://127.0.0.1:18395/0 bash scripts/check.sh
 ```
 
 `node .claude/metric/eval/switch/run.mjs --only ci` runs it with that environment and rewrites the table.

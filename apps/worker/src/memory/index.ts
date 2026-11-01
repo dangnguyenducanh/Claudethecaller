@@ -3,7 +3,7 @@
  * (NOOP / UPDATE / SUPERSEDE / ADD) into `memories`; the whole session becomes 6 summary fields in `session_summaries`.
  * Called from: apps/worker main, bound into `startWorkers({ handlers })` (apps/worker/src/jobs/index.ts). Jobs come from the spool drain
  * (apps/web/src/spool, T4.1) and later from `memory.distill` (T4.3). Why: spec:513-523, so the next session starts with what the user said.
- * Deliberately NOT done: the worker main and config wiring, recall, a "since last extract" cursor, embedding backfill (`memory.import`, `memory.distill` and the file watch live in jobs.ts and watch.ts, re-exported at the end).
+ * Deliberately NOT done: the worker main and config wiring, recall, embedding backfill (`memory.import`, `memory.distill` and the file watch live in jobs.ts and watch.ts, re-exported at the end).
  * Untrusted: the job payload (shape checked by runAttempt, meaning checked here), the transcript path and every byte of the file, every model reply.
  * Never: writes the transcript, logs user or model text, builds a fact from assistant text, hard-deletes a memory.
  */
@@ -16,6 +16,7 @@ import {
   EXTRACT_SCHEMA, SUMMARY_SCHEMA, sessionText, summaryHash, summaryMessages, userTurns,
   type Action, type ChatMessage,
 } from '@ctc/core/memory';
+import { GLOBAL_MEM_EPOCH } from '@ctc/shared/cache';
 import type { Chat, Embed } from '@ctc/shared/models';
 import { JobDropped } from '@ctc/shared/queues';
 import type { Ctx, Repositories } from '@ctc/shared/repositories';
@@ -101,11 +102,15 @@ export function memoryHandlers(deps: MemoryDeps): { 'llm.extract': Handler; 'llm
   const extract = async (payload: ExtractPayload, job: JobCtx): Promise<unknown> => {
     const { userId, sessionId, projectId } = payload;
     const ctx: Ctx = projectId ? { userId, projectId } : { userId };
-    const transcriptPath = payload.transcriptPath ?? (await repos.sessions.get({ userId }, sessionId))?.transcriptPath;
+    const session = await repos.sessions.get({ userId }, sessionId);
+    const transcriptPath = payload.transcriptPath ?? session?.transcriptPath;
     const jsonl = await readTranscript(transcriptPath);
     if (isRunnerSession(jsonl)) throw new JobDropped('runner_session');
-    const input = extractInput(userTurns(jsonl));
-    if (input === '') return { skipped: 'no_words' };
+    const turns = userTurns(jsonl);
+    // every Stop enqueues an extract: only the user turns after the last one read are sent to the model (a shorter transcript was rewritten, so it starts over)
+    const seen = session !== null && session.extractedTurns <= turns.length ? session.extractedTurns : 0;
+    const input = extractInput(turns.slice(seen));
+    if (input === '') return { skipped: seen > 0 && seen === turns.length ? 'no_new_turns' : 'no_words' };
 
     const reply = await askTwice(
       (retry) => extractMessages(input, retry === undefined ? undefined : { retry }),
@@ -115,11 +120,16 @@ export function memoryHandlers(deps: MemoryDeps): { 'llm.extract': Handler; 'llm
     );
     const ports = bandPorts({ memory: repos.memory, embed, chat, today }, ctx, { source: { type: 'session', sessionId, transcriptPath }, signal: job.signal });
     const counts: Record<Action, number> = { NOOP: 0, UPDATE: 0, SUPERSEDE: 0, ADD: 0 };
+    let globalChanged = false;
     for (const fact of reply.facts) {
       job.signal.throwIfAborted();
-      counts[(await applyBands(ports, fact, deps.config.memory.bands)).action]++;
+      const { action } = await applyBands(ports, fact, deps.config.memory.bands);
+      counts[action]++;
+      if (fact.scope === 'global' && action !== 'NOOP') globalChanged = true;
     }
+    if (session !== null) await repos.sessions.setExtractedTurns({ userId }, sessionId, turns.length);
     if (reply.facts.length > 0) await rotate(userId, projectId, job.jobId);
+    if (globalChanged) await rotate(userId, GLOBAL_MEM_EPOCH, job.jobId);
     const result = { facts: reply.total, noop: counts.NOOP, update: counts.UPDATE, supersede: counts.SUPERSEDE, add: counts.ADD, skipped: reply.skipped };
     log?.('extract done', { jobId: job.jobId, ...result });
     return result;
@@ -133,11 +143,13 @@ export function memoryHandlers(deps: MemoryDeps): { 'llm.extract': Handler; 'llm
     const projectId = session.projectId; // the row is the truth; the payload came from a spool file
     if (payload.projectId !== undefined && payload.projectId !== projectId) log?.('summarize payload project ignored', { jobId: job.jobId });
     const ctx: Ctx = { userId, projectId };
-    if (await repos.memory.getSummary(ctx, sessionId)) return { skipped: 'exists' };
     const jsonl = await readTranscript(session.transcriptPath);
     if (isRunnerSession(jsonl)) throw new JobDropped('runner_session');
     const text = sessionText(jsonl);
     if (text === '') return { skipped: 'empty' };
+    // a session that ended again with more content gets a new summary; the same content is a no-op without a model call
+    const contentHash = summaryHash(sessionId, text);
+    if ((await repos.memory.getSummary(ctx, sessionId))?.contentHash === contentHash) return { skipped: 'exists' };
 
     const reply = await askTwice(
       (retry) => summaryMessages(text, retry === undefined ? undefined : { retry }),
@@ -146,7 +158,7 @@ export function memoryHandlers(deps: MemoryDeps): { 'llm.extract': Handler; 'llm
       job.signal,
     );
     job.signal.throwIfAborted();
-    const inserted = await repos.memory.insertSummary(ctx, { sessionId, contentHash: summaryHash(sessionId, text), ...reply.summary });
+    const inserted = await repos.memory.insertSummary(ctx, { sessionId, contentHash, ...reply.summary });
     if (inserted) await rotate(userId, projectId, job.jobId);
     log?.('summarize done', { jobId: job.jobId, inserted });
     return { inserted };

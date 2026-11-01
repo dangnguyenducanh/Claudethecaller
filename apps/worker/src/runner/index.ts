@@ -20,6 +20,7 @@ import {
 import { JobDropped } from '@ctc/shared/queues';
 import { createSystemCtx, type Ctx } from '@ctc/shared/repositories';
 import type { Handler } from '../jobs/index.ts';
+import { watchStep } from './common.ts';
 import { finalizeAttempt, follow, LogTail, markStartUnknown, readExitRecord, timeoutStep } from './follow.ts';
 import { ensureExcluded, gitErrorLine, repoKey, runGit, withRepo } from './git.ts';
 import { killGroup, killIfOurs, procStartTime, runGroup, scrubbedEnv } from './proc.ts';
@@ -63,9 +64,9 @@ function diffInput(node: AgentNode | null, run: Run | null, step: Step): { workt
 }
 
 /** `running → failed` (which may break the circuit, T6.1). A concurrent move of the step is left alone and the given row is returned. */
-async function failNow(deps: RunnerExecDeps, ctx: Ctx, step: Step, error: string): Promise<Step> {
+async function failNow(deps: RunnerExecDeps, ctx: Ctx, step: Step, error: string, patch?: Record<string, unknown>): Promise<Step> {
   try {
-    return await failStep(deps.repos.runner, ctx, { step, to: 'failed', error, maxFailures: deps.config.runner.max_failures });
+    return await failStep(deps.repos.runner, ctx, { step, to: 'failed', error, ...(patch === undefined ? {} : { patch }), maxFailures: deps.config.runner.max_failures });
   } catch (e) {
     if (!isConflict(e)) throw e;
     return step;
@@ -111,7 +112,7 @@ class Attempt {
 
   /** `running → failed` with the exact error text (D3c); the caller throws the returned `Ended` to unwind. */
   async fail(error: string): Promise<Ended> {
-    this.step = await failNow(this.deps, this.ctx, this.step, error);
+    this.step = await failNow(this.deps, this.ctx, this.step, error, { promptOutcome: 'not_delivered' }); // every caller fails before the agent starts
     return new Ended();
   }
 
@@ -124,6 +125,18 @@ class Attempt {
 export function runnerHandlers(deps: RunnerExecDeps): { 'runner.step': Handler } {
   const port = deps.repos.runner;
   const cfg = () => deps.config.runner;
+
+  /** Runs `fn` with a signal that also fires when the step leaves `running` (a cancel); a cancelled step then unwinds quietly. */
+  async function cancellable<T extends { aborted: boolean }>(a: Attempt, fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const w = watchStep(deps, a.ctx, a.step.id, a.signal);
+    try {
+      const r = await fn(w.signal);
+      if (r.aborted && w.reason() === 'step') throw new Ended();
+      return r;
+    } finally {
+      w.stop();
+    }
+  }
 
   /** Stage worktree (only `new`): returns the worktree path and the setup entries to run. */
   async function makeWorktree(a: Attempt): Promise<{ path: string; entries: string[] }> {
@@ -174,7 +187,7 @@ export function runnerHandlers(deps: RunnerExecDeps): { 'runner.step': Handler }
     const addMs = cfg().worktree.add_timeout_s * 1000;
     const add = await withRepo(key, async () => {
       await ensureExcluded({ repo, dir: cfg().worktree.dir, outFile: a.paths.git, timeoutMs: runnerExecLimits.gitTimeoutMs });
-      const r = await runGit({ repo, args: rec.add, outFile: a.paths.git, timeoutMs: addMs, signal: a.signal });
+      const r = await cancellable(a, (signal) => runGit({ repo, args: rec.add, outFile: a.paths.git, timeoutMs: addMs, signal }));
       if (r.code === 0) {
         const c = await runGit({ repo, args: rec.config, outFile: a.paths.git, timeoutMs: runnerExecLimits.gitTimeoutMs });
         // judgment: the base is only a record for the later merge; a failed config write does not fail the attempt
@@ -199,10 +212,10 @@ export function runnerHandlers(deps: RunnerExecDeps): { 'runner.step': Handler }
     const env = scrubbedEnv({ CTC_ROOT_PATH: a.run.repo ?? '', CTC_WORKTREE_PATH: worktree });
     for (const entry of entries) {
       const used = await fs.promises.stat(a.paths.setup).then((s) => s.size, () => 0);
-      const r = await runGroup({
+      const r = await cancellable(a, (signal) => runGroup({
         cmd: ['/bin/sh', '-c', entry], cwd: worktree, env, timeoutMs: Math.max(end - Date.now(), 1), maxOutputBytes: Math.max(cap - used, 0), outFile: a.paths.setup,
-        signal: a.signal, onStart: async (pid) => a.set({ pid, pidStartedAt: await procStartTime(pid) }),
-      });
+        signal, onStart: async (pid) => a.set({ pid, pidStartedAt: await procStartTime(pid) }),
+      }));
       if (r.aborted) throw await a.timeout();
       if (r.timedOut) throw await a.fail(`setup timed out after ${timeout_s} s`);
       if (r.overflow) throw await a.fail(`setup output over ${max_output_mb} MB`);
@@ -262,6 +275,7 @@ export function runnerHandlers(deps: RunnerExecDeps): { 'runner.step': Handler }
   /** Runs every stage of one claimed attempt. Unwinds with `Ended` once the step has its final or parked status. */
   async function execute(a: Attempt): Promise<void> {
     const { node, run } = a;
+    if (deps.dev === true) throw await a.fail('spawn refused: dev instance');
     let argv: string[];
     try {
       const configured = Object.hasOwn(cfg().agents, node.agent) ? cfg().agents[node.agent]?.argv : undefined;

@@ -92,6 +92,9 @@ describe('buildVersion (D13, D4)', () => {
     const r = buildVersion(input('fallback', [['SKILL.md', '---\ndescription: "  spaced  "\nname: 7\n---\n']]));
     expect(r).toMatchObject({ ok: true, input: { name: 'fallback', description: 'spaced' } });
   });
+  it.each([['an escaped NUL', 'a\\0b'], ['an unpaired surrogate', '\\ud800']])('%s in the description is bad_yaml, not a value Postgres rejects', (_n, esc) => {
+    expect(buildVersion(input('d', [['SKILL.md', `---\ndescription: "${esc}"\n---\n`]]))).toMatchObject({ ok: false, skip: { code: 'bad_yaml' } });
+  });
   it('reports only the first failing check in the D4 order', () => {
     const bad = (text: string, extra: [string, string][] = []) => buildVersion(input('d', [['SKILL.md', text], ...extra]), { ...libraryLimits, maxFiles: 2, maxDescription: 3 });
     expect(bad('---\nname: [unclosed\n---\n', [['a', 'a'], ['b', 'b']])).toMatchObject({ skip: { code: 'too_many_files' } });

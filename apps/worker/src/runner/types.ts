@@ -22,6 +22,8 @@ export type RunnerExecDeps = {
   };
   /** Absolute directory that holds one directory per run (the attempt dir). */
   runsDir: string;
+  /** A dev instance (`CTC_HOME` set) never spawns an agent or creates a worktree. */
+  dev?: boolean;
   /** Base URL of the report route, e.g. `http://127.0.0.1:18410`. */
   reportBase: string;
   resolveNode(ctx: Ctx, run: Run, step: Step): Promise<AgentNode | null>;

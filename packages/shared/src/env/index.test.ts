@@ -318,6 +318,19 @@ describe('must never (D1, D6, D7)', () => {
   it('a tab after a colon is a ConfigError on that file', () => {
     expect(issuesOf(fixture({ server: 'port:\t1\n' })).map((i) => [i.file, i.path])).toEqual([['config/server.yaml', '(file)']]);
   });
+  it('a tab inside a comment or a quoted scalar is valid YAML', () => {
+    expect(load(fixture({ server: 'runner:\n  max_failures: 3 # see:\tnote\n' })).runner.max_failures).toBe(3);
+    expect(load(fixture({ server: 'runner:\n  worktree:\n    dir: "a-\tb"\n' })).runner.worktree.dir).toBe('a-\tb');
+  });
+  it('a config file over the size cap is a ConfigError, not a parser out-of-memory abort', () => {
+    const issues = issuesOf(fixture({ server: `runner:\n  x: ${'['.repeat(300_000)}\n` }));
+    expect(issues[0]).toMatchObject({ file: 'config/server.yaml', path: '(file)' });
+  });
+  it('configuring one agent keeps the built-in ones', () => {
+    const c = load(fixture({ server: 'runner:\n  agents:\n    claude:\n      argv: [claude, -p]\n' }));
+    expect(c.runner.agents['claude']?.argv).toEqual(['claude', '-p']);
+    expect(c.runner.agents['codex']?.argv).toEqual(['codex', 'exec', '--json']);
+  });
   it('does not modify the env argument and returns the same result for the same input', () => {
     const env = { CTC_PORT: '19999', CTC_DATABASE_URL: 'postgresql://u:p@h:5432/d' };
     const copy = { ...env };

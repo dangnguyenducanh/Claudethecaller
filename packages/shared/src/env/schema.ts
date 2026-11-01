@@ -67,12 +67,16 @@ const cache = z
   })
   .prefault({});
 
+const DEFAULT_AGENTS = {
+  claude: { argv: ['claude', '-p', '--output-format', 'stream-json'] },
+  codex: { argv: ['codex', 'exec', '--json'] },
+};
+
+/** Configured agents are added to the built-ins (or replace one by name), never replace the whole map. */
 const agents = z
   .record(z.string(), z.strictObject({ argv: z.array(str).min(1) }))
-  .prefault({
-    claude: { argv: ['claude', '-p', '--output-format', 'stream-json'] },
-    codex: { argv: ['codex', 'exec', '--json'] },
-  });
+  .default({})
+  .transform((configured) => ({ ...DEFAULT_AGENTS, ...configured }));
 
 export const ConfigSchema = z.strictObject({
   embed_url: str.default('http://127.0.0.1:18300'),

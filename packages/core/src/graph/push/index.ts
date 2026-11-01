@@ -42,10 +42,12 @@ const bySlot = (a: Cand, b: Cand): number =>
  * score desc, hop asc, symbol before file, id asc. `file` candidates are distinct by path. A skill that is not a node stays a standalone candidate.
  * Throws only what `walkFrom` throws for a `depth` outside 0..3; the caller clamps it.
  */
-export function rankSlots(index: GraphIndex, o: { seeds: Seed[]; skills: SkillSeed[]; depth: number; perSlot: number }): Slots {
+export function rankSlots(
+  index: GraphIndex, o: { seeds: Seed[]; skills: SkillSeed[]; depth: number; perSlot: number; blockedSkills?: ReadonlySet<string> },
+): Slots {
   const skills = o.skills
     .map((s) => ({ kind: clean(s.kind), name: clean(s.name), score: s.score }))
-    .filter((s) => s.kind !== '' && s.name !== '');
+    .filter((s) => s.kind !== '' && s.name !== '' && o.blockedSkills?.has(`${s.kind}:${s.name}`) !== true);
   const inIndex = skills.filter((s) => index.nodes.has(`${s.kind}:${s.name}`));
   const walked = walkFrom(index, [...o.seeds, ...inIndex.map((s) => ({ id: `${s.kind}:${s.name}`, score: s.score }))], { depth: o.depth });
 
@@ -53,6 +55,7 @@ export function rankSlots(index: GraphIndex, o: { seeds: Seed[]; skills: SkillSe
   for (const h of walked) {
     const slot = slotOf(h);
     if (slot === null || h.id === '') continue;
+    if (slot === 'skill' && o.blockedSkills?.has(h.id) === true) continue;
     // judgment: a code node without a source path cannot be pointed at, so it is not a file candidate
     if (slot === 'file' && h.file === null) continue;
     all[slot].push({ id: h.id, label: h.label || localId(h.id) || h.file || '', type: h.type, file: h.file, line: h.line, score: h.score, hop: h.hop });

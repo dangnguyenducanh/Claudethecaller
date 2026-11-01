@@ -47,7 +47,15 @@ first_value() {
 }
 
 # Strip: every <private>, <system-reminder>, <persisted-output> block (tags included) is removed, repeated until none is left.
-# An opening tag without a closing tag removes everything to the end (privacy wins; the file then fails JSON parsing).
+# An opening tag without a closing tag removes the text up to the end of the JSON string it sits in (a file that merely mentions a tag stays valid
+# JSON); when no string end follows, everything to the end goes (privacy wins). Input without any of the three tags skips awk.
+case $raw in
+  *'<private>'* | *'<system-reminder>'* | *'<persisted-output>'*) strip=1 ;;
+  *) strip= ;;
+esac
+if [ -z "$strip" ]; then
+  payload=$raw
+else
 payload=$(printf '%s' "$raw" | awk '
   BEGIN { n = split("private system-reminder persisted-output", T, " ") }
   { s = s (NR > 1 ? "\n" : "") $0 }
@@ -61,7 +69,16 @@ payload=$(printf '%s' "$raw" | awk '
           out = out substr(s, 1, i - 1)
           s = substr(s, i + length(o))
           j = index(s, c)
-          if (j == 0) { s = ""; break }
+          if (j == 0) {
+            e = 0
+            for (k = 1; k <= length(s); k++) {
+              ch = substr(s, k, 1)
+              if (ch == "\\") k++
+              else if (ch == "\"") { e = k; break }
+            }
+            s = e > 0 ? substr(s, e) : ""
+            break
+          }
           s = substr(s, j + length(c))
         }
         s = out s
@@ -69,6 +86,7 @@ payload=$(printf '%s' "$raw" | awk '
     } while (changed)
     printf "%s", s
   }') || exit 0
+fi
 raw=
 
 event=unknown

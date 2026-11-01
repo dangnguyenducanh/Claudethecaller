@@ -31,6 +31,8 @@ export type SkillChannelDeps = {
 };
 export type SkillChannel = {
   search(ctx: Ctx, prompt: unknown, opts?: { k?: number; signal?: AbortSignal }): Promise<SkillSearch>;
+  /** `kind:name` ids (the graph's skill node ids) of the skills blocked for `ctx`, among those loaded; empty when unknown. */
+  blocked(ctx: Ctx): Promise<Set<string>>;
   reload(ctx: Ctx): Promise<{ ok: boolean; size: number }>;
   invalidate(userId?: string): void;
   onInval(msg: unknown): void;
@@ -238,6 +240,19 @@ export function createSkillChannel(deps: SkillChannelDeps): SkillChannel {
         degraded.add('store');
         return done([]);
       }
+    },
+
+    async blocked(ctx) {
+      const out = new Set<string>();
+      try {
+        if (typeof ctx !== 'object' || ctx === null || !isStr(ctx.userId)) return out;
+        const clean: Ctx = isStr(ctx.projectId) ? { userId: ctx.userId, projectId: ctx.projectId } : { userId: ctx.userId };
+        const ids = await blockedIds(clean);
+        if (ids.size > 0) for (const m of users.get(clean.userId)?.data?.meta ?? []) if (ids.has(m.capId)) out.add(`${m.kind}:${m.name}`);
+      } catch (err) {
+        deps.log?.('blocked skills lookup failed', { error: errName(err) });
+      }
+      return out;
     },
 
     async reload(ctx) {

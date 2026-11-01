@@ -1,0 +1,62 @@
+{
+ "daemon_url": "http://127.0.0.1:18310",
+ "gates_for_ts": {
+  "hook_pre_p95_ms": 40,
+  "suggest_cold_p95_ms": 150,
+  "suggest_l1_p95_ms": 10
+ },
+ "git_sha": "8128219",
+ "health": {
+  "db": "ok",
+  "embedder": "ok",
+  "library_version": "196c3ab517449e5d48919fa8d0fbe29a",
+  "llm": "ok",
+  "mode": "local",
+  "redis": "ok",
+  "reranker": "ok"
+ },
+ "host": {
+  "cpus": 24,
+  "load_1m": 6.26611328125
+ },
+ "limited": null,
+ "not_measured": [
+  {
+   "reason": "writes session and decision rows",
+   "what": "POST /v1/hook/prompt"
+  },
+  {
+   "reason": "does not exist in the Python daemon",
+   "what": "POST /v1/suggest"
+  }
+ ],
+ "prompts": 100,
+ "recorded_at": "2026-11-01T00:23:08+00:00",
+ "tiers": {
+  "pre": {
+   "max": 1.2,
+   "min": 0.3,
+   "n": 50,
+   "note_rate": 0.0,
+   "p50": 0.3,
+   "p95": 0.7,
+   "p99": 1.1
+  },
+  "search_miss": {
+   "max": 237.4,
+   "min": 111.3,
+   "n": 100,
+   "p50": 144.9,
+   "p95": 167.8,
+   "p99": 182.3
+  },
+  "search_warm": {
+   "max": 205.7,
+   "min": 110.3,
+   "n": 100,
+   "p50": 139.0,
+   "p95": 162.7,
+   "p99": 173.1
+  }
+ }
+}

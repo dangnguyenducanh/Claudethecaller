@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { fakeChat, handlersFor, jobCtx, reply, say, scratch, seedSession, tempHome, type Scratch } from './testing.ts';
 
@@ -28,12 +29,18 @@ describe('memory.idempotent', () => {
     expect(first).toHaveLength(3);
     expect(first.every((r) => r.reinforcementDates.length === 0)).toBe(true);
 
+    const afterFirst = calls.length;
+    expect(await run()).toEqual({ skipped: 'no_new_turns' });
+    expect(calls).toHaveLength(afterFirst);
+    const rewind = () => s.repos.sessions.setExtractedTurns({ userId: x.userId }, x.sessionId, 0);
+    await rewind();
     expect(await run()).toEqual({ facts: 3, noop: 3, update: 0, supersede: 0, add: 0, skipped: 0 });
     const second = await list();
     expect(second.map((r) => r.id).sort()).toEqual(first.map((r) => r.id).sort());
     for (const r of second) expect(r.reinforcementDates).toEqual([today]);
     const dates = second.map((r) => [r.id, r.reinforcementDates.join()]).sort();
 
+    await rewind();
     await run();
     expect((await list()).map((r) => [r.id, r.reinforcementDates.join()]).sort()).toEqual(dates);
 
@@ -43,5 +50,10 @@ describe('memory.idempotent', () => {
     expect(await sum()).toEqual({ skipped: 'exists' });
     expect(calls).toHaveLength(n);
     expect(await s.repos.memory.lastSummaries(x.ctx, 10)).toHaveLength(1);
+    // the session ends again with more words: a new summary, not a skip
+    fs.appendFileSync(x.transcriptPath, `${JSON.stringify(say('user', 'and also pin the node version'))}\n`);
+    expect(await sum()).toEqual({ inserted: true });
+    expect(await s.repos.memory.lastSummaries(x.ctx, 10)).toHaveLength(1);
+    expect(await s.repos.memory.getSummary(x.ctx, x.sessionId)).toMatchObject({ sessionId: x.sessionId });
   });
 });

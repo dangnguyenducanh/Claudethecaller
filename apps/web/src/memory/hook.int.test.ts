@@ -110,7 +110,7 @@ describe('hook start (D12)', () => {
     const deps = mkDeps(s.repos, { cache, embed });
     expect((await hook(deps, { body: { cwd: x.root }, ctx: x.user })).status).toBe(200);
     expect(cache.store.get(keys.proj(x.user.userId, x.root))).toEqual({ id: x.project.id, root: x.root });
-    expect(cache.sets.map((c) => c[0])).toContain(keys.ctx(x.user.userId, x.project.id, 'e1'));
+    expect(cache.sets.map((c) => c[0])).toContain(keys.ctx(x.user.userId, x.project.id, 'e1-e1'));
     const before = (await s.repos.memory.get(x.ctx, (await s.repos.memory.list(x.ctx, {})).rows[0]?.id as string))?.useCount;
     const calls = embed.calls.length;
     const again = await hook(deps, { body: { cwd: x.root }, ctx: x.user });
@@ -121,12 +121,22 @@ describe('hook start (D12)', () => {
     expect(none.sets.filter((c) => c[0].startsWith('ctx:'))).toEqual([]);
   });
 
+  it('the first session of a project that has no row yet still shows the global memories, however many other projects fill the legs', async () => {
+    const x = await seed('newproj');
+    await x.add('global', 'always use pnpm');
+    const crowd = await seed('crowd');
+    for (let i = 0; i < 120; i++) await crowd.add('project', `crowd note ${i}`);
+    const embed = (async (texts: string[]) => texts.map(() => vecOf('crowd note 1'))) as never;
+    const r = await hook(mkDeps(s.repos, { embed }), { body: { cwd: `/work/brandnew-${rnd()}` }, ctx: x.user });
+    expect([r.status, String(r.body)]).toEqual([200, expect.stringContaining('ctc: - [fact] always use pnpm')]);
+  });
+
   it('caches an empty block as the empty string and replies 204 from it', async () => {
     const x = await seed('cempty');
     const cache = fakeCache('e2');
     const deps = mkDeps(s.repos, { cache });
     expect((await hook(deps, { body: { cwd: x.root }, ctx: x.user })).status).toBe(204);
-    expect(cache.store.get(keys.ctx(x.user.userId, x.project.id, 'e2'))).toBe('');
+    expect(cache.store.get(keys.ctx(x.user.userId, x.project.id, 'e2-e2'))).toBe('');
     expect((await hook(deps, { body: { cwd: x.root }, ctx: x.user })).status).toBe(204);
   });
 });

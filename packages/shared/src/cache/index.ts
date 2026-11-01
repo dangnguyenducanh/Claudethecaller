@@ -7,12 +7,12 @@
  * Deliberately NOT done: SQL, a semantic cache, whole-database wipes or key scans, logging values or URLs, reloading anything on `ctc:inval`.
  */
 import { Redis } from 'ioredis';
-import { cacheLimits, ttl } from './limits.ts';
-import { keys } from './keys.ts';
+import { applyCacheConfig, cacheLimits, ttl } from './limits.ts';
+import { GLOBAL_MEM_EPOCH, keys } from './keys.ts';
 import { createEpochs, errClass, type Core, type Log } from './epoch.ts';
 import { createInval, type InvalMessage } from './inval.ts';
 
-export { cacheLimits, ttl, keys };
+export { applyCacheConfig, cacheLimits, ttl, keys, GLOBAL_MEM_EPOCH };
 export type { InvalMessage, Log };
 
 export type Cache = {

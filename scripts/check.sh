@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run before pushing: the CI checks (.github/workflows/ci.yml) on this machine.
 # DB self-checks write and drop schemas/keys, so they only run against scratch services named in the shell env:
+#   CTC_SCRATCH_PG_URL, CTC_TEST_DATABASE_URL, CTC_TEST_ADMIN_URL (all postgres://...@127.0.0.1:18304/<db>) and CTC_SCRATCH_REDIS_URL (redis://127.0.0.1:18395) for the TS integration tests;
 #   CTC_DATABASE_URL (any non-Supabase Postgres + pgvector), CTC_REDIS_URL (db 0 of a scratch Redis 8, not the daemon's
 #   :18303: the query engine only indexes db 0), e.g. docker run -d --rm --name ctc-scratch-redis -p 127.0.0.1:18395:6379 redis:8.2
 set -euo pipefail

@@ -50,7 +50,7 @@ async function main(): Promise<void> {
 
   const db = createDb({ url, schema, max: config.db_pool.max });
   const web = composeWeb({ config, db, namespace: namespaceOf(env), runsDir: path.join(home, '.claudethecaller', 'runs'), log });
-  const { app, routes } = await buildApp({ routes: web.routes, tools: web.tools, probes: web.probes, log });
+  const { app, routes } = await buildApp({ routes: web.routes, tools: web.tools, mcpProject: web.mcpProject, probes: web.probes, log });
   await web.start();
 
   const listeners: Listener[] = [];

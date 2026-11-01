@@ -38,7 +38,7 @@ export type SuggestDeps = {
   tei: Pick<Tei, 'embed'>;
   config: Pick<Config, 'embed' | 'embedding_dim' | 'graph' | 'graph_push'>;
   graph: Pick<GraphStore, 'get'>;
-  skills: Pick<SkillChannel, 'search'>;
+  skills: Pick<SkillChannel, 'search'> & Partial<Pick<SkillChannel, 'blocked'>>;
   cache?: {
     get<T>(key: string): Promise<T | undefined>;
     set(key: string, value: unknown, ttlSeconds: number): Promise<void>;
@@ -226,7 +226,9 @@ export function createSuggest(deps: SuggestDeps): Suggest {
       const tWalk = performance.now();
       const d = config.graph.query.depth;
       const perSlot = Number.isInteger(config.graph_push.max_pointers) && config.graph_push.max_pointers > 0 ? config.graph_push.max_pointers : 3;
-      const slots = rankSlots(index, { seeds: [...lexical, ...dense], skills, depth: Number.isInteger(d) && d >= 1 && d <= 3 ? d : 2, perSlot });
+      // a skill the user blocked must not come back through a `serves` edge of the graph either
+      const blockedSkills = await deps.skills.blocked?.(ctxP as Ctx).catch(() => undefined);
+      const slots = rankSlots(index, { seeds: [...lexical, ...dense], skills, ...(blockedSkills === undefined ? {} : { blockedSkills }), depth: Number.isInteger(d) && d >= 1 && d <= 3 ? d : 2, perSlot });
       ms.walk = performance.now() - tWalk;
 
       // 7 render

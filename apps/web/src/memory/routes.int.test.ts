@@ -81,6 +81,19 @@ describe('GET/PATCH/DELETE /api/memories/:id', () => {
     expect((await api(deps, 'PATCH', '/api/memories/:id', { params: { id: randomUUID() }, body: { pinned: true }, ctx: x.ctx })).status).toBe(404);
   });
 
+  it('deleting or editing a global memory rotates the user-level memory epoch, so cached start blocks of every project drop it', async () => {
+    const x = await seed();
+    const cache = fakeCache();
+    const deps = mkDeps(s.repos, { cache });
+    const g = await x.add('api key is hunter2', 'global');
+    expect((await api(deps, 'DELETE', '/api/memories/:id', { params: { id: g.id }, ctx: x.ctx })).status).toBe(204);
+    expect(cache.rotates).toContainEqual(['mem', x.user.userId, '*']);
+    cache.rotates.length = 0;
+    const g2 = await x.add('another global', 'global');
+    await api(deps, 'PATCH', '/api/memories/:id', { params: { id: g2.id }, body: { pinned: true }, ctx: x.ctx });
+    expect(cache.rotates).toContainEqual(['mem', x.user.userId, '*']);
+  });
+
   it('keeps the patched text without a vector when the embedder fails', async () => {
     const x = await seed();
     const m = await x.add('embed fails');

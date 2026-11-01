@@ -8,6 +8,22 @@ const note = (idx = G1(), rel = 'src/ledger.ts', o: { max?: number; maxChars?: n
 const hint = (terms: string[], o: { maxNodes?: number; maxChars?: number } = {}, idx = G1()) => hintLine(idx, terms, { maxNodes: 5, maxChars: 400, ...o });
 const terms = (tool: string, input: unknown) => searchTerms(tool, input, { root: ROOTDIR });
 
+describe('searchTerms shell forms', () => {
+  const bash = (command: string) => terms('Bash', { command });
+  it('takes --regexp=PAT, -ePAT and -rne PAT as the pattern, not the directory', () => {
+    for (const command of ['grep --regexp=spool -r src', 'grep -espool -r src', 'grep -rne spool src', 'rg --regexp spool src']) expect([command, bash(command)]).toEqual([command, { terms: ['spool'], outside: false }]);
+  });
+  it('keeps a backslash-escaped space and an escaped bar inside the pattern', () => {
+    expect(bash('grep -rn spool\\ drain src').terms).toEqual(['spool', 'drain']);
+    expect(bash('grep a\\|b src').terms).toEqual([]);
+    expect(bash('grep spool\\|drain src').terms).toEqual(['spool', 'drain']);
+  });
+  it('treats a cd out of the project as a search outside it', () => {
+    expect(bash('cd /tmp && grep -rn foo .')).toEqual({ terms: ['foo'], outside: true });
+    expect(bash('cd src && grep -rn foo .')).toEqual({ terms: ['foo'], outside: false });
+  });
+});
+
 describe('note', () => {
   it('D2 pins the limit defaults and cuts an item at itemChars (80 valid, 81 cut)', () => {
     expect({ ...noteLimits }).toEqual({ itemChars: 80, tokenMin: 3, tokenMax: 64, tokensMax: 4, commandChars: 4096 });

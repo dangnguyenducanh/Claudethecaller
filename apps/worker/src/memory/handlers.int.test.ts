@@ -21,6 +21,8 @@ const dropCode = async (p: Promise<unknown>): Promise<string> => {
   try { await p; } catch (e) { expect(e).toBeInstanceOf(JobDropped); expect((e as JobDropped).message).toBe(`dropped:${(e as JobDropped).code}`); return (e as JobDropped).code; }
   return 'resolved';
 };
+/** Forgets what the extract has read, so the next call reads the whole transcript again. */
+const rewind = (x: { userId: string; sessionId: string }) => s.repos.sessions.setExtractedTurns({ userId: x.userId }, x.sessionId, 0);
 const payload = (x: Awaited<ReturnType<typeof seed>>) => ({ userId: x.userId, projectId: x.projectId, sessionId: x.sessionId, transcriptPath: x.transcriptPath });
 
 describe('llm.extract and llm.summarize (D0, D3, D13, D14)', () => {
@@ -83,6 +85,7 @@ describe('llm.extract and llm.summarize (D0, D3, D13, D14)', () => {
     const cache = { epoch: { rotate: async (...args: unknown[]) => (rot.push(args), 'tok') } };
     await handlersFor(s.repos, t.home, { chat: fakeChat({ extract: [reply()] }).chat, cache: cache as never })['llm.extract'](payload(x) as never, jobCtx());
     expect(rot).toHaveLength(0);
+    await rewind(x);
     const thrower = { epoch: { rotate: async () => { throw new Error('redis down'); } } };
     const logs: string[] = [];
     const r = await handlersFor(s.repos, t.home, {
@@ -90,6 +93,18 @@ describe('llm.extract and llm.summarize (D0, D3, D13, D14)', () => {
     })['llm.extract'](payload(x) as never, jobCtx());
     expect(r).toMatchObject({ add: 1 });
     expect(logs.join()).toContain('Error');
+  });
+  it('sends the model only the user turns after the last extract', async () => {
+    const x = await seed('cursor', [say('user', 'OLDWORDS first turn')], '');
+    const { chat, calls } = fakeChat({ extract: [reply()] });
+    const h = handlersFor(s.repos, t.home, { chat });
+    await h['llm.extract'](payload(x) as never, jobCtx());
+    expect(await h['llm.extract'](payload(x) as never, jobCtx())).toEqual({ skipped: 'no_new_turns' });
+    fs.appendFileSync(x.transcriptPath, `${JSON.stringify(say('user', 'NEWWORDS second turn'))}\n`);
+    await h['llm.extract'](payload(x) as never, jobCtx());
+    const sent = calls.map((c) => JSON.stringify(c.req.messages));
+    expect(sent).toHaveLength(2);
+    expect([sent[1]?.includes('NEWWORDS'), sent[1]?.includes('OLDWORDS')]).toEqual([true, false]);
   });
   it('drops with no_transcript for a missing session row or file', async () => {
     const x = await seed('nt');
@@ -143,6 +158,7 @@ describe('untrusted input (D1, D6)', () => {
     try {
       for (const [max, early] of [[150, false], [size, true]] as const) {
         memoryLimits.maxTranscriptBytes = max;
+        await rewind(x);
         const { chat, calls } = fakeChat({ extract: [reply()] });
         await handlersFor(s.repos, t.home, { chat })['llm.extract'](payload(x) as never, jobCtx());
         const sent = JSON.stringify(calls.map((c) => c.req.messages));
@@ -158,6 +174,7 @@ describe('untrusted input (D1, D6)', () => {
     const h = handlersFor(s.repos, t.home, { chat: fakeChat({ extract: [reply(['preference', 'global', 'SECRETFACT keep commits small'])] }).chat, log: (m, f) => logs.push(JSON.stringify([m, f ?? null])) });
     const p = Object.freeze(payload(x));
     await h['llm.extract'](p as never, jobCtx());
+    await rewind(x);
     await h['llm.extract'](p as never, jobCtx());
     await h['llm.summarize'](Object.freeze({ userId: x.userId, sessionId: x.sessionId }) as never, jobCtx());
     expect(fs.readFileSync(x.transcriptPath).equals(before)).toBe(true);

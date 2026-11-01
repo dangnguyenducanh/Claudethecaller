@@ -27,6 +27,16 @@ const dropCode = async (p: Promise<unknown>): Promise<string> => {
 };
 const live = (a: Awaited<ReturnType<Harness['mk']>>) => until(async () => { const st = await h.getStep(a.ctx, a.step.id); return st.pid && st.stage === 'stream' ? st : null; });
 
+describe('runner.step handler: a dev instance (O12)', () => {
+  it('refuses to spawn an agent or create a worktree', async () => {
+    const a = await h.mk();
+    const { step } = await h.go(a, h.deps({ dev: true }));
+    expect([step.status, step.error]).toEqual(['failed', 'spawn refused: dev instance']);
+    expect(h.snaps(a.step.id)).toEqual([]);
+    expect(git(a.repo as string, 'worktree', 'list').trim().split('\n')).toHaveLength(1);
+  });
+});
+
 describe('runner.step handler: a normal attempt (D0, D1, D3, D12, D14, D16)', () => {
   it('runs the agent in a new worktree and ends done with summary, usage, cost and diff stat', async () => {
     h.ended.length = 0;
@@ -36,7 +46,7 @@ describe('runner.step handler: a normal attempt (D0, D1, D3, D12, D14, D16)', ()
     expect([step.stage, step.error, step.promptOutcome, step.usage, step.costUsd]).toEqual(['report', null, 'delivered', { input_tokens: 5, output_tokens: 7 }, 0.25]);
     expect(step.output).toMatchObject({ outcome: 'done', summary: 'final answer' });
     expect((step.output as { diffStat: string }).diffStat).toMatch(/1 file changed/);
-    expect(step.branch).toBe(`ctc/wf-${a.run.id}-${a.nodeId}`);
+    expect(step.branch).toBe(`ctc/wf-${a.run.id}-${a.nodeId}-s${a.step.id}`);
     expect(step.worktree).toBe(path.join(a.repo as string, '.ctc/wt', String(a.run.id), String(a.step.id)));
     expect(git(a.repo as string, 'config', `branch.${step.branch}.base`).trim()).toBe('main');
     expect(git(a.repo as string, 'status', '--porcelain').trim()).toBe('');
@@ -111,6 +121,8 @@ describe('runner.step handler: bad input (D4)', () => {
     expect(await err({ node: { model: '--evil' } })).toBe('spawn refused: model not allowed');
     expect(await err({ repo: fs.mkdtempSync(path.join(h.tmp, 'plain-')) })).toBe('worktree failed: not a git repository');
     expect(await err({ ctcYaml: 'setup: 5\n' })).toBe('setup config invalid');
+    const noRepo = await h.go(await h.mk({ repo: null }));
+    expect([noRepo.step.error, noRepo.step.promptOutcome]).toEqual(['worktree failed: not a git repository', 'not_delivered']);
     const missing = await h.mk();
     h.nodes.delete(missing.nodeId);
     expect((await h.go(missing)).step.error).toBe('node not found');
@@ -176,6 +188,18 @@ describe('runner.step handler: repo setup (D13, D20)', () => {
 });
 
 describe('runner.step handler: following the agent (D15, D17)', () => {
+  it('stops the setup process when the step is cancelled during setup', async () => {
+    const marker = path.join(h.tmp, `setup-ran-${Date.now()}`);
+    const c = await h.mk({ ctcYaml: `setup:\n  - sleep 3; touch ${marker}\n` });
+    const pending = h.go(c);
+    await until(async () => (await h.getStep(c.ctx, c.step.id)).stage === 'setup');
+    await sleep(300);
+    await transitionStep(s.repos.runner, c.ctx, { stepId: c.step.id, from: 'running', to: 'cancelled' });
+    expect((await pending).step.status).toBe('cancelled');
+    await sleep(3500);
+    expect(fs.existsSync(marker)).toBe(false);
+  }, 20_000);
+
   it('kills the group when the step is cancelled', async () => {
     const c = await h.mk({ mode: 'hang' });
     const pending = h.go(c);
@@ -211,6 +235,13 @@ describe('runner.step handler: following the agent (D15, D17)', () => {
     expect([step.status, step.error]).toEqual(['quota', 'usage limit until 2030-01-01T00:00:00.000Z']);
     expect((await s.repos.runner.getRun(q.ctx, q.run.id))?.status).toBe('quota');
     await until(async () => !groupAlive(step.pid as number), 4000);
+  });
+
+  it('parks step and run on a usage limit when the agent prints it and exits', async () => {
+    const q = await h.mk({ mode: 'quota_exit' });
+    const { step } = await h.go(q);
+    expect([step.status, step.error]).toEqual(['quota', 'usage limit until 2030-01-01T00:00:00.000Z']);
+    expect((await s.repos.runner.getRun(q.ctx, q.run.id))?.status).toBe('quota');
   });
 
   it('marks the step start_unknown when the agent group vanishes without an exit record', async () => {

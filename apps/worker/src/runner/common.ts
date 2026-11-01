@@ -7,7 +7,7 @@
  */
 import { bodyOf, mainPathOf } from '@ctc/core/library';
 import {
-  failStep, isRef, outText, parseChildId, parseWorkflow, runnerJobId, scopeOf, workflowLimits, type Workflow, type WorkflowNode,
+  failStep, isRef, outText, parseWorkflow, runnerJobId, scopeOf, timeoutOf, workflowLimits, type Workflow, type WorkflowNode,
 } from '@ctc/core/runner';
 import path from 'node:path';
 import type { Ctx } from '@ctc/shared/repositories';
@@ -148,7 +148,7 @@ export async function failNow(deps: EngineDeps, ctx: Ctx, step: Step, error: str
  * Notices a cancel (D15): aborts when the job's own signal fires, or when the step is no longer `running` (read every `engineLimits.watchMs`).
  * `reason()` says which. Never kills anything by itself and never acts on silence.
  */
-export function watchStep(deps: EngineDeps, ctx: Ctx, stepId: number, jobSignal: AbortSignal): { signal: AbortSignal; reason(): 'job' | 'step' | null; stop(): void } {
+export function watchStep(deps: Pick<RunnerExecDeps, 'repos'>, ctx: Ctx, stepId: number, jobSignal: AbortSignal): { signal: AbortSignal; reason(): 'job' | 'step' | null; stop(): void } {
   const ac = new AbortController();
   let why: 'job' | 'step' | null = null;
   const onJob = (): void => {
@@ -185,12 +185,7 @@ export function underWorktrees(deps: EngineDeps, run: Run, p: unknown): p is str
   return root !== null && typeof p === 'string' && p.startsWith('/') && !p.includes('\0') && path.resolve(p).startsWith(root);
 }
 
-/** Job timeout of a step's node in seconds: an agent or shell node's own, a fan-out child's from its fan-out node, else the agent default. */
-export function timeoutOf(wf: Workflow, nodeId: string): number {
-  const cid = parseChildId(nodeId);
-  const node = nodeFor(wf, cid === null ? nodeId : cid.fanoutId);
-  return (cid === null ? node?.timeoutS : node?.child?.timeoutS) ?? (node?.type === 'shell' ? workflowLimits.shellTimeoutS : 1800);
-}
+export { timeoutOf };
 
 /** True when `step` is an agent step that was parked at a setup gate and answered: it is no completion, the next attempt runs it (D16e). */
 export const isAnsweredGate = (step: Step): boolean => step.status === 'done' && step.stage === null && step.options !== null;

@@ -9,16 +9,17 @@
  */
 import { runnerJobId } from '@ctc/core/runner';
 import type { Config } from '@ctc/shared/env';
-import { createCache } from '@ctc/shared/cache';
+import { applyCacheConfig, createCache } from '@ctc/shared/cache';
 import { createChat, createEmbedder } from '@ctc/shared/models';
 import { createQueues, submitJob } from '@ctc/shared/queues';
 import { createRepositories, type Ctx, type Db } from '@ctc/shared/repositories';
 import { createTei } from '@ctc/shared/tei';
+import { countGuardTrips } from '../graph/common.ts';
 import { createGraphStore, graphRoutes, graphTools } from '../graph/index.ts';
 import { libraryRoutes, libraryTools, type LibraryApiDeps, type McpTool, type Route } from '../library/index.ts';
 import { hookStartRoute, memoryRoutes, memoryTools, type MemoryApiDeps } from '../memory/index.ts';
 import { createSessionCaps, preRoutes } from '../pre/index.ts';
-import { runsRoutes, workflowRoutes, workflowTools, type WorkflowApiDeps } from '../runs/index.ts';
+import { runsRoutes, stepTimeoutS, workflowRoutes, workflowTools, type WorkflowApiDeps } from '../runs/index.ts';
 import { createSkillChannel } from '../skills/index.ts';
 import { createSpoolDrain, nudgeRoute } from '../spool/index.ts';
 import { suggestRoutes } from '../suggest/index.ts';
@@ -26,8 +27,6 @@ import type { Log } from './guards.ts';
 
 /** How often the warm-up of the RAM graph and the skill vectors is retried while Postgres or the embedder is down (spec:205). Chosen by judgment. */
 const WARM_RETRY_MS = 5000;
-/** Job timeout of a runner step that the web re-queues; the agent default of the engine (apps/worker/src/runner/common.ts `timeoutOf`). Chosen by judgment. */
-const STEP_TIMEOUT_S = 1800;
 const WARM_PROJECTS = 8;
 
 const errClass = (e: unknown): string => (e instanceof Error ? e.constructor.name : typeof e);
@@ -35,6 +34,7 @@ const errClass = (e: unknown): string => (e instanceof Error ? e.constructor.nam
 export type Web = {
   routes: Route[];
   tools: McpTool[];
+  mcpProject(root: string): Promise<string | undefined>;
   probes: { db(): Promise<boolean>; redis(): Promise<boolean> };
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -44,6 +44,7 @@ export function composeWeb(o: { config: Config; db: Db; namespace: string; runsD
   const { config, db, log } = o;
   const ctxOf = (): Ctx => ({ userId: 'local' });
   const repos = createRepositories(db);
+  applyCacheConfig(config);
   const cache = createCache({ url: config.redis_url, namespace: o.namespace, log });
   const queues = createQueues({ url: config.redis_url, namespace: o.namespace });
   const embed = createEmbedder({ url: config.embed_url });
@@ -69,12 +70,12 @@ export function composeWeb(o: { config: Config; db: Db; namespace: string; runsD
   const drain = createSpoolDrain({ dir: config.spool.dir, keepDays: config.spool.keep_days, queues, repos, log });
 
   const library: LibraryApiDeps = { repos, config, submit, cache, ctxOf, log };
-  const graph = { repos, config, submit, embed, cache, store, ctxOf, log };
+  const graph = { repos, config, submit, embed, cache, store, ctxOf, log, guardTrips: (ctx: Ctx, since: Date | null) => countGuardTrips(repos, ctx, since) };
   const memory: MemoryApiDeps = { repos, config, embed, chat, submit, cache, ctxOf, log };
   const enqueue = async (ctx: Ctx, step: { id: number; runId: number; nodeId: string; visit: number; attempt: number }, id: string): Promise<void> => {
     await submit({
       queue: 'runner', kind: 'step', id,
-      payload: { userId: ctx.userId, runId: String(step.runId), stepId: String(step.id), nodeId: step.nodeId, visit: step.visit, attempt: step.attempt, timeoutS: STEP_TIMEOUT_S },
+      payload: { userId: ctx.userId, runId: String(step.runId), stepId: String(step.id), nodeId: step.nodeId, visit: step.visit, attempt: step.attempt, timeoutS: await stepTimeoutS(runs, ctx, step) },
     });
   };
   const runs: WorkflowApiDeps = {
@@ -126,6 +127,7 @@ export function composeWeb(o: { config: Config; db: Db; namespace: string; runsD
   return {
     routes,
     tools,
+    mcpProject: async (root) => (await repos.projects.byRoot(ctxOf(), root))?.id,
     probes: {
       db: () => db.kysely.selectNoFrom((eb) => eb.lit(1).as('ok')).execute().then(() => true),
       redis: async () => {

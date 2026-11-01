@@ -66,6 +66,22 @@ jobs:
 
   ts:
     runs-on: ubuntu-latest
+    # the scratch helpers only accept 127.0.0.1:18304 (Postgres) and 127.0.0.1:18395 (Redis), so the services map those host ports
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env: { POSTGRES_PASSWORD: ci }
+        ports: ["18304:5432"]
+        options: --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 30
+      redis:
+        image: redis:8.2
+        ports: ["18395:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      CTC_SCRATCH_PG_URL: postgresql://postgres:ci@127.0.0.1:18304/postgres
+      CTC_TEST_DATABASE_URL: postgresql://postgres:ci@127.0.0.1:18304/postgres
+      CTC_TEST_ADMIN_URL: postgresql://postgres:ci@127.0.0.1:18304/postgres
+      CTC_SCRATCH_REDIS_URL: redis://127.0.0.1:18395
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

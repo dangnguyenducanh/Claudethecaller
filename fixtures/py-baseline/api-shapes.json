@@ -1,0 +1,693 @@
+{
+ "recorded_at": "2026-10-31T19:59:30+00:00",
+ "routes": [
+  {
+   "path": "/api/capabilities",
+   "route": "GET /api/capabilities",
+   "shape": [
+    {
+     "calls_30d": "number",
+     "cluster_id": "null",
+     "description": "str",
+     "followed_30d": "number",
+     "id": "str",
+     "kind": "str",
+     "namespace": "str",
+     "override": "null"
+    }
+   ],
+   "status": 200
+  },
+  {
+   "path": "/api/capabilities/user%3Ano-mistakes",
+   "route": "GET /api/capabilities/{cap_id}",
+   "shape": {
+    "body": "str",
+    "calls_30d": "number",
+    "cluster_id": "null",
+    "cluster_members": [],
+    "description": "str",
+    "editable": "bool",
+    "followed_30d": "number",
+    "graph": "null",
+    "id": "str",
+    "invoke": "str",
+    "kind": "str",
+    "name": "str",
+    "namespace": "str",
+    "override": "null",
+    "path": "str",
+    "recent_decisions": [
+     {
+      "abstained": "bool",
+      "at": "str",
+      "confidence": "number",
+      "difficulty": "str",
+      "followed": "bool",
+      "id": "number",
+      "latency_ms": "number",
+      "model_tier": "str",
+      "project": "str",
+      "prompt": "str",
+      "session_id": "str",
+      "source": "str",
+      "stages": [
+       {
+        "cap_id": "str",
+        "dense_rank": "number",
+        "dropped": "null|str",
+        "rerank": "null|number",
+        "rrf": "number",
+        "sparse_rank": "null|number"
+       }
+      ],
+      "steps": [
+       {
+        "agent": "null",
+        "cap_id": "str",
+        "invoke": "str",
+        "kind": "str",
+        "order": "number",
+        "reason": "str"
+       }
+      ]
+     }
+    ],
+    "schedule": "null",
+    "settings": "null",
+    "steps": "null",
+    "summary": "null",
+    "triggers": [],
+    "vectors": "number"
+   },
+   "status": 200
+  },
+  {
+   "path": "/api/dedup",
+   "route": "GET /api/dedup",
+   "shape": [
+    {
+     "a": "str",
+     "b": "str",
+     "id": "number",
+     "similarity": "number",
+     "status": "str"
+    }
+   ],
+   "status": 200
+  },
+  {
+   "path": "/api/history",
+   "route": "GET /api/history",
+   "shape": {
+    "failed": "number",
+    "files": "number",
+    "imported": "number",
+    "last_job": {
+     "created_at": "str",
+     "error": "null",
+     "id": "str",
+     "kind": "str",
+     "progress": "number",
+     "result": {
+      "excluded": "number",
+      "failed": "number",
+      "files": "number",
+      "imported": "number",
+      "outcomes": "number",
+      "skipped": "number",
+      "submitted": "number",
+      "unchanged": "number"
+     },
+     "status": "str"
+    },
+    "pending": "number",
+    "processed": "number",
+    "root": "str"
+   },
+   "status": 200
+  },
+  {
+   "path": "/api/history/files",
+   "route": "GET /api/history/files",
+   "shape": [
+    {
+     "error": "null",
+     "imported_at": "str",
+     "path": "str",
+     "session_id": "str",
+     "size": "number",
+     "status": "str"
+    }
+   ],
+   "status": 200
+  },
+  {
+   "path": "/api/jobs",
+   "route": "GET /api/jobs",
+   "shape": [
+    {
+     "created_at": "str",
+     "error": "null|str",
+     "id": "str",
+     "kind": "str",
+     "progress": "number",
+     "result": "null|object",
+     "status": "str"
+    }
+   ],
+   "status": 200
+  },
+  {
+   "path": "/api/jobs/e0eec5b3-1133-4c46-9fe9-6d067e9fdf23",
+   "route": "GET /api/jobs/{job_id}",
+   "shape": {
+    "created_at": "str",
+    "error": "null",
+    "id": "str",
+    "kind": "str",
+    "progress": "number",
+    "result": {
+     "noop": "number",
+     "superseded": "number",
+     "updated": "number",
+     "written": "number"
+    },
+    "status": "str"
+   },
+   "status": 200
+  },
+  {
+   "path": "/api/keys",
+   "route": "GET /api/keys",
+   "shape": {
+    "error": {
+     "code": "str",
+     "message": "str"
+    }
+   },
+   "status": 404
+  },
+  {
+   "path": "/api/memories",
+   "route": "GET /api/memories",
+   "shape": [
+    {
+     "confidence": "number",
+     "deleted_at": "null",
+     "id": "str",
+     "kind": "str",
+     "pinned": "bool",
+     "project": "null|str",
+     "scope": "str",
+     "source": "str",
+     "supersedes": "null|str",
+     "text": "str",
+     "updated_at": "str",
+     "use_count": "number"
+    }
+   ],
+   "status": 200
+  },
+  {
+   "path": "/api/memories/72a79ab0-6a0e-4a98-9ded-cdaa30a6f933",
+   "route": "GET /api/memories/{mid}",
+   "shape": {
+    "confidence": "number",
+    "deleted_at": "null",
+    "history": [],
+    "id": "str",
+    "kind": "str",
+    "pinned": "bool",
+    "project": "str",
+    "scope": "str",
+    "source": "str",
+    "supersedes": "null",
+    "text": "str",
+    "updated_at": "str",
+    "use_count": "number"
+   },
+   "status": 200
+  },
+  {
+   "path": "/api/projects",
+   "route": "GET /api/projects",
+   "shape": [
+    {
+     "id": "str",
+     "name": "str",
+     "sessions": "number"
+    }
+   ],
+   "status": 200
+  },
+  {
+   "path": "/api/projects/backend",
+   "route": "GET /api/projects/{name}",
+   "shape": {
+    "decisions": "number",
+    "id": "str",
+    "last_active": "str",
+    "memories": "number",
+    "name": "str",
+    "overrides": "number",
+    "path": "str",
+    "sessions": "number"
+   },
+   "status": 200
+  },
+  {
+   "path": "/api/runs",
+   "route": "GET /api/runs",
+   "shape": [
+    {
+     "auto_resume": "bool",
+     "branch": "null|str",
+     "created_at": "str",
+     "ended_at": "str",
+     "error": "null|str",
+     "id": "number",
+     "input": "str",
+     "nodes_done": "number",
+     "nodes_total": "number",
+     "pr_url": "null",
+     "project": "str",
+     "quota_resets_at": "null|str",
+     "started_at": "null|str",
+     "status": "str",
+     "tokens": "number",
+     "trigger": "str",
+     "workflow": "str",
+     "worktree": "null|str"
+    }
+   ],
+   "status": 200
+  },
+  {
+   "path": "/api/runs/compare",
+   "query": {
+    "a": 61,
+    "b": 60
+   },
+   "route": "GET /api/runs/compare",
+   "shape": {
+    "diff": "str",
+    "files": [
+     {
+      "added": "number",
+      "deleted": "number",
+      "path": "str"
+     }
+    ],
+    "truncated": "bool"
+   },
+   "status": 200
+  },
+  {
+   "path": "/api/runs/61",
+   "route": "GET /api/runs/{rid}",
+   "shape": {
+    "auth": {
+     "authMethod": "str",
+     "claude_version": "str",
+     "email": "str"
+    },
+    "auto_resume": "bool",
+    "branch": "str",
+    "created_at": "str",
+    "ended_at": "str",
+    "error": "null",
+    "file_sha": "str",
+    "graph": {
+     "defaults": {
+      "max_visits": "number"
+     },
+     "description": "str",
+     "edges": [
+      {
+       "from": "str",
+       "handle": "null|str",
+       "to": "str"
+      }
+     ],
+     "name": "str",
+     "nodes": [
+      {
+       "command?": "str",
+       "id": "str",
+       "input?": "str",
+       "op?": "str",
+       "path?": "str",
+       "pos": [
+        "number"
+       ],
+       "timeout_s?": "number",
+       "type": "str",
+       "value?": "number"
+      }
+     ],
+     "settings": {
+      "allow_extra_usage": "bool",
+      "auto_resume": "bool",
+      "max_run_tokens": "null",
+      "permission": "str"
+     },
+     "steps": []
+    },
+    "id": "number",
+    "input": "str",
+    "nodes_done": "number",
+    "nodes_total": "number",
+    "pr_url": "null",
+    "project": "str",
+    "quota_resets_at": "null",
+    "started_at": "str",
+    "status": "str",
+    "steps": [
+     {
+      "cost_usd": "null",
+      "ended_at": "str",
+      "error": "null",
+      "files": "array|null",
+      "id": "number",
+      "input": "null|str",
+      "kind": "str",
+      "node_id": "str",
+      "num_turns": "null",
+      "output": "null|object",
+      "overage": "null",
+      "permission_denials": "null",
+      "session_id": "null",
+      "started_at": "str",
+      "status": "str",
+      "tokens": "null",
+      "visit": "number"
+     }
+    ],
+    "tokens": "number",
+    "trigger": "str",
+    "workflow": "str",
+    "worktree": "str"
+   },
+   "status": 200
+  },
+  {
+   "path": "/api/runs/61/diff",
+   "route": "GET /api/runs/{rid}/diff",
+   "shape": {
+    "diff": "str",
+    "files": [
+     {
+      "added": "number",
+      "deleted": "number",
+      "path": "str"
+     }
+    ],
+    "truncated": "bool"
+   },
+   "status": 200
+  },
+  {
+   "path": "/api/runs/61/steps/354/diff",
+   "route": "GET /api/runs/{rid}/steps/{sid}/diff",
+   "shape": {
+    "diff": "str",
+    "files": [],
+    "truncated": "bool"
+   },
+   "status": 200
+  },
+  {
+   "path": "/api/runs/61/steps/354/log",
+   "route": "GET /api/runs/{rid}/steps/{sid}/log",
+   "shape": {
+    "done": "bool",
+    "offset": "number",
+    "text": "str"
+   },
+   "status": 200
+  },
+  {
+   "path": "/api/sessions",
+   "route": "GET /api/sessions",
+   "shape": [
+    {
+     "decisions": "number",
+     "followed": "number",
+     "git_branch": "null|str",
+     "id": "str",
+     "memories": "number",
+     "model": "str",
+     "project": "str",
+     "source": "str",
+     "started_at": "str",
+     "status": "str",
+     "summary": "null|str",
+     "title": "str",
+     "tokens": "number",
+     "turns": "number"
+    }
+   ],
+   "status": 200
+  },
+  {
+   "path": "/api/sessions/1090f354-892c-4631-880b-bfa828d2aad8",
+   "route": "GET /api/sessions/{sid}",
+   "shape": {
+    "decisions": [
+     {
+      "abstained": "bool",
+      "at": "str",
+      "confidence": "number",
+      "difficulty": "str",
+      "followed": "bool",
+      "id": "number",
+      "latency_ms": "number",
+      "model_tier": "str",
+      "project": "str",
+      "prompt": "str",
+      "session_id": "str",
+      "source": "str",
+      "stages": [
+       {
+        "cap_id": "str",
+        "dense_rank": "number",
+        "dropped": "null|str",
+        "rerank": "null|number",
+        "rrf": "number",
+        "sparse_rank": "null|number"
+       }
+      ],
+      "steps": [
+       {
+        "agent": "null",
+        "cap_id": "str",
+        "invoke": "str",
+        "kind": "str",
+        "order": "number",
+        "reason": "str"
+       }
+      ]
+     }
+    ],
+    "followed": "number",
+    "git_branch": "null",
+    "id": "str",
+    "memories": [
+     {
+      "confidence": "number",
+      "deleted_at": "null",
+      "id": "str",
+      "kind": "str",
+      "pinned": "bool",
+      "project": "str",
+      "scope": "str",
+      "source": "str",
+      "supersedes": "null",
+      "text": "str",
+      "updated_at": "str",
+      "use_count": "number"
+     }
+    ],
+    "model": "str",
+    "project": "str",
+    "source": "str",
+    "started_at": "str",
+    "status": "str",
+    "summary": "null",
+    "title": "str",
+    "tokens": "number",
+    "turns": "number"
+   },
+   "status": 200
+  },
+  {
+   "path": "/v1/health",
+   "route": "GET /v1/health",
+   "shape": {
+    "db": "str",
+    "embedder": "str",
+    "library_version": "str",
+    "llm": "str",
+    "mode": "str",
+    "redis": "str",
+    "reranker": "str"
+   },
+   "status": 200
+  }
+ ],
+ "skipped": [
+  {
+   "reason": "mutating",
+   "route": "DELETE /api/capabilities/{cap_id}"
+  },
+  {
+   "reason": "removed",
+   "route": "DELETE /api/decisions/{did}"
+  },
+  {
+   "reason": "mutating",
+   "route": "DELETE /api/keys/{kid}"
+  },
+  {
+   "reason": "mutating",
+   "route": "DELETE /api/memories/{mid}"
+  },
+  {
+   "reason": "mutating",
+   "route": "DELETE /api/projects/{name}"
+  },
+  {
+   "reason": "mutating",
+   "route": "DELETE /api/sessions/{sid}"
+  },
+  {
+   "reason": "mutating",
+   "route": "DELETE /api/workflows/{cap_id}/schedule"
+  },
+  {
+   "reason": "removed",
+   "route": "GET /api/activity"
+  },
+  {
+   "reason": "removed",
+   "route": "GET /api/decisions"
+  },
+  {
+   "reason": "removed",
+   "route": "GET /api/decisions/{did}"
+  },
+  {
+   "reason": "removed",
+   "route": "GET /api/kpis"
+  },
+  {
+   "reason": "removed",
+   "route": "GET /api/timeline"
+  },
+  {
+   "reason": "removed",
+   "route": "GET /v1/bundle/{ref}"
+  },
+  {
+   "reason": "mutating",
+   "route": "PATCH /api/capabilities/{cap_id}"
+  },
+  {
+   "reason": "mutating",
+   "route": "PATCH /api/memories/{mid}"
+  },
+  {
+   "reason": "mutating",
+   "route": "PATCH /api/projects/{name}"
+  },
+  {
+   "reason": "mutating",
+   "route": "POST /api/capabilities"
+  },
+  {
+   "reason": "mutating",
+   "route": "POST /api/capabilities/{cap_id}/enrich"
+  },
+  {
+   "reason": "mutating",
+   "route": "POST /api/dedup/{pair_id}"
+  },
+  {
+   "reason": "mutating",
+   "route": "POST /api/history/import"
+  },
+  {
+   "reason": "mutating",
+   "route": "POST /api/index"
+  },
+  {
+   "reason": "mutating",
+   "route": "POST /api/keys"
+  },
+  {
+   "reason": "mutating",
+   "route": "POST /api/memories"
+  },
+  {
+   "reason": "mutating",
+   "route": "POST /api/memories/backfill"
+  },
+  {
+   "reason": "mutating",
+   "route": "POST /api/memories/import"
+  },
+  {
+   "reason": "mutating",
+   "route": "POST /api/memories/{mid}/restore"
+  },
+  {
+   "reason": "mutating",
+   "route": "POST /api/runs/{rid}/approve"
+  },
+  {
+   "reason": "mutating",
+   "route": "POST /api/runs/{rid}/cancel"
+  },
+  {
+   "reason": "mutating",
+   "route": "POST /api/runs/{rid}/continue"
+  },
+  {
+   "reason": "mutating",
+   "route": "POST /api/workflows/{cap_id}/export"
+  },
+  {
+   "reason": "mutating",
+   "route": "POST /api/workflows/{cap_id}/runs"
+  },
+  {
+   "reason": "hook",
+   "route": "POST /v1/hook/pre"
+  },
+  {
+   "reason": "hook",
+   "route": "POST /v1/hook/prompt"
+  },
+  {
+   "reason": "hook",
+   "route": "POST /v1/hook/stop"
+  },
+  {
+   "reason": "hook",
+   "route": "POST /v1/hook/tool"
+  },
+  {
+   "reason": "removed",
+   "route": "POST /v1/route"
+  },
+  {
+   "reason": "mutating",
+   "route": "PUT /api/capabilities/{cap_id}/override"
+  },
+  {
+   "reason": "mutating",
+   "route": "PUT /api/workflows/{cap_id}/schedule"
+  }
+ ]
+}

@@ -203,6 +203,23 @@ export async function follow(deps: RunnerExecDeps, f: FollowInput): Promise<void
     const end = Date.now() + ms;
     while (Date.now() < end && (await readExitRecord(paths.exit)) === null) await sleep(Math.min(runnerExecLimits.tailPollMs, 50));
   };
+  /** `running → quota`; false when the step already left `running`. */
+  const parkQuota = async (): Promise<boolean> => {
+    quotaDone = true;
+    const until = state.quota?.resetsAt ?? null;
+    try {
+      await transitionStep(port, ctx, {
+        stepId: id, from: 'running', to: 'quota', patch: { error: until === null ? 'usage limit' : `usage limit until ${until}`, ...usageFields(state) },
+      });
+      await parkRun(deps, ctx, f.step.runId, 'quota');
+      await waitExit(runnerExecLimits.quotaExitGraceMs);
+      await kill();
+      return true;
+    } catch (e) {
+      if (!isConflict(e)) throw e;
+      return false;
+    }
+  };
   const settle = async (code: number | null): Promise<void> => {
     state = await tail.read(f.agent, state, true);
     await finalizeAttempt(deps, f, state, code, code === null ? '' : await fileTail(paths.err));
@@ -225,6 +242,9 @@ export async function follow(deps: RunnerExecDeps, f: FollowInput): Promise<void
     const code = await readExitRecord(paths.exit);
     if (code !== null) {
       await kill(); // members left after the leader exited; a reattach (own=false) finds the leader gone and its start time unmatchable, so it leaves them
+      state = await tail.read(f.agent, state, true);
+      // `claude -p` prints the limit event and exits: that is a quota stop, not a failed attempt
+      if (state.quota !== null && !quotaDone && (await parkQuota())) return;
       return settle(code);
     }
 
@@ -233,21 +253,7 @@ export async function follow(deps: RunnerExecDeps, f: FollowInput): Promise<void
       return timeoutStep(deps, ctx, id, f.timeoutS);
     }
 
-    if (state.quota !== null && !quotaDone) {
-      quotaDone = true;
-      const until = state.quota.resetsAt;
-      try {
-        await transitionStep(port, ctx, {
-          stepId: id, from: 'running', to: 'quota', patch: { error: until === null ? 'usage limit' : `usage limit until ${until}`, ...usageFields(state) },
-        });
-        await parkRun(deps, ctx, f.step.runId, 'quota');
-        await waitExit(L.quotaExitGraceMs);
-        await kill();
-        return;
-      } catch (e) {
-        if (!isConflict(e)) throw e;
-      }
-    }
+    if (state.quota !== null && !quotaDone && (await parkQuota())) return;
 
     if (Date.now() - statusAt >= L.statusPollMs) {
       statusAt = Date.now();

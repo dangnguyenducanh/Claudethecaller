@@ -58,7 +58,8 @@ describe('memory.import (D15)', () => {
     expect([by('The spool lives under the data directory')?.kind, by('Docs are in the docs folder')?.kind]).toEqual(['fact', 'fact']);
     expect(by('Always propose before editing')?.source).toEqual({ type: 'file', path: fs.realpathSync(path.join(dir, 'feedback.md')) });
     expect(rows.every((m) => m.confidence === 1)).toBe(true);
-    expect(rotates.at(-1)).toEqual(['mem', userId, project.id]);
+    expect(rotates).toContainEqual(['mem', userId, project.id]);
+    expect(rotates).toContainEqual(['mem', userId, '*']);
     const before = fs.readFileSync(path.join(dir, 'feedback.md'), 'utf8');
     const again = await run(deps, 'memory.import', { userId });
     expect(again).toEqual({ files: 5, noop: 4, update: 0, supersede: 0, add: 0, skipped: 1 });

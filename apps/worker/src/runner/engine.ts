@@ -38,6 +38,7 @@ export function execDepsOf(deps: EngineDeps): RunnerExecDeps {
   return {
     repos: deps.repos, config: deps.config, runsDir: deps.runsDir, reportBase: deps.reportBase,
     ...(deps.log === undefined ? {} : { log: deps.log }),
+    ...(deps.dev === undefined ? {} : { dev: deps.dev }),
     resolveNode: (ctx, run, step) => resolveAgentNode(deps, ctx, run, step),
     onStepEnd: async (ctx, step) => void (await advanceRun(deps, ctx, step.runId)),
   };

@@ -49,7 +49,8 @@ const AGENT_NAMES = ['claude', 'codex'];
 const PERMISSION_NAMES = ['acceptEdits', 'dontAsk', 'plan'];
 const OPS = ['eq', 'ne', 'contains', 'truthy'];
 const ERROR_CAP = 50;
-const PUSH = /\b(git\s+push|gh\s+pr\s+(create|merge))\b/;
+// global options may sit between `git` and `push` (`git -C . push`) and `gh api` can merge a PR; a false match only asks for an approval node
+const PUSH = /\bgit\b[^;&|\n]*\bpush\b|\bgh\b[^;&|\n]*(\bpr\s+(create|merge)\b|\bapi\b[^;&|\n]*\b(merge|pulls?)\b)/;
 const DEFAULT_OPTIONS = [{ id: 'approve', label: 'Approve' }, { id: 'reject', label: 'Reject' }];
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -94,6 +95,21 @@ const err = (c: Ctx, m: string): void => {
   if (c.errors.length < ERROR_CAP) c.errors.push(m);
 };
 
+/** True when a `{{...}}` of a shell line is inside a quoted span or right after a backslash: the value's own single quotes would then be live shell syntax. */
+export function placeholderInQuotes(run: string): boolean {
+  let quote = '';
+  for (let i = 0; i < run.length; i++) {
+    const ch = run[i];
+    if (run.startsWith('{{', i) && quote !== '') return true;
+    if (ch === '\\' && quote !== "'") {
+      if (run.startsWith('{{', i + 1)) return true;
+      i++;
+    } else if (quote === '' && (ch === '"' || ch === "'")) quote = ch;
+    else if (ch === quote) quote = '';
+  }
+  return false;
+}
+
 function agentBody(c: Ctx, id: string, src: Record<string, unknown>, child: boolean): Omit<FanoutChild, 'worktree'> & { worktree: string } {
   const agent = src['agent'];
   if (typeof agent !== 'string' || agent === '') err(c, `node ${id}: agent is required`);
@@ -130,7 +146,10 @@ function nodeOf(c: Ctx, src: Record<string, unknown>, id: string, type: string):
     Object.assign(n, { ...a, worktree: a.worktree as 'new' | 'parent' | 'none' });
   } else if (type === 'shell') {
     if (typeof src['run'] !== 'string' || src['run'] === '') err(c, `node ${id}: run is required`);
-    else n.run = long('run', src['run']);
+    else {
+      n.run = long('run', src['run']);
+      if (placeholderInQuotes(n.run)) err(c, `node ${id}: a {{placeholder}} in run must not sit inside quotes or follow a backslash (values are quoted for you)`);
+    }
     const cwd = src['cwd'] ?? 'worktree';
     if (cwd !== 'worktree' && cwd !== 'repo') err(c, `node ${id}: invalid cwd "${String(cwd)}"`);
     n.cwd = cwd === 'repo' ? 'repo' : 'worktree';
